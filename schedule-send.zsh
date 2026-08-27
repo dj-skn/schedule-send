@@ -62,6 +62,13 @@ Target selection:
 Delivery:
   --if-busy wait|abort   When the target agent is working, wait for it to settle
                          or abort the send. Default: wait.
+  --recover MODE         What to do when the submit is not confirmed and the
+                         text is still sitting in the agent's composer.
+                         "keys" (default) presses Enter again. "focus" then
+                         focuses the pane and presses Enter once more, and
+                         hands focus back afterwards. "none" fails instead.
+  --submit-grace SECS    How long each confirmation attempt waits for the
+                         submit to show up. Default: 4.
   --force                Skip the fire-time check that the target still is what
                          it was when the job was scheduled.
 
@@ -383,36 +390,71 @@ worker_fail() {
   exit 1
 }
 
-# Herdr confirms a prompt by observing a lifecycle state change. Claude
-# reports its state through a hook, so that observation is a real receipt.
-# Codex has no hook: herdr scrapes its state from the OSC title, and its idle
-# rule matches any non-empty title. Codex's state therefore flaps on its own,
-# so a prompt whose Enter the TUI dropped still satisfies --wait. The text is
-# then left in the composer as an unsubmitted draft while the job reports
-# success. These helpers verify the send instead of trusting the receipt.
+# Herdr confirms a prompt by observing a lifecycle state change, but that
+# observation is not a receipt. Codex has no state hook: herdr scrapes its
+# state from the OSC title and its idle rule matches any non-empty title, so
+# Codex's state flaps on its own and a prompt whose Enter the TUI dropped still
+# satisfies --wait. Herdr records the mirror-image bug for Copilot, where a
+# background pane swallowed the keystrokes entirely until prompting was made to
+# focus the pane first. Either way the text is left in the composer as an
+# unsubmitted draft while the job reports success.
+#
+# So the send is gated on evidence instead, and the composer outranks the
+# lifecycle: a draft still on screen disproves any status the agent claims.
+# Only that evidence authorises a keystroke, which is what keeps a retry from
+# answering a dialog or landing a second copy of the message.
 
-readonly SUBMIT_GRACE_SECONDS=6
+readonly NEEDLE_LEN=24
+readonly NEEDLE_MIN=8
 
-squash() { print -r -- "${1//[[:space:]]/}" }
+typeset -g W_RECOVER=keys W_GRACE=4
+typeset -g OBS_STATUS=unknown OBS_SEQ=-1
+typeset -g OBS_TAIL='' OBS_BODY='' OBS_BODY_OK=0
+typeset -ga OBS_RAW=()
+typeset -g VERDICT=unknown SAW_DRAFT=0 RECOVERY=''
+
+# Alphanumerics only, folded to lower case. A composer wraps the text it holds,
+# and wrapping injects padding, newlines, and gutter glyphs into the middle of
+# it; reducing both sides to this form makes the comparison survive all three.
+squash() { local s="${1//[^[:alnum:]]/}"; print -r -- "${s:l}" }
 
 # A long prompt scrolls inside the composer and only its end stays on screen,
-# so the end of the message is the part we can reliably look for.
+# so the end of the message is the part we can reliably look for. Too short a
+# needle would match noise, so it is dropped rather than trusted.
 msg_needle() {
   local squashed
   squashed="$(squash "$1")"
-  print -r -- "${squashed[-24,-1]}"
+  (( ${#squashed} >= NEEDLE_MIN )) || { print -r -- ""; return 0 }
+  print -r -- "${squashed[-NEEDLE_LEN,-1]}"
 }
 
-# Everything from the last composer marker to the bottom of the visible
-# screen. Codex draws that marker as "›", Claude Code as "❯" inside a rule.
-# The markers are matched as literal prefixes rather than through a bracket
-# expression, because the worker runs under systemd with no locale and a
-# byte-wise matcher would union the leading UTF-8 byte of every marker and
-# fire on any other glyph that happens to share it.
-composer_tail() {
+# A horizontal rule, tested by removing the glyphs that draw one rather than
+# through a bracket expression: the worker runs under systemd with no locale,
+# where a byte-wise matcher would union the leading UTF-8 byte of every glyph
+# and fire on anything that happens to share it.
+is_rule() {
+  local t="${1//[ 	]/}"
+  [[ -n "$t" ]] || return 1
+  t="${t//─/}"; t="${t//━/}"; t="${t//═/}"; t="${t//╌/}"
+  t="${t//-/}"; t="${t//=/}"; t="${t//_/}"
+  [[ -z "$t" ]]
+}
+
+# One screen read feeds both detectors, which need different slices of it.
+# OBS_TAIL is the last composer marker down to the bottom of the screen, the
+# domain the needle is searched in. OBS_BODY is that marker up to the rule that
+# closes the composer, the domain emptiness is judged in — the cut matters,
+# because below that rule Claude draws a status footer whose context, cost, and
+# elapsed-time counters move on their own and would make every composer look
+# occupied. OBS_BODY_OK stays 0 when the region cannot be delimited, which
+# switches the emptiness detector off rather than letting it guess.
+read_composer() {
+  OBS_TAIL=''; OBS_BODY=''; OBS_BODY_OK=0; OBS_RAW=()
   local -a lines
   lines=("${(@f)$("$HERDR_BIN" agent read "$1" --source visible --lines 40 2>/dev/null)}")
-  local i trimmed start=0
+  (( ${#lines} )) || return 0
+
+  local i trimmed start=0 end=0
   for (( i = 1; i <= ${#lines}; i++ )); do
     trimmed="${${lines[$i]//[ 	]/}#('│'|'|')}"
     case "$trimmed" in
@@ -420,64 +462,218 @@ composer_tail() {
     esac
   done
   (( start )) || return 0
-  print -rl -- "${(@)lines[$start,-1]}"
-}
+  OBS_TAIL="$(squash "${(j::)${(@)lines[$start,-1]}}")"
+  OBS_RAW=("${(@)lines[$start,-1]}")
 
-composer_holds() {
-  local pane="$1" needle="$2"
-  [[ -n "$needle" ]] || return 1
-  [[ "$(squash "$(composer_tail "$pane")")" == *"$needle"* ]]
-}
-
-agent_state() {
-  "$HERDR_BIN" agent get "$1" 2>/dev/null \
-    | jq -r '.result.agent.agent_status // "unknown"' 2>/dev/null || print -r -- unknown
-}
-
-# Succeeds as soon as the send is confirmed: the agent picked a turn up, or
-# the draft is no longer in the composer. Only a genuinely dropped Enter
-# burns the whole grace period.
-await_submission() {
-  local pane="$1" needle="$2" deadline=$(( SECONDS + SUBMIT_GRACE_SECONDS ))
-  while true; do
-    case "$(agent_state "$pane")" in
-      working|blocked) return 0 ;;
-    esac
-    composer_holds "$pane" "$needle" || return 0
-    if (( SECONDS >= deadline )); then return 1; fi
-    sleep 0.3
+  for (( i = start + 1; i <= ${#lines}; i++ )); do
+    if is_rule "${lines[$i]}"; then end=$i; break; fi
   done
+  (( end )) || return 0
+  OBS_BODY="$(squash "${(j::)${(@)lines[$start,end-1]}}")"
+  OBS_RAW=("${(@)lines[$start,end-1]}")
+  OBS_BODY_OK=1
+}
+
+# state_change_seq is stamped on an agent when its own status transitions, so
+# comparing it against a baseline is edge-triggered: it still reports a turn
+# that started and finished between two polls, which comparing the status
+# itself would miss. It degrades to -1 if herdr ever stops reporting it, and
+# the status comparison then carries the gate alone.
+read_agent_state() {
+  OBS_STATUS=unknown; OBS_SEQ=-1
+  local json pair
+  json="$("$HERDR_BIN" agent get "$1" 2>/dev/null)" || return 0
+  pair="$(print -r -- "$json" | jq -r '
+    [(.result.agent.agent_status // "unknown"),
+     (.result.agent.state_change_seq // -1)] | @tsv' 2>/dev/null)" || return 0
+  [[ -n "$pair" ]] || return 0
+  OBS_STATUS="$(row_field "$pair" 1)"
+  OBS_SEQ="$(row_field "$pair" 2)"
+  [[ "$OBS_SEQ" == (-|)<-> ]] || OBS_SEQ=-1
+}
+
+# sent | unsent | unknown, in that order of authority. The composer is read
+# first on purpose: whatever the lifecycle says, a draft we can still see means
+# the Enter did not land.
+submission_verdict() {
+  local pane="$1" needle="$2" seq0="$3" gate="$4"
+
+  read_composer "$pane"
+  if [[ -n "$needle" && "$OBS_TAIL" == *"$needle"* ]]; then
+    SAW_DRAFT=1; VERDICT=unsent; return 0
+  fi
+  if (( gate && OBS_BODY_OK )) && [[ -n "$OBS_BODY" ]]; then
+    SAW_DRAFT=1; VERDICT=unsent; return 0
+  fi
+
+  read_agent_state "$pane"
+  if [[ "$OBS_STATUS" == working || "$OBS_STATUS" == blocked ]]; then
+    VERDICT=sent; return 0
+  fi
+  if (( seq0 >= 0 && OBS_SEQ > seq0 )); then
+    VERDICT=sent; return 0
+  fi
+  # A draft that was on screen a moment ago and is not there now went
+  # somewhere, and the only way out of a composer is a submit.
+  if (( SAW_DRAFT )); then
+    VERDICT=sent; return 0
+  fi
+  VERDICT=unknown
+}
+
+# Polls until the verdict is decisive or the grace window closes, backing off
+# so a genuinely dropped Enter costs a handful of reads rather than twenty.
+await_verdict() {
+  local pane="$1" needle="$2" seq0="$3" gate="$4"
+  local deadline=$(( SECONDS + W_GRACE )) polls=0
+  while true; do
+    submission_verdict "$pane" "$needle" "$seq0" "$gate"
+    [[ "$VERDICT" == sent ]] && return 0
+    (( SECONDS >= deadline )) && return 0
+    polls=$(( polls + 1 ))
+    if   (( polls < 3 )); then sleep 0.25
+    elif (( polls < 6 )); then sleep 0.5
+    else                       sleep 1
+    fi
+  done
+}
+
+focused_agent() {
+  "$HERDR_BIN" agent list 2>/dev/null \
+    | jq -r 'first(.result.agents[] | select(.focused) | .pane_id) // empty' 2>/dev/null \
+    || true
+}
+
+# The focus rung is a repair, not a context switch, so focus goes back to
+# whoever held it. Only an agent can be refocused this way; when a plain pane
+# held focus there is nothing to hand it back to.
+restore_focus() {
+  local prev="$1" pane="$2"
+  [[ -n "$prev" && "$prev" != "$pane" ]] || return 0
+  "$HERDR_BIN" agent focus "$prev" >/dev/null 2>&1 || true
+}
+
+# The escalation ladder, entered only on a verdict of unsent. It presses Enter
+# and never re-sends the text: if the first Enter did land after all, a second
+# copy of the message would be far worse than an Enter into an empty composer,
+# which every supported TUI ignores.
+# 0 recovered, 1 exhausted, 2 a dialog opened and the ladder must not touch it.
+recover_submission() {
+  local pane="$1" needle="$2" seq0="$3" gate="$4"
+  local -a rungs
+  case "$W_RECOVER" in
+    none)  return 1 ;;
+    focus) rungs=(keys focus) ;;
+    *)     rungs=(keys) ;;
+  esac
+
+  local rung prev_focus=''
+  for rung in "${(@)rungs}"; do
+    read_agent_state "$pane"
+    if [[ "$OBS_STATUS" == blocked ]]; then
+      restore_focus "$prev_focus" "$pane"
+      return 2
+    fi
+
+    if [[ "$rung" == focus ]]; then
+      # Herdr's own notes record background panes swallowing input until the
+      # pane was focused, so focusing is the escalation rather than a louder
+      # keypress. It also marks a "done" agent as seen, which reads as idle.
+      print -u2 -- "Retried Enter did not land in $pane; focusing the pane and trying again."
+      prev_focus="$(focused_agent)"
+      "$HERDR_BIN" agent focus "$pane" >/dev/null 2>&1 || true
+      RECOVERY="focused, Enter retried"
+    else
+      print -u2 -- "Enter was dropped by the agent in $pane; retrying the submit."
+      RECOVERY="Enter retried"
+    fi
+
+    if ! "$HERDR_BIN" agent send-keys "$pane" enter >/dev/null 2>&1; then
+      print -u2 -- "Could not send Enter to $pane."
+      continue
+    fi
+
+    await_verdict "$pane" "$needle" "$seq0" "$gate"
+    if [[ "$VERDICT" == sent ]]; then
+      restore_focus "$prev_focus" "$pane"
+      return 0
+    fi
+  done
+
+  restore_focus "$prev_focus" "$pane"
+  return 1
+}
+
+# The draft the user will find in the composer, quoted into the failure so the
+# journal and the notification say what is stuck rather than only that
+# something is.
+composer_excerpt() {
+  read_composer "$1"
+  local i out=''
+  for (( i = 1; i <= ${#OBS_RAW}; i++ )); do
+    [[ -n "${OBS_RAW[$i]//[ 	]/}" ]] || continue
+    out="$out ${OBS_RAW[$i]}"
+  done
+  print -r -- "$out" | tr -s ' 	' ' ' | cut -c1-160
 }
 
 deliver_agent_text() {
   local pane="$1" msg="$2"
-  local needle
+  local needle seq0 gate=0
   needle="$(msg_needle "$msg")"
 
-  "$HERDR_BIN" agent prompt "$pane" "$msg" --wait --timeout 900000 >/dev/null \
-    || worker_fail "agent prompt to $pane did not complete cleanly; the text may still have been submitted."
+  # Baseline taken before anything is typed: the lifecycle counter to compare
+  # against, and whether the composer was empty. If it already held a draft of
+  # the user's own we cannot tell their text from ours, so the emptiness
+  # detector stays off and only the needle speaks.
+  read_agent_state "$pane"
+  seq0=$OBS_SEQ
+  read_composer "$pane"
+  (( OBS_BODY_OK )) && [[ -z "$OBS_BODY" ]] && gate=1
+  SAW_DRAFT=0
+  RECOVERY=''
 
-  if await_submission "$pane" "$needle"; then
-    print -r -- "prompted agent in $pane"
-    return 0
+  if [[ -z "$needle" ]] && (( ! gate )); then
+    print -u2 -- "Note: neither submit detector applies to $pane; the send cannot be verified."
   fi
 
-  # The draft is still in the composer. Enter is only safe to press while the
-  # agent is not waiting at a dialog, where it would answer the dialog.
-  if [[ "$(agent_state "$pane")" == blocked ]]; then
-    worker_fail "Agent in $pane opened a dialog with the text unsent; it is left in the composer."
+  # --wait is deliberately not used. It reports a lifecycle change that a
+  # self-flapping agent produces on its own, and when it sees none it fails
+  # with agent_prompt_stalled — which is the very case this gate exists to
+  # recover from, and treating it as fatal here would make the ladder
+  # unreachable. It also holds the job open for the whole turn, so the check
+  # would run minutes after the moment it could still fix anything.
+  local prompt_err detail
+  if ! prompt_err="$("$HERDR_BIN" agent prompt "$pane" "$msg" 2>&1)"; then
+    detail="$(print -r -- "$prompt_err" | jq -r '.error.message // empty' 2>/dev/null || true)"
+    [[ -n "$detail" ]] || detail="$(print -r -- "$prompt_err" | head -1)"
+    worker_fail "agent prompt to $pane was refused: ${detail:-unknown error}"
   fi
 
-  print -u2 -- "Enter was dropped by the agent in $pane; retrying the submit."
-  "$HERDR_BIN" agent send-keys "$pane" enter >/dev/null 2>&1 \
-    || worker_fail "Could not retry Enter for $pane; the text is unsent in its composer."
+  await_verdict "$pane" "$needle" "$seq0" "$gate"
 
-  if await_submission "$pane" "$needle"; then
-    print -r -- "prompted agent in $pane (Enter retried)"
-    return 0
-  fi
+  case "$VERDICT" in
+    sent)
+      print -r -- "prompted agent in $pane"
+      return 0
+      ;;
+    unknown)
+      # Nothing in the composer and nothing moved. Pressing Enter here would
+      # be the blind keystroke this gate replaced, so the send is reported as
+      # delivered but unverified instead of being guessed either way.
+      print -u2 -- "Delivered to $pane but the submit is unverified: no draft in its composer and no state change."
+      print -r -- "prompted agent in $pane (unverified)"
+      return 0
+      ;;
+  esac
 
-  worker_fail "Text is still unsent in $pane's composer after a retried Enter."
+  local rc=0
+  recover_submission "$pane" "$needle" "$seq0" "$gate" || rc=$?
+  case $rc in
+    0) print -r -- "prompted agent in $pane ($RECOVERY)"; return 0 ;;
+    2) worker_fail "Agent in $pane opened a dialog with the text unsent; it is left in the composer." ;;
+  esac
+  worker_fail "Text is still unsent in $pane's composer: $(composer_excerpt "$pane")"
 }
 
 cmd_fire() {
@@ -496,6 +692,12 @@ cmd_fire() {
   force="$(jq -r '.force' "$state")"
   quiet="$(jq -r '.quiet' "$state")"
   W_QUIET=$(( quiet == 1 ? 1 : 0 ))
+
+  # Defaulted rather than read straight, so a timer armed by an older version
+  # of this script still fires: its state file predates both keys.
+  W_RECOVER="$(jq -r '.recover // "keys"' "$state")"
+  W_GRACE="$(jq -r '.grace // 4' "$state")"
+  [[ "$W_GRACE" == <-> ]] || W_GRACE=4
 
   HERDR_BIN="$(jq -r '.herdr_bin' "$state")"
   [[ -x "$HERDR_BIN" ]] || HERDR_BIN="$(command -v herdr 2>/dev/null || true)"
@@ -568,6 +770,7 @@ fi
 opt_pane=""; opt_cwd=""; opt_kind=""; opt_at=""
 opt_message=""; opt_message_file=""; opt_keys=""
 opt_pick="unique"; opt_if_busy="wait"
+opt_recover="keys"; opt_grace=4
 opt_panes_only=0; opt_allow_self=0; opt_force=0
 opt_quiet=0; opt_dry_run=0; opt_persistent=0
 have_message=0
@@ -590,6 +793,8 @@ while (( $# > 0 )); do
     --keys)         opt_keys="$(flag_value "$1" "${2-}")"; shift 2 ;;
     --pick)         opt_pick="$(flag_value "$1" "${2-}")"; shift 2 ;;
     --if-busy)      opt_if_busy="$(flag_value "$1" "${2-}")"; shift 2 ;;
+    --recover)      opt_recover="$(flag_value "$1" "${2-}")"; shift 2 ;;
+    --submit-grace) opt_grace="$(flag_value "$1" "${2-}")"; shift 2 ;;
     --enter-only)   opt_keys="enter"; shift ;;
     --panes-only)   opt_panes_only=1; shift ;;
     --allow-self)   opt_allow_self=1; shift ;;
@@ -609,6 +814,10 @@ done
   || die "--pick must be 'unique' or 'best'."
 [[ "$opt_if_busy" == wait || "$opt_if_busy" == abort ]] \
   || die "--if-busy must be 'wait' or 'abort'."
+[[ "$opt_recover" == (none|keys|focus) ]] \
+  || die "--recover must be 'none', 'keys', or 'focus'."
+[[ "$opt_grace" == <-> ]] && (( opt_grace >= 1 && opt_grace <= 60 )) \
+  || die "--submit-grace must be a whole number of seconds from 1 to 60."
 
 [[ -n "$opt_at" ]] || { usage >&2; die "Missing required --at."; }
 
@@ -725,6 +934,8 @@ if (( opt_dry_run )); then
   print -r -- "unit=$unit.timer"
   print -r -- "persistent=$opt_persistent"
   print -r -- "if_busy=$opt_if_busy"
+  print -r -- "recover=$opt_recover"
+  print -r -- "submit_grace=$opt_grace"
   print -r -- "unit_files=$UNIT_DIR/$unit.{service,timer}"
   print -r -- "would_run=$SELF __fire $id"
   exit 0
@@ -751,10 +962,12 @@ jq -n \
   --arg id "$id" --arg kind "$t_kind" --arg pane_id "$t_pane" \
   --arg agent "$t_agent" --arg cwd "$t_cwd" --arg at "$calendar" \
   --arg mode "$mode" --arg keys "$opt_keys" --arg if_busy "$opt_if_busy" \
+  --arg recover "$opt_recover" --argjson grace "$opt_grace" \
   --arg herdr_bin "$HERDR_BIN" --arg unit "$unit" \
   --argjson force "$opt_force" --argjson quiet "$opt_quiet" \
   '{id:$id, kind:$kind, pane_id:$pane_id, agent:$agent, cwd:$cwd, at:$at,
     mode:$mode, keys:$keys, if_busy:$if_busy, force:$force, quiet:$quiet,
+    recover:$recover, grace:$grace,
     herdr_bin:$herdr_bin, unit:$unit}' \
   > "$STATE_DIR/$id.json"
 
