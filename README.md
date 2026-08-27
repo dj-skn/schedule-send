@@ -98,6 +98,32 @@ Because `agent prompt` honours the pane's bracketed-paste mode, a multi-line
 `--message-file` arrives as **one** prompt. Sending the same text as raw
 keystrokes would submit it line by line as several truncated turns.
 
+### Confirming the submit
+
+`agent prompt` sends the text and then an Enter, and reports success once Herdr
+observes the agent change lifecycle state. For Claude that state comes from a
+hook, so the observation is a real receipt. Codex has no such hook: Herdr
+scrapes its state from the terminal title, and its idle rule matches any
+non-empty title, so Codex's state flaps on its own. A prompt whose Enter the
+Codex TUI dropped therefore still satisfied `--wait` — the text was left in the
+composer as an unsubmitted draft, and the job reported success and cleaned
+itself up. Herdr documents the same class of bug for Copilot, where background
+panes silently dropped prompts until prompting was made to focus the pane
+first.
+
+So the send is verified rather than trusted. After prompting, the job waits up
+to six seconds for either signal that the text actually went in:
+
+- the agent picked up a turn (`working`, or `blocked` on a dialog it opened), or
+- the message tail is no longer sitting in the composer.
+
+If neither appears, the Enter was dropped: the job presses Enter once more and
+re-checks. A send recovered this way is logged as `(Enter retried)`. If the
+text is still unsent after that, the job fails loudly — journal, non-zero exit,
+and the usual notification — instead of reporting a success that never
+happened. The retry is skipped if the agent has meanwhile opened a dialog,
+where Enter would answer the dialog rather than submit the draft.
+
 ```zsh
 schedule-send --at '09:00' --pane wS:p1 --keys 'ctrl+c'
 schedule-send --at '09:00' --cwd ~/projects/website --keys 'esc'

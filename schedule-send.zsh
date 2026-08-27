@@ -383,6 +383,103 @@ worker_fail() {
   exit 1
 }
 
+# Herdr confirms a prompt by observing a lifecycle state change. Claude
+# reports its state through a hook, so that observation is a real receipt.
+# Codex has no hook: herdr scrapes its state from the OSC title, and its idle
+# rule matches any non-empty title. Codex's state therefore flaps on its own,
+# so a prompt whose Enter the TUI dropped still satisfies --wait. The text is
+# then left in the composer as an unsubmitted draft while the job reports
+# success. These helpers verify the send instead of trusting the receipt.
+
+readonly SUBMIT_GRACE_SECONDS=6
+
+squash() { print -r -- "${1//[[:space:]]/}" }
+
+# A long prompt scrolls inside the composer and only its end stays on screen,
+# so the end of the message is the part we can reliably look for.
+msg_needle() {
+  local squashed
+  squashed="$(squash "$1")"
+  print -r -- "${squashed[-24,-1]}"
+}
+
+# Everything from the last composer marker to the bottom of the visible
+# screen. Codex draws that marker as "›", Claude Code as "❯" inside a rule.
+# The markers are matched as literal prefixes rather than through a bracket
+# expression, because the worker runs under systemd with no locale and a
+# byte-wise matcher would union the leading UTF-8 byte of every marker and
+# fire on any other glyph that happens to share it.
+composer_tail() {
+  local -a lines
+  lines=("${(@f)$("$HERDR_BIN" agent read "$1" --source visible --lines 40 2>/dev/null)}")
+  local i trimmed start=0
+  for (( i = 1; i <= ${#lines}; i++ )); do
+    trimmed="${${lines[$i]//[ 	]/}#('│'|'|')}"
+    case "$trimmed" in
+      ('›'*|'❯'*|'>'*) start=$i ;;
+    esac
+  done
+  (( start )) || return 0
+  print -rl -- "${(@)lines[$start,-1]}"
+}
+
+composer_holds() {
+  local pane="$1" needle="$2"
+  [[ -n "$needle" ]] || return 1
+  [[ "$(squash "$(composer_tail "$pane")")" == *"$needle"* ]]
+}
+
+agent_state() {
+  "$HERDR_BIN" agent get "$1" 2>/dev/null \
+    | jq -r '.result.agent.agent_status // "unknown"' 2>/dev/null || print -r -- unknown
+}
+
+# Succeeds as soon as the send is confirmed: the agent picked a turn up, or
+# the draft is no longer in the composer. Only a genuinely dropped Enter
+# burns the whole grace period.
+await_submission() {
+  local pane="$1" needle="$2" deadline=$(( SECONDS + SUBMIT_GRACE_SECONDS ))
+  while true; do
+    case "$(agent_state "$pane")" in
+      working|blocked) return 0 ;;
+    esac
+    composer_holds "$pane" "$needle" || return 0
+    if (( SECONDS >= deadline )); then return 1; fi
+    sleep 0.3
+  done
+}
+
+deliver_agent_text() {
+  local pane="$1" msg="$2"
+  local needle
+  needle="$(msg_needle "$msg")"
+
+  "$HERDR_BIN" agent prompt "$pane" "$msg" --wait --timeout 900000 >/dev/null \
+    || worker_fail "agent prompt to $pane did not complete cleanly; the text may still have been submitted."
+
+  if await_submission "$pane" "$needle"; then
+    print -r -- "prompted agent in $pane"
+    return 0
+  fi
+
+  # The draft is still in the composer. Enter is only safe to press while the
+  # agent is not waiting at a dialog, where it would answer the dialog.
+  if [[ "$(agent_state "$pane")" == blocked ]]; then
+    worker_fail "Agent in $pane opened a dialog with the text unsent; it is left in the composer."
+  fi
+
+  print -u2 -- "Enter was dropped by the agent in $pane; retrying the submit."
+  "$HERDR_BIN" agent send-keys "$pane" enter >/dev/null 2>&1 \
+    || worker_fail "Could not retry Enter for $pane; the text is unsent in its composer."
+
+  if await_submission "$pane" "$needle"; then
+    print -r -- "prompted agent in $pane (Enter retried)"
+    return 0
+  fi
+
+  worker_fail "Text is still unsent in $pane's composer after a retried Enter."
+}
+
 cmd_fire() {
   W_ID="$1"
   local state="$STATE_DIR/$W_ID.json"
@@ -450,9 +547,7 @@ cmd_fire() {
     else
       "$HERDR_BIN" agent wait "$pane" --timeout 900000 >/dev/null 2>&1 || true
     fi
-    "$HERDR_BIN" agent prompt "$pane" "$msg" --wait --timeout 900000 >/dev/null \
-      || worker_fail "agent prompt to $pane did not complete cleanly; the text may still have been submitted."
-    print -r -- "prompted agent in $pane"
+    deliver_agent_text "$pane" "$msg"
   else
     "$HERDR_BIN" pane run "$pane" "$msg" >/dev/null \
       || worker_fail "pane run in $pane failed."
