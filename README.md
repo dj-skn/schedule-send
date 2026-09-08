@@ -33,8 +33,16 @@ enabled for reboot survival (`loginctl show-user "$USER" -p Linger`).
 schedule-send --at '15:50' --message 'resume, then commit when done'
 ```
 
-With no selector this shows a picker. With a selector that resolves to exactly
-one target it runs silently — which is what makes it usable from scripts:
+With no selector this shows a picker. When exactly one target matches — a
+selector that narrows to one, or a single agent being the only thing running —
+it is taken without a picker and named on stderr:
+
+```
+Only one target matched; selecting codex in wV:p1 (idle, ~/projects/shop-backend).
+```
+
+stdout stays the plain `key=value` receipt, so this is still usable from
+scripts:
 
 ```zsh
 schedule-send --at '03:30' --cwd ~/projects/website --message-file prompt.txt
@@ -82,7 +90,11 @@ Selectors:
 | `--allow-self` | Permit targeting the calling pane. |
 
 Non-interactively, an ambiguous match prints the same grouped listing to stderr
-and exits 1, so you can see what to narrow.
+and exits 1, so you can see what to narrow. `--pick best` resolves it instead
+and names what it took, in the same form as the single-match note.
+
+Every selection that skips the picker says which agent it landed on, so an
+unattended run leaves a record of the choice rather than only the pane id.
 
 ## Sending
 
@@ -90,7 +102,7 @@ The payload decides the surface, and both are atomic:
 
 | Target | Command used |
 | --- | --- |
-| agent, message | `herdr agent prompt --wait` |
+| agent, message | `herdr agent prompt`, then the submit gate below |
 | plain pane, message | `herdr pane run` |
 | either, `--keys` | `herdr agent send-keys` / `herdr pane send-keys` |
 
@@ -100,29 +112,72 @@ keystrokes would submit it line by line as several truncated turns.
 
 ### Confirming the submit
 
-`agent prompt` sends the text and then an Enter, and reports success once Herdr
-observes the agent change lifecycle state. For Claude that state comes from a
-hook, so the observation is a real receipt. Codex has no such hook: Herdr
-scrapes its state from the terminal title, and its idle rule matches any
-non-empty title, so Codex's state flaps on its own. A prompt whose Enter the
-Codex TUI dropped therefore still satisfied `--wait` — the text was left in the
-composer as an unsubmitted draft, and the job reported success and cleaned
-itself up. Herdr documents the same class of bug for Copilot, where background
-panes silently dropped prompts until prompting was made to focus the pane
-first.
+`agent prompt` sends the text and then an Enter, and Herdr reports success once
+it observes the agent change lifecycle state. That observation is not a
+receipt. Codex has no state hook: Herdr scrapes its state from the terminal
+title and its idle rule matches any non-empty title, so Codex's state flaps on
+its own, and a prompt whose Enter the TUI dropped still satisfied `--wait`.
+Herdr records the mirror-image bug for Copilot, where a background pane
+swallowed the keystrokes entirely until prompting was made to focus the pane
+first. Either way the text is left in the composer as an unsubmitted draft
+while the job reports success and cleans itself up.
 
-So the send is verified rather than trusted. After prompting, the job waits up
-to six seconds for either signal that the text actually went in:
+So the send is gated on evidence instead, and `--wait` is not used at all. When
+it sees no state change it fails with `agent_prompt_stalled` — the very case
+worth recovering from — and when it sees one it holds the job open for the rest
+of the turn, so the check would land minutes after the moment it could still
+fix anything.
 
-- the agent picked up a turn (`working`, or `blocked` on a dialog it opened), or
-- the message tail is no longer sitting in the composer.
+Two questions are asked after the text goes out, and the composer outranks the
+lifecycle.
 
-If neither appears, the Enter was dropped: the job presses Enter once more and
-re-checks. A send recovered this way is logged as `(Enter retried)`. If the
-text is still unsent after that, the job fails loudly — journal, non-zero exit,
-and the usual notification — instead of reporting a success that never
-happened. The retry is skipped if the agent has meanwhile opened a dialog,
-where Enter would answer the dialog rather than submit the draft.
+**Is the draft still on screen?** The message's last 24 characters are looked
+for in the composer, with both sides reduced to lower-case alphanumerics so
+that wrapping, padding, and gutter glyphs cannot break the match. Separately,
+if the composer was empty before the send, anything in it afterwards is a stuck
+draft — which is what catches a long paste that Claude collapses to
+`[Pasted text #1 +40 lines]`, where the needle is not on screen to be found.
+The composer is read only as far as the rule that closes it, because below that
+rule sits a status footer whose context, cost, and elapsed-time counters move
+on their own.
+
+**Did the agent pick a turn up?** `agent get` reports `state_change_seq`, a
+counter stamped on an agent whenever its own status transitions. Comparing it
+against a baseline taken before the send is edge-triggered, so it still catches
+a turn that started and finished between two polls — which comparing `working`
+against `idle` would miss.
+
+A draft that is still visible beats any state the agent claims, so a flapping
+agent can no longer talk its way to a receipt. When the grace window closes
+with the draft still there, the ladder runs:
+
+1. press Enter again;
+2. focus the pane, press Enter again, then hand focus back — `--recover focus`;
+3. fail loudly, quoting the draft left in the composer.
+
+Only evidence of a stuck draft authorises a keystroke, and the ladder presses
+Enter without ever re-sending the text: if the first Enter did land after all,
+a second copy of the message is far worse than an Enter into an empty composer,
+which every supported TUI ignores. The ladder is abandoned if the agent has
+meanwhile opened a dialog, where Enter would answer the dialog instead.
+
+When neither question can be answered — nothing in the composer and nothing
+moved — the send is logged as `(unverified)` rather than guessed either way.
+Pressing Enter into a composer with no visible draft would be the blind
+keystroke this gate replaced.
+
+| Flag | Effect |
+| --- | --- |
+| `--recover keys` | Default. One extra Enter when the draft is stuck. |
+| `--recover focus` | Then focus the pane and try once more, restoring focus after. |
+| `--recover none` | Never press anything; fail if the submit is unconfirmed. |
+| `--submit-grace SECS` | How long each attempt waits for the submit. Default 4. |
+
+A recovered send is logged as `(Enter retried)` or `(focused, Enter retried)`,
+and a failed one takes the journal, the notification, and a non-zero exit with
+it rather than reporting a success that never happened.
+
+### Sending keys
 
 ```zsh
 schedule-send --at '09:00' --pane wS:p1 --keys 'ctrl+c'
@@ -130,6 +185,9 @@ schedule-send --at '09:00' --cwd ~/projects/website --keys 'esc'
 ```
 
 `--enter-only` is kept as an alias for `--keys enter`.
+
+Keys go in as keys, with no submit gate: `esc` and `ctrl+c` change nothing that
+could be verified the way a submitted prompt can.
 
 For agent targets, `--if-busy` decides what happens if the agent is mid-turn at
 fire time: `wait` (default) waits for it to settle, `abort` cancels the send.
