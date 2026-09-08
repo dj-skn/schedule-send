@@ -258,6 +258,21 @@ render_picker() {
   print -r -- "" >&$fd
 }
 
+# Human-readable name for a resolved row, so every non-picker selection says
+# which agent it landed on rather than leaving it to be inferred.
+target_summary() {
+  local row="$1"
+  local kind pane agent st cwd
+  kind="$(row_field "$row" 1)"; pane="$(row_field "$row" 2)"
+  agent="$(row_field "$row" 3)"; st="$(row_field "$row" 4)"
+  cwd="$(pretty_cwd "$(row_field "$row" 5)")"
+  if [[ "$kind" == agent ]]; then
+    print -r -- "$agent in $pane ($st, $cwd)"
+  else
+    print -r -- "pane $pane ($cwd)"
+  fi
+}
+
 choose_target() {
   local -a rows
   rows=("${(@f)$(filter_rows)}")
@@ -265,7 +280,10 @@ choose_target() {
 
   (( ${#rows} > 0 )) || die "No target matches the given selectors."
 
+  # One match skips the picker, so this note is the only place the choice is
+  # stated before the send is armed.
   if (( ${#rows} == 1 )); then
+    print -u2 -- "Only one target matched; selecting $(target_summary "${rows[1]}")."
     print -r -- "${rows[1]}"
     return
   fi
@@ -274,7 +292,7 @@ choose_target() {
 
   if [[ ! -t 0 ]]; then
     if [[ "$opt_pick" == best ]]; then
-      print -u2 -- "Multiple targets matched; picking $(row_field "${rows[1]}" 2)."
+      print -u2 -- "Multiple targets matched; picking $(target_summary "${rows[1]}")."
       print -r -- "${rows[1]}"
       return
     fi
@@ -1013,7 +1031,7 @@ systemctl --user enable --now "$unit.timer" >/dev/null 2>&1 \
 
 print -r -- "id=$id"
 print -r -- "unit=$unit.timer"
-print -r -- "target=$t_kind $t_pane ($t_agent)"
+print -r -- "target=$t_kind $t_pane ($t_agent, $t_status)"
 print -r -- "at=$calendar"
 print -r -- "delay_seconds=$delay"
 print -r -- "payload=$payload_desc"

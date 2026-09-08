@@ -33,8 +33,16 @@ enabled for reboot survival (`loginctl show-user "$USER" -p Linger`).
 schedule-send --at '15:50' --message 'resume, then commit when done'
 ```
 
-With no selector this shows a picker. With a selector that resolves to exactly
-one target it runs silently — which is what makes it usable from scripts:
+With no selector this shows a picker. When exactly one target matches — a
+selector that narrows to one, or a single agent being the only thing running —
+it is taken without a picker and named on stderr:
+
+```
+Only one target matched; selecting codex in wV:p1 (idle, ~/projects/shop-backend).
+```
+
+stdout stays the plain `key=value` receipt, so this is still usable from
+scripts:
 
 ```zsh
 schedule-send --at '03:30' --cwd ~/projects/website --message-file prompt.txt
@@ -82,7 +90,11 @@ Selectors:
 | `--allow-self` | Permit targeting the calling pane. |
 
 Non-interactively, an ambiguous match prints the same grouped listing to stderr
-and exits 1, so you can see what to narrow.
+and exits 1, so you can see what to narrow. `--pick best` resolves it instead
+and names what it took, in the same form as the single-match note.
+
+Every selection that skips the picker says which agent it landed on, so an
+unattended run leaves a record of the choice rather than only the pane id.
 
 ## Sending
 
