@@ -37,9 +37,10 @@ Usage:
   schedule-send --status ID
 
 Timing:
-  --at TIME              Local time. "HH:MM", "HH:MM:SS", "YYYY-MM-DD HH:MM:SS"
-                         or "YYYY-MM-DDTHH:MM:SS". Time-only values that already
-                         passed roll to tomorrow, correctly across DST.
+  --at TIME              Local time. "HH:MM", "HH:MM:SS", "12:27 AM", "3pm",
+                         "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DDTHH:MM:SS".
+                         Time-only values that already passed roll to
+                         tomorrow, correctly across DST.
   --persistent           If the machine is down at the target time, fire at the
                          next boot instead of skipping the job.
 
@@ -60,8 +61,9 @@ Target selection:
   --allow-self           Permit targeting the pane this command runs in.
 
 Delivery:
-  --if-busy wait|abort   When the target agent is working, wait for it to settle
-                         or abort the send. Default: wait.
+  --if-busy wait|abort   When the target agent is working, wait up to 15 minutes
+                         for it to settle, or abort the send. A wait that runs
+                         out fails the send. Default: wait.
   --recover MODE         What to do when the submit is not confirmed and the
                          text is still sitting in the agent's composer.
                          "keys" (default) presses Enter again. "focus" then
@@ -326,6 +328,34 @@ choose_target() {
 parse_epoch() { date -d "$1" +%s 2>/dev/null || true; }
 fmt_epoch()   { date -d "@$1" "$2"; }
 
+# An --at value as an epoch, or nothing when date(1) cannot parse it.
+#
+# A value with no date part means its next occurrence. That includes 12-hour
+# forms such as "12:27 AM" and "3pm": handed to date(1) whole they resolve to
+# today even once today's has passed. When it has, the time is re-parsed
+# against tomorrow's calendar date rather than advanced by 86400, so a DST
+# transition between the two days cannot shift the result by an hour.
+resolve_at() {
+  local at="$1" now="$2" day epoch
+
+  # Only an ISO timestamp has its T separator swapped out; anywhere else a
+  # capital T is part of the text, as in "Tue 3pm".
+  [[ "$at" =~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' ]] && at="${at/T/ }"
+
+  if [[ "$at" =~ '^[0-9]{1,2}:[0-9]{2}(:[0-9]{2})?$' \
+     || "$at" =~ '^[0-9]{1,2}(:[0-9]{2}(:[0-9]{2})?)? ?[AaPp][Mm]$' ]]; then
+    day="$(fmt_epoch "$now" +%F)"
+    epoch="$(parse_epoch "$day $at")"
+    if [[ -n "$epoch" ]] && (( epoch <= now )); then
+      day="$(date -d "$day +1 day" +%F)"
+      epoch="$(parse_epoch "$day $at")"
+    fi
+  else
+    epoch="$(parse_epoch "$at")"
+  fi
+  print -r -- "$epoch"
+}
+
 # ------------------------------------------------------------ subcommands ---
 
 cmd_list() {
@@ -383,6 +413,9 @@ cmd_status() {
 # ----------------------------------------------------------------- worker ---
 
 typeset -g W_ID='' W_QUIET=0
+
+# How long --if-busy wait gives a working agent to settle.
+readonly BUSY_WAIT_MS=900000
 
 worker_notify() {
   (( W_QUIET )) && return 0
@@ -635,6 +668,77 @@ composer_excerpt() {
   print -r -- "$out" | tr -s ' 	' ' ' | cut -c1-160
 }
 
+# A usage-limited agent takes a prompt like any other: the text leaves the
+# composer and the lifecycle moves, so the gate reports a submit. The agent
+# then answers with a limit notice instead of a turn, and the job would report
+# a success that never happened. So after the submit the transcript below our
+# message is watched for that notice.
+#
+# Both Codex and Claude echo a submitted prompt into the transcript, so the
+# last copy of the message's end marks where this send's answer begins, and a
+# notice from an earlier limit sits above it. The anchor has no minimum length
+# the way the composer needle does: a short one can only land later in the
+# transcript than our message, which misses a notice but never invents one.
+readonly LIMIT_WATCH=10
+
+typeset -g LIMIT_EXCERPT=''
+
+# 0 when a transcript line after the message's end opens with a limit notice:
+# Codex's "■ You’ve hit your usage limit" or "Usage limit reached", Claude's
+# "You've hit your session limit". Squashing strips the glyph and the curly
+# apostrophe, so the match does not depend on the worker's missing locale.
+limit_notice_after() {
+  local pane="$1" anchor="$2"
+  LIMIT_EXCERPT=''
+  local -a lines sq
+  lines=("${(@f)$("$HERDR_BIN" agent read "$pane" --source recent-unwrapped --lines 80 2>/dev/null)}")
+
+  # squash() inlined: this runs for every line on every poll.
+  local i s all=''
+  for (( i = 1; i <= ${#lines}; i++ )); do
+    s="${lines[$i]//[^[:alnum:]]/}"
+    sq[i]="${s:l}"
+    all="$all${sq[i]}"
+  done
+  [[ -n "$anchor" && "$all" == *"$anchor"* ]] || return 1
+
+  # The line holding the last character of the last copy of the anchor.
+  local end=$(( ${#${all%"$anchor"*}} + ${#anchor} )) acc=0
+  for (( i = 1; i <= ${#lines}; i++ )); do
+    acc=$(( acc + ${#sq[i]} ))
+    (( acc >= end )) && break
+  done
+
+  local j out
+  for (( i = i + 1; i <= ${#lines}; i++ )); do
+    [[ "${sq[i]}" == youvehityour*limit* || "${sq[i]}" == usagelimitreached* ]] || continue
+    # The notice wraps, so its next lines are quoted too, up to the blank line
+    # or rule that ends it.
+    out="${lines[i]}"
+    for (( j = i + 1; j <= i + 2 && j <= ${#lines}; j++ )); do
+      [[ -n "${lines[j]//[ 	]/}" ]] || break
+      is_rule "${lines[j]}" && break
+      out="$out ${lines[j]}"
+    done
+    LIMIT_EXCERPT="$(print -r -- "$out" | tr -s ' 	' ' ' | cut -c1-200)"
+    return 0
+  done
+  return 1
+}
+
+# Holds the job open for LIMIT_WATCH seconds after the submit, which is long
+# enough for the rejected request to come back. 1 when a notice showed up.
+await_limit_notice() {
+  local pane="$1" anchor="$2"
+  local deadline=$(( SECONDS + LIMIT_WATCH ))
+  [[ -n "$anchor" ]] || return 0
+  while (( SECONDS < deadline )); do
+    sleep 1
+    limit_notice_after "$pane" "$anchor" && return 1
+  done
+  return 0
+}
+
 deliver_agent_text() {
   local pane="$1" msg="$2"
   local needle seq0 gate=0
@@ -670,28 +774,31 @@ deliver_agent_text() {
 
   await_verdict "$pane" "$needle" "$seq0" "$gate"
 
+  local note='' rc=0
   case "$VERDICT" in
-    sent)
-      print -r -- "prompted agent in $pane"
-      return 0
-      ;;
+    sent) ;;
     unknown)
       # Nothing in the composer and nothing moved. Pressing Enter here would
       # be the blind keystroke this gate replaced, so the send is reported as
       # delivered but unverified instead of being guessed either way.
       print -u2 -- "Delivered to $pane but the submit is unverified: no draft in its composer and no state change."
-      print -r -- "prompted agent in $pane (unverified)"
-      return 0
+      note=' (unverified)'
+      ;;
+    *)
+      recover_submission "$pane" "$needle" "$seq0" "$gate" || rc=$?
+      case $rc in
+        0) note=" ($RECOVERY)" ;;
+        2) worker_fail "Agent in $pane opened a dialog with the text unsent; it is left in the composer." ;;
+        *) worker_fail "Text is still unsent in $pane's composer: $(composer_excerpt "$pane")" ;;
+      esac
       ;;
   esac
 
-  local rc=0
-  recover_submission "$pane" "$needle" "$seq0" "$gate" || rc=$?
-  case $rc in
-    0) print -r -- "prompted agent in $pane ($RECOVERY)"; return 0 ;;
-    2) worker_fail "Agent in $pane opened a dialog with the text unsent; it is left in the composer." ;;
-  esac
-  worker_fail "Text is still unsent in $pane's composer: $(composer_excerpt "$pane")"
+  local anchor
+  anchor="$(squash "$msg")"
+  await_limit_notice "$pane" "${anchor[-NEEDLE_LEN,-1]}" \
+    || worker_fail "Agent in $pane is still usage-limited; the prompt was not acted on: $LIMIT_EXCERPT"
+  print -r -- "prompted agent in $pane$note"
 }
 
 cmd_fire() {
@@ -765,7 +872,14 @@ cmd_fire() {
       [[ "$status_now" == idle || "$status_now" == done ]] \
         || worker_fail "Agent in $pane is $status_now and --if-busy=abort was set."
     else
-      "$HERDR_BIN" agent wait "$pane" --timeout 900000 >/dev/null 2>&1 || true
+      # A wait that timed out is not a settled agent, and prompting it anyway
+      # would type into a turn that is still running. Only "working" is
+      # refused: an unknown status is Codex's flapping title, which the submit
+      # gate is there to see through.
+      "$HERDR_BIN" agent wait "$pane" --timeout "$BUSY_WAIT_MS" >/dev/null 2>&1 || true
+      read_agent_state "$pane"
+      [[ "$OBS_STATUS" != working ]] \
+        || worker_fail "Agent in $pane was still working after $(( BUSY_WAIT_MS / 60000 )) minutes; send aborted."
     fi
     deliver_agent_text "$pane" "$msg"
   else
@@ -896,33 +1010,9 @@ fi
 now_epoch="${HERDR_SCHEDULE_NOW_EPOCH:-$(date +%s)}"
 [[ "$now_epoch" == <-> ]] || die "HERDR_SCHEDULE_NOW_EPOCH must be an integer epoch."
 
-normalized_at="${opt_at/T/ }"
-time_only=0
-hhmmss=""
-
-if [[ "$normalized_at" =~ '^[0-9]{1,2}:[0-9]{2}$' ]]; then
-  time_only=1
-  hhmmss="$(printf '%02d:%s:00' "${normalized_at%%:*}" "${normalized_at#*:}")"
-elif [[ "$normalized_at" =~ '^[0-9]{1,2}:[0-9]{2}:[0-9]{2}$' ]]; then
-  time_only=1
-  hhmmss="$(printf '%02d:%s' "${normalized_at%%:*}" "${normalized_at#*:}")"
-fi
-
-if (( time_only )); then
-  today="$(fmt_epoch "$now_epoch" +%F)"
-  run_at="$(parse_epoch "$today $hhmmss")"
-  [[ -n "$run_at" ]] || die "Could not parse --at '$opt_at'."
-  if (( run_at <= now_epoch )); then
-    # Re-parse against tomorrow's calendar date rather than adding 86400,
-    # so a DST transition between the two days cannot shift the result.
-    tomorrow="$(date -d "$today +1 day" +%F)"
-    run_at="$(parse_epoch "$tomorrow $hhmmss")"
-    [[ -n "$run_at" ]] || die "Could not resolve tomorrow's $hhmmss."
-  fi
-else
-  run_at="$(parse_epoch "$normalized_at")"
-  [[ -n "$run_at" ]] || die "Could not parse --at '$opt_at'. Use HH:MM, HH:MM:SS, or YYYY-MM-DD HH:MM:SS."
-fi
+run_at="$(resolve_at "$opt_at" "$now_epoch")"
+[[ -n "$run_at" ]] \
+  || die "Could not parse --at '$opt_at'. Use HH:MM[:SS], H[:MM]am/pm, or YYYY-MM-DD HH:MM:SS."
 
 (( run_at > now_epoch )) || die "Target time has already passed: $(fmt_epoch "$run_at" '+%F %T')"
 
@@ -933,6 +1023,12 @@ delay=$(( run_at - now_epoch ))
 
 id="$(fmt_epoch "$run_at" '+%Y%m%d-%H%M%S')-${t_pane//[^A-Za-z0-9]/}"
 unit="${UNIT_PREFIX}-${id}"
+
+# The id is the fire time plus the pane, so a second send to the same pane at
+# the same second would overwrite the first job's state and units while its
+# timer is still armed.
+[[ ! -e "$STATE_DIR/$id.json" ]] \
+  || die "A send to $t_pane at $calendar is already scheduled ($id). Cancel it with --cancel $id, or pick another time."
 
 if [[ -n "$opt_keys" ]]; then
   mode="keys"; payload_desc="keys: $opt_keys"

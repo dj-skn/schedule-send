@@ -48,8 +48,9 @@ scripts:
 schedule-send --at '03:30' --cwd ~/projects/website --message-file prompt.txt
 ```
 
-Time-only values use local time. If the time already passed today it schedules
-for tomorrow, re-parsed against tomorrow's calendar date so a DST transition
+Time-only values use local time, in 24-hour (`15:50`, `03:30:15`) or 12-hour
+(`12:27 AM`, `3pm`) form. If the time already passed today it schedules for
+tomorrow, re-parsed against tomorrow's calendar date so a DST transition
 between the two days cannot shift the result by an hour.
 
 ## Choosing a Target
@@ -177,6 +178,17 @@ A recovered send is logged as `(Enter retried)` or `(focused, Enter retried)`,
 and a failed one takes the journal, the notification, and a non-zero exit with
 it rather than reporting a success that never happened.
 
+### Still usage-limited
+
+An agent that is out of usage accepts a prompt like any other — the composer
+clears and the lifecycle moves — and then answers with a limit notice instead
+of a turn. So once the submit is settled, the job watches the transcript for
+10 seconds. Both Codex and Claude echo a submitted prompt, so the check looks
+only below the last copy of the message's end, where a notice from an earlier
+limit cannot be. A notice there — Codex's `■ You’ve hit your usage limit` or
+`Usage limit reached`, Claude's `You've hit your … limit` — fails the job and
+quotes the notice.
+
 ### Sending keys
 
 ```zsh
@@ -190,7 +202,9 @@ Keys go in as keys, with no submit gate: `esc` and `ctrl+c` change nothing that
 could be verified the way a submitted prompt can.
 
 For agent targets, `--if-busy` decides what happens if the agent is mid-turn at
-fire time: `wait` (default) waits for it to settle, `abort` cancels the send.
+fire time: `wait` (default) waits up to 15 minutes for it to settle, `abort`
+cancels the send. A wait that runs out fails the send rather than typing into
+a turn that is still running.
 
 ## Fire-Time Validation
 
@@ -254,6 +268,8 @@ herdr pane send-keys 'wX:p1' enter
 
 - Explicit full timestamps such as `2026-06-24 15:50:00` never roll forward. If
   they are in the past the script exits instead of sending immediately.
+- A job id is the fire time plus the pane, so a second send to the same pane at
+  the same time is refused until the first is cancelled.
 - The herdr binary path is resolved once at schedule time and stored with the
   job, so the worker does not depend on a login shell or `PATH`.
 - Message text is stored verbatim in `~/.local/state/herdr-send/<id>.msg`; that
