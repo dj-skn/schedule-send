@@ -32,19 +32,25 @@ usage() {
   cat <<'EOF'
 Usage:
   schedule-send --at TIME (--message TEXT | --message-file PATH | --keys KEYS) [options]
+  schedule-send [--auto] [--message TEXT | ...] [options]
   schedule-send --list
   schedule-send --cancel ID
   schedule-send --status ID
 
 Timing:
-  --at TIME              Local time. "HH:MM", "HH:MM:SS", "YYYY-MM-DD HH:MM:SS"
-                         or "YYYY-MM-DDTHH:MM:SS". Time-only values that already
-                         passed roll to tomorrow, correctly across DST.
+  --at TIME              Local time. "HH:MM", "HH:MM:SS", "12:27 AM", "3pm",
+                         "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DDTHH:MM:SS".
+                         Time-only values that already passed roll to
+                         tomorrow, correctly across DST. Omitted: read the
+                         reset time from the target's usage-limit notice, add
+                         one minute, and confirm it on the terminal.
+  --auto                 Take the detected reset time without confirming, for
+                         runs with no terminal. Fails if no notice names one.
   --persistent           If the machine is down at the target time, fire at the
                          next boot instead of skipping the job.
 
 Payload:
-  --message TEXT         Text to submit.
+  --message TEXT         Text to submit. Without --at, defaults to "resume".
   --message-file PATH    Read the text from a file. Multi-line is safe.
   --keys KEYS            Space-separated key names, e.g. "esc" or "ctrl+c enter".
   --enter-only           Alias for --keys enter.
@@ -60,8 +66,9 @@ Target selection:
   --allow-self           Permit targeting the pane this command runs in.
 
 Delivery:
-  --if-busy wait|abort   When the target agent is working, wait for it to settle
-                         or abort the send. Default: wait.
+  --if-busy wait|abort   When the target agent is working, wait up to 15 minutes
+                         for it to settle, or abort the send. A wait that runs
+                         out fails the send. Default: wait.
   --recover MODE         What to do when the submit is not confirmed and the
                          text is still sitting in the agent's composer.
                          "keys" (default) presses Enter again. "focus" then
@@ -81,6 +88,7 @@ Examples:
   schedule-send --at 15:50 --message 'resume, then commit when done'
   schedule-send --at 03:30 --cwd ~/projects/website --message-file prompt.txt
   schedule-send --at 09:00 --pane wS:p1 --keys 'ctrl+c'
+  schedule-send --cwd ~/projects/website          # resume after its usage limit
   schedule-send --list
 
 Environment:
@@ -326,6 +334,61 @@ choose_target() {
 parse_epoch() { date -d "$1" +%s 2>/dev/null || true; }
 fmt_epoch()   { date -d "@$1" "$2"; }
 
+# An --at value as an epoch, or nothing when date(1) cannot parse it.
+#
+# A value with no date part means its next occurrence. That includes 12-hour
+# forms such as "12:27 AM" and "3pm": handed to date(1) whole they resolve to
+# today even once today's has passed. When it has, the time is re-parsed
+# against tomorrow's calendar date rather than advanced by 86400, so a DST
+# transition between the two days cannot shift the result by an hour.
+resolve_at() {
+  setopt local_options extended_glob
+  local at="$1" now="$2" day epoch zone='' tzp=''
+
+  # Only an ISO timestamp has its T separator swapped out; anywhere else a
+  # capital T is part of the text, as in "Tue 3pm".
+  [[ "$at" =~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' ]] && at="${at/T/ }"
+
+  # Agents print reset times in forms date(1) rejects as written: an ordinal
+  # day ("Sep 27th"), a comma before the time ("Sep 28, 3pm"), and a zone in
+  # brackets ("3pm (Europe/Warsaw)"). They are normalised here rather than in
+  # the detector, so a time copied out of a notice parses the same as one
+  # read from it.
+  if [[ "$at" =~ '^(.*[^ ]) *\(([A-Za-z_]+(/[A-Za-z0-9_+-]+)*)\)$' ]]; then
+    at="$match[1]"; zone="$match[2]"; tzp="TZ=\"$zone\" "
+    # glibc reads a zone it does not know as UTC, without a word.
+    [[ -f "${TZDIR:-/usr/share/zoneinfo}/$zone" ]] || { print -r -- ""; return 0 }
+  fi
+  at="${${at//,/}//(#b)([0-9])(st|nd|rd|th)/$match[1]}"
+
+  if [[ "$at" =~ '^[0-9]{1,2}:[0-9]{2}(:[0-9]{2})?$' \
+     || "$at" =~ '^[0-9]{1,2}(:[0-9]{2}(:[0-9]{2})?)? ?[AaPp][Mm]$' ]]; then
+    # "Today" is the zone's own date, which differs from ours near midnight.
+    if [[ -n "$zone" ]]; then
+      day="$(TZ="$zone" date -d "@$now" +%F)"
+    else
+      day="$(fmt_epoch "$now" +%F)"
+    fi
+    epoch="$(parse_epoch "$tzp$day $at")"
+    if [[ -n "$epoch" ]] && (( epoch <= now )); then
+      day="$(date -d "$day +1 day" +%F)"
+      epoch="$(parse_epoch "$tzp$day $at")"
+    fi
+  else
+    epoch="$(parse_epoch "$tzp$at")"
+  fi
+  print -r -- "$epoch"
+}
+
+# A delay in seconds as "2h 5m", rounded up to the minute.
+fmt_delay() {
+  local m=$(( ($1 + 59) / 60 ))
+  if   (( m >= 1440 )); then print -r -- "$(( m / 1440 ))d $(( m % 1440 / 60 ))h"
+  elif (( m >= 60 ));   then print -r -- "$(( m / 60 ))h $(( m % 60 ))m"
+  else                       print -r -- "${m}m"
+  fi
+}
+
 # ------------------------------------------------------------ subcommands ---
 
 cmd_list() {
@@ -383,6 +446,9 @@ cmd_status() {
 # ----------------------------------------------------------------- worker ---
 
 typeset -g W_ID='' W_QUIET=0
+
+# How long --if-busy wait gives a working agent to settle.
+readonly BUSY_WAIT_MS=900000
 
 worker_notify() {
   (( W_QUIET )) && return 0
@@ -458,6 +524,14 @@ is_rule() {
   [[ -z "$t" ]]
 }
 
+# A line opening with a prompt marker: an agent's composer, or a prompt it
+# echoed into its transcript. Matched as strings, not a bracket expression,
+# for the same locale reason as is_rule.
+is_prompt_line() {
+  local t="${${1//[ 	]/}#('│'|'|')}"
+  [[ "$t" == ('›'|'❯'|'>')* ]]
+}
+
 # One screen read feeds both detectors, which need different slices of it.
 # OBS_TAIL is the last composer marker down to the bottom of the screen, the
 # domain the needle is searched in. OBS_BODY is that marker up to the rule that
@@ -472,12 +546,9 @@ read_composer() {
   lines=("${(@f)$("$HERDR_BIN" agent read "$1" --source visible --lines 40 2>/dev/null)}")
   (( ${#lines} )) || return 0
 
-  local i trimmed start=0 end=0
+  local i start=0 end=0
   for (( i = 1; i <= ${#lines}; i++ )); do
-    trimmed="${${lines[$i]//[ 	]/}#('│'|'|')}"
-    case "$trimmed" in
-      ('›'*|'❯'*|'>'*) start=$i ;;
-    esac
+    is_prompt_line "${lines[$i]}" && start=$i
   done
   (( start )) || return 0
   OBS_TAIL="$(squash "${(j::)${(@)lines[$start,-1]}}")"
@@ -635,6 +706,105 @@ composer_excerpt() {
   print -r -- "$out" | tr -s ' 	' ' ' | cut -c1-160
 }
 
+# A usage-limited agent takes a prompt like any other: the text leaves the
+# composer and the lifecycle moves, so the gate reports a submit. The agent
+# then answers with a limit notice instead of a turn, and the job would report
+# a success that never happened. So after the submit the transcript below our
+# message is watched for that notice.
+#
+# Both Codex and Claude echo a submitted prompt into the transcript, so the
+# last copy of the message's end marks where this send's answer begins, and a
+# notice from an earlier limit sits above it. The anchor has no minimum length
+# the way the composer needle does: a short one can only land later in the
+# transcript than our message, which misses a notice but never invents one.
+readonly LIMIT_WATCH=10
+
+typeset -ga TR_LINES=() TR_SQ=()
+typeset -g LIMIT_EXCERPT=''
+
+# The pane's recent transcript into TR_LINES, and each line squashed into
+# TR_SQ. Claude draws on the alternate screen, whose rows never reach the host
+# scrollback, and herdr can recover that history only from an idle agent — so
+# a recent read can come back empty, and the visible screen, which still holds
+# the latest exchange, stands in for it.
+read_transcript() {
+  local out
+  out="$("$HERDR_BIN" agent read "$1" --source recent-unwrapped --lines "$2" 2>/dev/null)"
+  [[ -n "${out//[[:space:]]/}" ]] \
+    || out="$("$HERDR_BIN" agent read "$1" --source visible --lines "$2" 2>/dev/null)"
+  TR_LINES=("${(@f)out}")
+
+  # squash() inlined: this runs for every line on every poll.
+  TR_SQ=()
+  local i s
+  for (( i = 1; i <= ${#TR_LINES}; i++ )); do
+    s="${TR_LINES[$i]//[^[:alnum:]]/}"
+    TR_SQ[i]="${s:l}"
+  done
+}
+
+# A squashed line that opens a usage-limit notice: Codex's "■ You’ve hit your
+# usage limit" or "Usage limit reached", Claude's "You've hit your session
+# limit". Squashing strips the glyph and the curly apostrophe, so the match
+# does not depend on the worker's missing locale.
+is_limit_line() {
+  [[ "$1" == youvehityour*limit* || "$1" == usagelimitreached* ]]
+}
+
+# The notice opening at transcript line $1, joined back into one line. Codex
+# wraps it itself, even in the middle of a date, so the lines after it are
+# taken too — up to the blank line or rule that ends it, or a line indented
+# well past it, such as the tip Codex centres underneath.
+notice_text() {
+  local i="$1" j out="${TR_LINES[$1]}" lead
+  lead="${TR_LINES[i]%%[^ ]*}"
+  local indent=${#lead}
+  for (( j = i + 1; j <= i + 5 && j <= ${#TR_LINES}; j++ )); do
+    [[ -n "${TR_LINES[j]//[ 	]/}" ]] || break
+    is_rule "${TR_LINES[j]}" && break
+    lead="${TR_LINES[j]%%[^ ]*}"
+    (( ${#lead} < indent + 8 )) || break
+    out="$out ${TR_LINES[j]}"
+  done
+  print -r -- "$out" | tr -s ' 	' ' '
+}
+
+# 0 when a transcript line after the message's end opens a limit notice.
+limit_notice_after() {
+  local pane="$1" anchor="$2"
+  LIMIT_EXCERPT=''
+  read_transcript "$pane" 80
+  local i all="${(j::)TR_SQ}"
+  [[ -n "$anchor" && "$all" == *"$anchor"* ]] || return 1
+
+  # The line holding the last character of the last copy of the anchor.
+  local end=$(( ${#${all%"$anchor"*}} + ${#anchor} )) acc=0
+  for (( i = 1; i <= ${#TR_SQ}; i++ )); do
+    acc=$(( acc + ${#TR_SQ[i]} ))
+    (( acc >= end )) && break
+  done
+
+  for (( i = i + 1; i <= ${#TR_SQ}; i++ )); do
+    is_limit_line "${TR_SQ[i]}" || continue
+    LIMIT_EXCERPT="$(notice_text "$i" | cut -c1-200)"
+    return 0
+  done
+  return 1
+}
+
+# Holds the job open for LIMIT_WATCH seconds after the submit, which is long
+# enough for the rejected request to come back. 1 when a notice showed up.
+await_limit_notice() {
+  local pane="$1" anchor="$2"
+  local deadline=$(( SECONDS + LIMIT_WATCH ))
+  [[ -n "$anchor" ]] || return 0
+  while (( SECONDS < deadline )); do
+    sleep 1
+    limit_notice_after "$pane" "$anchor" && return 1
+  done
+  return 0
+}
+
 deliver_agent_text() {
   local pane="$1" msg="$2"
   local needle seq0 gate=0
@@ -670,28 +840,31 @@ deliver_agent_text() {
 
   await_verdict "$pane" "$needle" "$seq0" "$gate"
 
+  local note='' rc=0
   case "$VERDICT" in
-    sent)
-      print -r -- "prompted agent in $pane"
-      return 0
-      ;;
+    sent) ;;
     unknown)
       # Nothing in the composer and nothing moved. Pressing Enter here would
       # be the blind keystroke this gate replaced, so the send is reported as
       # delivered but unverified instead of being guessed either way.
       print -u2 -- "Delivered to $pane but the submit is unverified: no draft in its composer and no state change."
-      print -r -- "prompted agent in $pane (unverified)"
-      return 0
+      note=' (unverified)'
+      ;;
+    *)
+      recover_submission "$pane" "$needle" "$seq0" "$gate" || rc=$?
+      case $rc in
+        0) note=" ($RECOVERY)" ;;
+        2) worker_fail "Agent in $pane opened a dialog with the text unsent; it is left in the composer." ;;
+        *) worker_fail "Text is still unsent in $pane's composer: $(composer_excerpt "$pane")" ;;
+      esac
       ;;
   esac
 
-  local rc=0
-  recover_submission "$pane" "$needle" "$seq0" "$gate" || rc=$?
-  case $rc in
-    0) print -r -- "prompted agent in $pane ($RECOVERY)"; return 0 ;;
-    2) worker_fail "Agent in $pane opened a dialog with the text unsent; it is left in the composer." ;;
-  esac
-  worker_fail "Text is still unsent in $pane's composer: $(composer_excerpt "$pane")"
+  local anchor
+  anchor="$(squash "$msg")"
+  await_limit_notice "$pane" "${anchor[-NEEDLE_LEN,-1]}" \
+    || worker_fail "Agent in $pane is still usage-limited; the prompt was not acted on: $LIMIT_EXCERPT"
+  print -r -- "prompted agent in $pane$note"
 }
 
 cmd_fire() {
@@ -765,7 +938,14 @@ cmd_fire() {
       [[ "$status_now" == idle || "$status_now" == done ]] \
         || worker_fail "Agent in $pane is $status_now and --if-busy=abort was set."
     else
-      "$HERDR_BIN" agent wait "$pane" --timeout 900000 >/dev/null 2>&1 || true
+      # A wait that timed out is not a settled agent, and prompting it anyway
+      # would type into a turn that is still running. Only "working" is
+      # refused: an unknown status is Codex's flapping title, which the submit
+      # gate is there to see through.
+      "$HERDR_BIN" agent wait "$pane" --timeout "$BUSY_WAIT_MS" >/dev/null 2>&1 || true
+      read_agent_state "$pane"
+      [[ "$OBS_STATUS" != working ]] \
+        || worker_fail "Agent in $pane was still working after $(( BUSY_WAIT_MS / 60000 )) minutes; send aborted."
     fi
     deliver_agent_text "$pane" "$msg"
   else
@@ -775,6 +955,160 @@ cmd_fire() {
   fi
 
   worker_cleanup
+}
+
+# ----------------------------------------------------- usage-limit timing ---
+
+# What a run without --at sends when no payload was given: resuming after the
+# limit is what a detected time is for.
+readonly RESUME_MESSAGE=resume
+
+# A notice names its reset to the minute, and the reset lands somewhere inside
+# that minute — a notice reading 12:27 AM was for a reset at 00:27:52 — so the
+# first moment certainly past it is one minute on.
+readonly LIMIT_MARGIN=60
+
+typeset -g LN_TIME='' LN_QUOTE='' LIMIT_SOURCE='' LIMIT_RESET=''
+
+# The pane's current usage-limit notice. LN_TIME is the reset time it names, as
+# printed, or empty when it names none ("try again later"); LN_QUOTE is the
+# phrase to show back. 1 when there is no notice, or only one the agent has
+# since moved past.
+limit_notice() {
+  LN_TIME=''; LN_QUOTE=''
+  read_transcript "$1" 120
+  local i last=0 prompts=0
+  for (( i = 1; i <= ${#TR_SQ}; i++ )); do
+    is_limit_line "${TR_SQ[i]}" && last=$i
+  done
+  (( last )) || return 1
+
+  # A prompt echoed below the newest notice went through without drawing
+  # another, so that limit is over. The last prompt line is the composer.
+  for (( i = last + 1; i <= ${#TR_LINES}; i++ )); do
+    is_prompt_line "${TR_LINES[i]}" && prompts=$(( prompts + 1 ))
+  done
+  (( prompts < 2 )) || return 1
+
+  # Codex: "try again at Sep 27th, 2026 12:27 AM". Claude: "resets 3pm",
+  # "resets Sep 28, 3:30pm", either optionally followed by "(Europe/Warsaw)".
+  local text re
+  text="$(notice_text "$last")"
+  re='([Tt]ry again at|resets at|resets) (([A-Z][a-z]{2} [0-9]{1,2}(st|nd|rd|th)?,? ([0-9]{4},? )?)?[0-9]{1,2}(:[0-9]{2})? ?[AaPp][Mm]( \([A-Za-z_]+(/[A-Za-z0-9_+-]+)*\))?)'
+  if [[ "$text" =~ "$re" ]]; then
+    LN_TIME="$match[2]"; LN_QUOTE="$MATCH"
+  else
+    LN_QUOTE="$(print -r -- "$text" | cut -c1-160)"
+  fi
+}
+
+# The reset for a target: its own notice first, then another agent of the same
+# kind, since the limit belongs to the account rather than the pane. Sets
+# LIMIT_SOURCE to the pane the notice came from and LIMIT_RESET to its epoch,
+# left empty when the notice names no time date(1) can read. A notice whose
+# reset already passed is old scrollback and is skipped. 1 when none is found.
+find_limit() {
+  local pane="$1" agent="$2" now="$3" row p epoch
+  local -a panes=("$pane")
+  for row in "${(@)ROWS}"; do
+    [[ "$(row_field "$row" 1)" == agent && "$(row_field "$row" 3)" == "$agent" ]] || continue
+    p="$(row_field "$row" 2)"
+    [[ "$p" != "$pane" && "$p" != "${HERDR_PANE_ID:-}" ]] && panes+=("$p")
+  done
+
+  LIMIT_SOURCE=''; LIMIT_RESET=''
+  for p in "${(@)panes}"; do
+    limit_notice "$p" || continue
+    epoch=''
+    [[ -n "$LN_TIME" ]] && epoch="$(resolve_at "$LN_TIME" "$now")"
+    [[ -n "$epoch" ]] && (( epoch <= now )) && continue
+    LIMIT_SOURCE="$p"; LIMIT_RESET="$epoch"
+    return 0
+  done
+  return 1
+}
+
+# What was found, for the confirmation prompt or --auto's note on stderr.
+limit_report() {
+  local now="$1" what
+  if [[ -z "$LIMIT_SOURCE" ]]; then
+    print -r -- "No usage-limit notice found for $(target_summary "$target")."
+    return 0
+  fi
+  if [[ -n "$opt_keys" ]]; then
+    what="keys: $opt_keys"
+  else
+    what="\"${opt_message%%$'\n'*}\""
+  fi
+
+  if [[ "$LIMIT_SOURCE" == "$t_pane" ]]; then
+    print -r -- "Usage limit in $t_agent $t_pane:"
+  else
+    print -r -- "Usage limit in $t_agent $LIMIT_SOURCE (per account; $t_pane shows none):"
+  fi
+  print -r -- "  $LN_QUOTE"
+  if [[ -n "$LIMIT_RESET" ]]; then
+    print -r -- "Resets $(fmt_epoch "$LIMIT_RESET" '+%a %H:%M') (in $(fmt_delay $(( LIMIT_RESET - now )))); sending $what $(( LIMIT_MARGIN / 60 )) min after."
+  else
+    print -r -- "It names no reset time that can be read; sending $what at the time given."
+  fi
+}
+
+# Asks on the terminal when to send, after showing the report, offering $1 (an
+# epoch, or empty for no default). Enter takes the default. Anything typed goes
+# through resolve_at, is shown back, and becomes the new default, so a
+# correction is confirmed the same way the detected time is.
+confirm_at() {
+  local def="$1" now="$2" report="$3" tty_fd input epoch
+  exec {tty_fd}<>/dev/tty || die "Could not open /dev/tty to confirm the send time."
+  print -r -- "" >&$tty_fd
+  print -r -- "$report" >&$tty_fd
+  print -r -- "" >&$tty_fd
+
+  while true; do
+    if [[ -n "$def" ]]; then
+      printf 'at [%s]: ' "$(fmt_epoch "$def" '+%F %H:%M')" >&$tty_fd
+    else
+      printf 'at: ' >&$tty_fd
+    fi
+    IFS= read -r input <&$tty_fd || die "No send time given."
+    if [[ -z "$input" ]]; then
+      [[ -n "$def" ]] && break
+      continue
+    fi
+    epoch="$(resolve_at "$input" "$now")"
+    if [[ -z "$epoch" ]]; then
+      print -r -- "Could not parse '$input'. Try 00:45, 12:45 AM, Sep 27 1am, or +30 min." >&$tty_fd
+    elif (( epoch <= now )); then
+      print -r -- "$(fmt_epoch "$epoch" '+%F %H:%M') has already passed." >&$tty_fd
+    else
+      print -r -- "  → $(fmt_epoch "$epoch" '+%a %F %H:%M:%S') (in $(fmt_delay $(( epoch - now ))))" >&$tty_fd
+      def="$epoch"
+    fi
+  done
+  exec {tty_fd}>&-
+  print -r -- "$def"
+}
+
+# The send time for a run without --at: the target's usage-limit reset plus
+# LIMIT_MARGIN, confirmed on the terminal, or taken as found under --auto.
+detect_at() {
+  local now="$1" proposed='' report
+  LIMIT_SOURCE=''; LIMIT_RESET=''
+  if [[ "$t_kind" == agent ]]; then
+    find_limit "$t_pane" "$t_agent" "$now" || true
+  fi
+  [[ -n "$LIMIT_RESET" ]] && proposed=$(( LIMIT_RESET + LIMIT_MARGIN ))
+  report="$(limit_report "$now")"
+
+  if (( opt_auto )); then
+    [[ -n "$proposed" ]] \
+      || die "$report"$'\n'"--auto needs a notice that names its reset time; pass --at instead."
+    print -u2 -- "$report"
+    print -r -- "$proposed"
+    return 0
+  fi
+  confirm_at "$proposed" "$now" "$report"
 }
 
 # ------------------------------------------------------------------- main ---
@@ -790,8 +1124,8 @@ opt_message=""; opt_message_file=""; opt_keys=""
 opt_pick="unique"; opt_if_busy="wait"
 opt_recover="keys"; opt_grace=4
 opt_panes_only=0; opt_allow_self=0; opt_force=0
-opt_quiet=0; opt_dry_run=0; opt_persistent=0
-have_message=0
+opt_quiet=0; opt_dry_run=0; opt_persistent=0; opt_auto=0
+have_message=0; message_defaulted=0
 
 flag_value() {
   local flag="$1" val="${2-}"
@@ -806,6 +1140,7 @@ while (( $# > 0 )); do
     --cwd)          opt_cwd="$(flag_value "$1" "${2-}")"; shift 2 ;;
     --kind)         opt_kind="$(flag_value "$1" "${2-}")"; shift 2 ;;
     --at)           opt_at="$(flag_value "$1" "${2-}")"; shift 2 ;;
+    --auto)         opt_auto=1; shift ;;
     --message)      opt_message="$(flag_value "$1" "${2-}")"; have_message=1; shift 2 ;;
     --message-file) opt_message_file="$(flag_value "$1" "${2-}")"; have_message=1; shift 2 ;;
     --keys)         opt_keys="$(flag_value "$1" "${2-}")"; shift 2 ;;
@@ -837,7 +1172,15 @@ done
 [[ "$opt_grace" == <-> ]] && (( opt_grace >= 1 && opt_grace <= 60 )) \
   || die "--submit-grace must be a whole number of seconds from 1 to 60."
 
-[[ -n "$opt_at" ]] || { usage >&2; die "Missing required --at."; }
+[[ -z "$opt_at" ]] || (( ! opt_auto )) || die "Use either --at or --auto, not both."
+
+# Without --at the send time comes from the target's usage-limit notice, and a
+# detected time is only taken unseen when --auto says so.
+detect=0
+[[ -n "$opt_at" ]] || detect=1
+if (( detect && ! opt_auto )) && [[ ! -t 0 ]]; then
+  die "No --at, and no terminal to confirm a detected time on. Pass --at, or --auto to take the detected time unconfirmed."
+fi
 
 if [[ -n "$opt_message" && -n "$opt_message_file" ]]; then
   die "Use either --message or --message-file, not both."
@@ -848,6 +1191,10 @@ fi
 if [[ -n "$opt_message_file" ]]; then
   [[ -f "$opt_message_file" ]] || die "Message file does not exist: $opt_message_file"
   opt_message="$(<"$opt_message_file")"
+fi
+if (( detect && ! have_message )) && [[ -z "$opt_keys" ]]; then
+  opt_message="$RESUME_MESSAGE"
+  message_defaulted=1
 fi
 if [[ -z "$opt_keys" && -z "$opt_message" ]]; then
   die "Nothing to send. Pass --message, --message-file, or --keys."
@@ -889,6 +1236,9 @@ t_cwd="$(row_field "$target" 5)"
 if [[ "$t_pane" == "${HERDR_PANE_ID:-}" ]] && (( ! opt_allow_self )); then
   die "Refusing to target the pane this command runs in. Pass --allow-self to override."
 fi
+if (( message_defaulted )) && [[ "$t_kind" != agent ]]; then
+  die "Pane $t_pane is a plain shell, where the default '$RESUME_MESSAGE' would run as a command. Pass --message."
+fi
 if [[ "$t_kind" == agent && "$t_status" == blocked && -z "$opt_keys" ]]; then
   print -u2 -- "Warning: agent in $t_pane is blocked on a prompt right now."
 fi
@@ -896,32 +1246,15 @@ fi
 now_epoch="${HERDR_SCHEDULE_NOW_EPOCH:-$(date +%s)}"
 [[ "$now_epoch" == <-> ]] || die "HERDR_SCHEDULE_NOW_EPOCH must be an integer epoch."
 
-normalized_at="${opt_at/T/ }"
-time_only=0
-hhmmss=""
-
-if [[ "$normalized_at" =~ '^[0-9]{1,2}:[0-9]{2}$' ]]; then
-  time_only=1
-  hhmmss="$(printf '%02d:%s:00' "${normalized_at%%:*}" "${normalized_at#*:}")"
-elif [[ "$normalized_at" =~ '^[0-9]{1,2}:[0-9]{2}:[0-9]{2}$' ]]; then
-  time_only=1
-  hhmmss="$(printf '%02d:%s' "${normalized_at%%:*}" "${normalized_at#*:}")"
-fi
-
-if (( time_only )); then
-  today="$(fmt_epoch "$now_epoch" +%F)"
-  run_at="$(parse_epoch "$today $hhmmss")"
-  [[ -n "$run_at" ]] || die "Could not parse --at '$opt_at'."
-  if (( run_at <= now_epoch )); then
-    # Re-parse against tomorrow's calendar date rather than adding 86400,
-    # so a DST transition between the two days cannot shift the result.
-    tomorrow="$(date -d "$today +1 day" +%F)"
-    run_at="$(parse_epoch "$tomorrow $hhmmss")"
-    [[ -n "$run_at" ]] || die "Could not resolve tomorrow's $hhmmss."
-  fi
+if (( detect )); then
+  run_at="$(detect_at "$now_epoch")"
+  # A confirmation can sit unanswered for a while, so "already passed" and the
+  # delay are judged from the moment it was answered.
+  [[ -n "${HERDR_SCHEDULE_NOW_EPOCH:-}" ]] || now_epoch="$(date +%s)"
 else
-  run_at="$(parse_epoch "$normalized_at")"
-  [[ -n "$run_at" ]] || die "Could not parse --at '$opt_at'. Use HH:MM, HH:MM:SS, or YYYY-MM-DD HH:MM:SS."
+  run_at="$(resolve_at "$opt_at" "$now_epoch")"
+  [[ -n "$run_at" ]] \
+    || die "Could not parse --at '$opt_at'. Use HH:MM[:SS], H[:MM]am/pm, or YYYY-MM-DD HH:MM:SS."
 fi
 
 (( run_at > now_epoch )) || die "Target time has already passed: $(fmt_epoch "$run_at" '+%F %T')"
@@ -933,6 +1266,12 @@ delay=$(( run_at - now_epoch ))
 
 id="$(fmt_epoch "$run_at" '+%Y%m%d-%H%M%S')-${t_pane//[^A-Za-z0-9]/}"
 unit="${UNIT_PREFIX}-${id}"
+
+# The id is the fire time plus the pane, so a second send to the same pane at
+# the same second would overwrite the first job's state and units while its
+# timer is still armed.
+[[ ! -e "$STATE_DIR/$id.json" ]] \
+  || die "A send to $t_pane at $calendar is already scheduled ($id). Cancel it with --cancel $id, or pick another time."
 
 if [[ -n "$opt_keys" ]]; then
   mode="keys"; payload_desc="keys: $opt_keys"

@@ -7,6 +7,10 @@ The delayed job is owned by an on-disk systemd user timer, so it survives the
 launching shell, a logout, and a reboot. Targets are re-resolved at fire time,
 so a pane that changed identity in the meantime is never written to.
 
+Leave out the time and it is read from the agent's usage-limit notice instead,
+so an agent that ran out of usage can be told to `resume` the minute its limit
+resets — see [Resuming After a Usage Limit](#resuming-after-a-usage-limit).
+
 ## Install Once
 
 ```zsh
@@ -48,9 +52,67 @@ scripts:
 schedule-send --at '03:30' --cwd ~/projects/website --message-file prompt.txt
 ```
 
-Time-only values use local time. If the time already passed today it schedules
-for tomorrow, re-parsed against tomorrow's calendar date so a DST transition
+Time-only values use local time, in 24-hour (`15:50`, `03:30:15`) or 12-hour
+(`12:27 AM`, `3pm`) form. If the time already passed today it schedules for
+tomorrow, re-parsed against tomorrow's calendar date so a DST transition
 between the two days cannot shift the result by an hour.
+
+## Resuming After a Usage Limit
+
+Leave out `--at` and the time comes from the agent's own usage-limit notice:
+
+```zsh
+schedule-send --cwd ~/projects/shop-backend
+```
+
+```
+Usage limit in codex w9:p1:
+  try again at Sep 27th, 2026 12:27 AM
+Resets Sun 00:27 (in 37m); sending "resume" 1 min after.
+
+at [2026-09-27 00:28]:
+```
+
+Enter takes the proposed time. Anything typed instead — `00:45`, `12:45 AM`,
+`Sep 27 1am`, `+30 min` — is shown back as a full date and becomes the new
+default, so a correction is confirmed the same way. With no `--message` the
+payload is `resume`; pass one to send something else.
+
+The notice names its reset to the minute and the reset lands somewhere inside
+it (one reading 12:27 AM was for 00:27:52), so the proposal is one minute
+later: the first moment certainly past it.
+
+What is recognised:
+
+| Agent | Notice | Time forms |
+| --- | --- | --- |
+| Codex | `■ You’ve hit your usage limit … try again at …` | `Sep 27th, 2026 12:27 AM` |
+| Claude | `You've hit your session limit · resets …` | `3pm`, `3:30pm`, `Sep 28, 3pm`, each optionally `(Europe/Warsaw)` |
+
+A notice that names no time (`try again later`, `Usage limit reached`) is
+still shown, and the prompt then has no default. Only the newest notice
+counts, and it is ignored once its time has passed or once a prompt has gone
+through below it. If the target itself shows none, other agents of the same
+kind are checked, since the limit belongs to the account; the report says which
+pane it came from. The pane you run the command in is never read this way.
+
+These forms are accepted by `--at` too, so a time copied out of a notice works
+as written.
+
+Claude's short form, `resets 3pm`, carries no date. A notice left on screen
+after its reset, with no prompt sent since, therefore reads as tomorrow's
+3pm; the report's "in 23h" gives it away, but `--auto` would take it.
+
+With no terminal there is nobody to confirm, so leaving out `--at` fails unless
+`--auto` is passed. `--auto` takes the detected time as found, prints the report
+on stderr, and fails if no notice names a time:
+
+```zsh
+schedule-send --cwd ~/projects/shop-backend --auto
+```
+
+A plain shell pane has no notice to read, and the default `resume` would run as
+a command there, so it needs `--at` and `--message`.
 
 ## Choosing a Target
 
@@ -177,6 +239,23 @@ A recovered send is logged as `(Enter retried)` or `(focused, Enter retried)`,
 and a failed one takes the journal, the notification, and a non-zero exit with
 it rather than reporting a success that never happened.
 
+### Still usage-limited
+
+An agent that is out of usage accepts a prompt like any other — the composer
+clears and the lifecycle moves — and then answers with a limit notice instead
+of a turn. So once the submit is settled, the job watches the transcript for
+10 seconds. Both Codex and Claude echo a submitted prompt, so the check looks
+only below the last copy of the message's end, where a notice from an earlier
+limit cannot be. A notice there — Codex's `■ You’ve hit your usage limit` or
+`Usage limit reached`, Claude's `You've hit your … limit` — fails the job and
+quotes the notice. The job does not re-arm itself; running the command again
+without `--at` schedules from the new notice.
+
+Claude draws on the alternate screen, which never reaches the host scrollback,
+and Herdr can recover that history only from an idle agent. When a recent read
+comes back empty, the visible screen stands in for it; it still holds the
+latest exchange.
+
 ### Sending keys
 
 ```zsh
@@ -190,7 +269,9 @@ Keys go in as keys, with no submit gate: `esc` and `ctrl+c` change nothing that
 could be verified the way a submitted prompt can.
 
 For agent targets, `--if-busy` decides what happens if the agent is mid-turn at
-fire time: `wait` (default) waits for it to settle, `abort` cancels the send.
+fire time: `wait` (default) waits up to 15 minutes for it to settle, `abort`
+cancels the send. A wait that runs out fails the send rather than typing into
+a turn that is still running.
 
 ## Fire-Time Validation
 
@@ -240,7 +321,8 @@ schedule-send --at '03:30' --cwd ~/projects/website --message hello --dry-run
 ```
 
 Resolves the target and prints the schedule, the unit name, and the unit file
-paths without creating anything.
+paths without creating anything. Without `--at` it still reads the notice and
+asks for confirmation, so a dry run shows exactly what would be armed.
 
 ## Safety Test
 
@@ -254,11 +336,15 @@ herdr pane send-keys 'wX:p1' enter
 
 - Explicit full timestamps such as `2026-06-24 15:50:00` never roll forward. If
   they are in the past the script exits instead of sending immediately.
+- A job id is the fire time plus the pane, so a second send to the same pane at
+  the same time is refused until the first is cancelled. Running the command
+  twice on the same usage-limit notice lands on that case.
 - The herdr binary path is resolved once at schedule time and stored with the
   job, so the worker does not depend on a login shell or `PATH`.
 - Message text is stored verbatim in `~/.local/state/herdr-send/<id>.msg`; that
   directory is created mode 700.
-- `HERDR_SCHEDULE_NOW_EPOCH` overrides "now" for testing `--dry-run`.
+- `HERDR_SCHEDULE_NOW_EPOCH` overrides "now" for testing `--dry-run`, including
+  deciding whether a usage-limit notice has already passed.
 
 ## Find Targets
 
