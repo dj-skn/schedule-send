@@ -681,46 +681,74 @@ composer_excerpt() {
 # transcript than our message, which misses a notice but never invents one.
 readonly LIMIT_WATCH=10
 
+typeset -ga TR_LINES=() TR_SQ=()
 typeset -g LIMIT_EXCERPT=''
 
-# 0 when a transcript line after the message's end opens with a limit notice:
-# Codex's "■ You’ve hit your usage limit" or "Usage limit reached", Claude's
-# "You've hit your session limit". Squashing strips the glyph and the curly
-# apostrophe, so the match does not depend on the worker's missing locale.
+# The pane's recent transcript into TR_LINES, and each line squashed into
+# TR_SQ. Claude draws on the alternate screen, whose rows never reach the host
+# scrollback, and herdr can recover that history only from an idle agent — so
+# a recent read can come back empty, and the visible screen, which still holds
+# the latest exchange, stands in for it.
+read_transcript() {
+  local out
+  out="$("$HERDR_BIN" agent read "$1" --source recent-unwrapped --lines "$2" 2>/dev/null)"
+  [[ -n "${out//[[:space:]]/}" ]] \
+    || out="$("$HERDR_BIN" agent read "$1" --source visible --lines "$2" 2>/dev/null)"
+  TR_LINES=("${(@f)out}")
+
+  # squash() inlined: this runs for every line on every poll.
+  TR_SQ=()
+  local i s
+  for (( i = 1; i <= ${#TR_LINES}; i++ )); do
+    s="${TR_LINES[$i]//[^[:alnum:]]/}"
+    TR_SQ[i]="${s:l}"
+  done
+}
+
+# A squashed line that opens a usage-limit notice: Codex's "■ You’ve hit your
+# usage limit" or "Usage limit reached", Claude's "You've hit your session
+# limit". Squashing strips the glyph and the curly apostrophe, so the match
+# does not depend on the worker's missing locale.
+is_limit_line() {
+  [[ "$1" == youvehityour*limit* || "$1" == usagelimitreached* ]]
+}
+
+# The notice opening at transcript line $1, joined back into one line. Codex
+# wraps it itself, even in the middle of a date, so the lines after it are
+# taken too — up to the blank line or rule that ends it, or a line indented
+# well past it, such as the tip Codex centres underneath.
+notice_text() {
+  local i="$1" j out="${TR_LINES[$1]}" lead
+  lead="${TR_LINES[i]%%[^ ]*}"
+  local indent=${#lead}
+  for (( j = i + 1; j <= i + 5 && j <= ${#TR_LINES}; j++ )); do
+    [[ -n "${TR_LINES[j]//[ 	]/}" ]] || break
+    is_rule "${TR_LINES[j]}" && break
+    lead="${TR_LINES[j]%%[^ ]*}"
+    (( ${#lead} < indent + 8 )) || break
+    out="$out ${TR_LINES[j]}"
+  done
+  print -r -- "$out" | tr -s ' 	' ' '
+}
+
+# 0 when a transcript line after the message's end opens a limit notice.
 limit_notice_after() {
   local pane="$1" anchor="$2"
   LIMIT_EXCERPT=''
-  local -a lines sq
-  lines=("${(@f)$("$HERDR_BIN" agent read "$pane" --source recent-unwrapped --lines 80 2>/dev/null)}")
-
-  # squash() inlined: this runs for every line on every poll.
-  local i s all=''
-  for (( i = 1; i <= ${#lines}; i++ )); do
-    s="${lines[$i]//[^[:alnum:]]/}"
-    sq[i]="${s:l}"
-    all="$all${sq[i]}"
-  done
+  read_transcript "$pane" 80
+  local i all="${(j::)TR_SQ}"
   [[ -n "$anchor" && "$all" == *"$anchor"* ]] || return 1
 
   # The line holding the last character of the last copy of the anchor.
   local end=$(( ${#${all%"$anchor"*}} + ${#anchor} )) acc=0
-  for (( i = 1; i <= ${#lines}; i++ )); do
-    acc=$(( acc + ${#sq[i]} ))
+  for (( i = 1; i <= ${#TR_SQ}; i++ )); do
+    acc=$(( acc + ${#TR_SQ[i]} ))
     (( acc >= end )) && break
   done
 
-  local j out
-  for (( i = i + 1; i <= ${#lines}; i++ )); do
-    [[ "${sq[i]}" == youvehityour*limit* || "${sq[i]}" == usagelimitreached* ]] || continue
-    # The notice wraps, so its next lines are quoted too, up to the blank line
-    # or rule that ends it.
-    out="${lines[i]}"
-    for (( j = i + 1; j <= i + 2 && j <= ${#lines}; j++ )); do
-      [[ -n "${lines[j]//[ 	]/}" ]] || break
-      is_rule "${lines[j]}" && break
-      out="$out ${lines[j]}"
-    done
-    LIMIT_EXCERPT="$(print -r -- "$out" | tr -s ' 	' ' ' | cut -c1-200)"
+  for (( i = i + 1; i <= ${#TR_SQ}; i++ )); do
+    is_limit_line "${TR_SQ[i]}" || continue
+    LIMIT_EXCERPT="$(notice_text "$i" | cut -c1-200)"
     return 0
   done
   return 1

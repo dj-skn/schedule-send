@@ -189,6 +189,11 @@ limit cannot be. A notice there — Codex's `■ You’ve hit your usage limit` 
 `Usage limit reached`, Claude's `You've hit your … limit` — fails the job and
 quotes the notice.
 
+Claude draws on the alternate screen, which never reaches the host scrollback,
+and Herdr can recover that history only from an idle agent. When a recent read
+comes back empty, the visible screen stands in for it; it still holds the
+latest exchange.
+
 ### Sending keys
 
 ```zsh
