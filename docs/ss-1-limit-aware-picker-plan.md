@@ -2,8 +2,9 @@
 
 ## Status
 
-P1 (Go port) is being built on `ss-1-p1`. P2–P4 are not started. `master`
-still runs the zsh script; nothing in this story is live until `ss-1` merges.
+P1 (Go port) is done and fast-forwarded into `ss-1`. P2–P4 are not started.
+`master` still runs the zsh script; nothing in this story is live until `ss-1`
+merges and `tools/install` is run in the main checkout.
 
 ## The story
 
@@ -32,7 +33,7 @@ builds each result once to render it either for a person or for a program.
 
 | Phase | What | Status |
 |---|---|---|
-| P1 | Go port, identical behaviour, with tests | building |
+| P1 | Go port, identical behaviour, with tests | done |
 | P2 | Limits detected for every agent before the picker, from pane output | not started |
 | P3 | Styled terminal output; `key=value` unchanged when piped | not started |
 | P4 | `--json` everywhere, a `--targets` listing, JSON errors on stderr | not started |
@@ -88,3 +89,74 @@ builds each result once to render it either for a person or for a program.
 
 New behaviour of any kind: limit marking, styling and JSON are P2–P4. The
 install switch happens when `ss-1` merges into `master`.
+
+### As built
+
+**What exists.** A Go module using only the standard library: 2,541 lines in
+`cmd/schedule-send` and nine packages under `internal/` (`screen`, `notice`,
+`when`, `target`, `term`, `herdr`, `job`, `cli`, `worker`), plus 1,545 lines
+of tests. `schedule-send.zsh` is a 12-line shim that runs `bin/schedule-send`.
+`tools/check` is the gate, `tools/install` builds and links, and
+`tools/parity` is this phase's acceptance check. Stand-ins for herdr,
+systemctl and journalctl are in `testdata/standin/`, and screens saved from
+live panes on 2026-10-03 are in `testdata/fixtures/`.
+
+**Measured on 2026-10-03.**
+
+- `tools/check`: 70 tests and 4 subtests pass, none skipped.
+- `tools/parity`: 78 cases (58 for the command line, 20 for the worker), each
+  run through the zsh script at `db50943` and through the binary. 75 are
+  identical in stdout, stderr, exit status, files written, file modes, and
+  every herdr and systemctl call. The other 3 are the known differences below.
+  The terminal cases run on a pseudo-terminal, so colour codes are compared
+  too. A full run takes 69 s, mostly the 10 s limit watch.
+- **A real systemd timer round trip.** Armed through the binary at 16:19:00
+  against a stand-in herdr, on pane `wZ:p9`, which the real herdr does not
+  have. It fired at 16:19:12, logged "prompted agent in wZ:p9" at 16:19:22
+  after the limit watch, and removed its state, message and unit files.
+- **The shim** fired a copy of the real 16:01 job's state file, as the zsh
+  version wrote it, under a bare `env -i` environment.
+
+**Deliberate differences from the zsh version.**
+
+- A quoted `~` in `--cwd` is expanded. The zsh `${~1}` inside quotes never
+  expanded, so such a selector matched nothing. Parity case `cwd-tilde-two`.
+- `--cancel` or `--status` with no value prints one message and exits 1. The
+  zsh printed two messages, and `--status` exited 0.
+- `jq` is no longer needed.
+- Failure paths where zsh died silently under `set -e` now fail with a message,
+  and in the worker with a notification and the job removed. They are a herdr
+  read failure while scheduling, the `--if-busy abort` status read (now
+  "unknown"), a missing message file (`fire-no-message`), and a pane list herdr
+  cannot return at fire time (`fire-herdr-unreadable`).
+- Empty-string fields from herdr count as missing, the same as `null`.
+- Waits are timed exactly. zsh timed them in whole seconds, so its 4 s grace
+  window lasted somewhere between 3 and 4 s, and its 10 s limit watch made 9
+  or 10 polls. Parity therefore compares a fired job's actions but not its
+  polling reads.
+
+**Found while building and left alone.**
+
+- When arming fails at `systemctl enable`, the state file stays behind. The
+  zsh did the same; mirrored.
+- Codex's composer now opens with `»`, which is not a recognised prompt
+  marker. Neither submit detector can see a Codex draft, so a Codex send is
+  confirmed by its state change alone.
+- The zsh comments said the worker runs with no locale. It runs with
+  `LANG=C.UTF-8`; those comments went with the shim.
+
+**To confirm by hand at the merge.** Run `tools/install` in the main checkout
+straight after the merge, because the shim refuses to run without
+`bin/schedule-send` and armed timers would fail. Then check that the picker
+looks as before and that `--list` shows any armed jobs.
+
+**What this gives later phases.**
+
+- The picker must read each agent's `visible` screen: for a Claude agent that
+  is not idle, `recent-unwrapped` can come back empty.
+- Both agents print a usage gauge in their footer: Claude's `week:11% (1h58m)`
+  and Codex's `5h 100% left`. That is pane output, so P2 can use it.
+- Recognising Codex's `»` marker would switch its submit detectors back on. It
+  changes behaviour, so it belongs in P2 or later, not in the port.
+- From P2 on, a parity case whose behaviour changes on purpose moves into the
+  known-differences list in `tools/parity`, with the reason.
