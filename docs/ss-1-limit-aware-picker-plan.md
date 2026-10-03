@@ -3,7 +3,8 @@
 ## Status
 
 P1 (Go port) and P2 (limits before the picker) are done and fast-forwarded
-into `ss-1`. P3 is being built on `ss-1-p3`; P4 is not started.
+into `ss-1`. P3 (styled terminal output) is done and fast-forwarded into
+`ss-1`; P4 is not started.
 `master` still runs the zsh script; nothing in this story is live until `ss-1`
 merges and `tools/install` is run in the main checkout.
 
@@ -36,7 +37,7 @@ builds each result once to render it either for a person or for a program.
 |---|---|---|
 | P1 | Go port, identical behaviour, with tests | done |
 | P2 | Limits detected for every agent before the picker, from pane output | done |
-| P3 | Styled terminal output; `key=value` unchanged when piped | building |
+| P3 | Styled terminal output; `key=value` unchanged when piped | done |
 | P4 | `--json` everywhere, a `--targets` listing, JSON errors on stderr | not started |
 
 ## P1 — Go port
@@ -363,3 +364,30 @@ can style the output from it, and P4 can print it as JSON.
 
 `--json` (P4), styling errors, warnings and `--status`, and an arrow-key
 picker.
+
+### As built
+
+**What exists.** `internal/show` holds each result (the send, the limit
+report, the job list) and prints it two ways. The plain way is the old
+`key=value` text. The styled way is the mock-up's layout: a glyph, a
+headline, and aligned rows. The command line uses the styled way only when
+that output is going to a terminal. `NO_COLOR` keeps the layout and drops
+the colour. The module is 3,384 lines of code and 2,835 of tests.
+
+**Measured on 2026-10-03.**
+
+- `tools/check`: 108 tests and 18 subtests pass, none skipped.
+- `tools/parity`: 78 cases. 65 are identical. 13 are known differences: the
+  3 zsh bugs, the 7 from P2, and 3 confirm cases whose terminal text is now
+  styled. The 71 piped cases are byte-identical to P2.
+- **Live and read-only, late that evening.** wB:p1 was working and showed no
+  limit notice, so the report was the no-notice line. Typing `17:00` echoed
+  `→ Sun 17:00   in 17h 40m` and the dry run followed, in colour (38 escape
+  sequences). Nothing was armed. `--list` reported no scheduled sends.
+
+**Found while building and left alone.**
+
+- The stand-in systemctl can now report one named timer as active, so a test
+  can show a live row. It changes nothing unless that variable is set.
+- A limit that is already over was not on screen during the live check. The
+  snapshot tests cover that block.
