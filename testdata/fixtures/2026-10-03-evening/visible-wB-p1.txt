@@ -1,0 +1,41 @@
+     retry worker.
+  3. Orders, Refunds and Payouts read those rows. A redelivery then stops
+     double-counting, at no cost, for every consumer.
+  4. Nothing to change in the client, and the signing policy stays as it is.
+
+  One thing to flag for the audit log, without planning it: an auditor needs
+  entries the service cannot rewrite afterwards. I would route every write
+  through a single append-only function now, so that can be tightened later
+  without restructuring.
+
+  Optional add-on: a dedupe window of 30–60 seconds for events that arrive twice
+  in a row. It is one config line but an experimental flag, so your call.
+
+  Decision for you: go with the slim stored-events version as P3.5, and do you
+  want the dedupe add-on?
+
+  Sources:
+  - Webhook best practices — Example docs (https://example.com/docs/webhooks)
+  - Retry schedules (https://example.com/docs/retries)
+  - Idempotency keys — Example docs
+    (https://example.com/docs/idempotency)
+
+✻ Baked for 1m 28s · done 4:28 PM
+
+❯ go with the slim stored-events version, without the dedupe add-on.
+
+  write the p3.5 walkthrough as phases, and say what each phase changes before
+  you build anything.
+
+  Ran 3 shell commands
+  ⎿  You've hit your session limit · resets 7pm (Europe/Warsaw)
+     /upgrade to increase your usage limit.
+
+✻ Cogitated for 52s · done 5:48 PM
+
+────────────────────────────────────────────────────────────────────────── sb-42 ─
+❯
+──────────────────────────────────────────────────────────────────────────────────
+  ~/projects/shop-backend  sb-42  Opus 5.5 ◉
+  ctx:23%  session:-1% (01:11)  week:95% (6d22h)  cost:$41.90
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

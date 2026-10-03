@@ -2,7 +2,8 @@
 
 ## Status
 
-P1 (Go port) is done and fast-forwarded into `ss-1`. P2–P4 are not started.
+P1 (Go port) is done and fast-forwarded into `ss-1`. P2 is being built on
+`ss-1-p2`; P3–P4 are not started.
 `master` still runs the zsh script; nothing in this story is live until `ss-1`
 merges and `tools/install` is run in the main checkout.
 
@@ -34,7 +35,7 @@ builds each result once to render it either for a person or for a program.
 | Phase | What | Status |
 |---|---|---|
 | P1 | Go port, identical behaviour, with tests | done |
-| P2 | Limits detected for every agent before the picker, from pane output | not started |
+| P2 | Limits detected for every agent before the picker, from pane output | building |
 | P3 | Styled terminal output; `key=value` unchanged when piped | not started |
 | P4 | `--json` everywhere, a `--targets` listing, JSON errors on stderr | not started |
 
@@ -160,3 +161,83 @@ looks as before and that `--list` shows any armed jobs.
   changes behaviour, so it belongs in P2 or later, not in the port.
 - From P2 on, a parity case whose behaviour changes on purpose moves into the
   known-differences list in `tools/parity`, with the reason.
+
+## P2 — limits before the picker
+
+### What the code check found
+
+- **Screen reads are cheap; history reads are not.** Measured 2026-10-03: a
+  `visible` read takes 7–9 ms per agent; `recent-unwrapped` takes 52–58 ms warm
+  and once took 5.1 s cold (wB:p1). The check reads `visible` only, every agent
+  in parallel, and the time prompt reuses it.
+- **An old notice proposes tomorrow.** Claude's notice names only "resets 4pm".
+  On the 15:16 fixture screen at 16:16, with no prompt since, today's code
+  proposes Sun 16:01 and `--auto` takes it unasked. Herdr keeps no per-agent
+  timestamps (`agent get` checked), so the screen is the only evidence.
+- **The footer gauge bounds the reset.** The Claude statusline in use
+  prints usage *left* and time to reset
+  from Claude's rate-limit data: `session:N% (HH:MM)` and `week:N% (XdYh |
+  XhYm | Xm)`. N is 100 − used and can go negative (`session:-1%` seen at
+  17:54). It is only drawn when Claude has rate-limit data (wA:p1 had none at
+  16:59). Codex prints `5h N% left · weekly N% left` (often cut off with `…`),
+  with no reset time; Codex notices carry a full date anyway.
+- **Codex's `»` input box breaks two things.** Codex echoes a sent prompt as
+  `› resume` and draws its empty input box as `» Ask Codex to do anything`;
+  only `›` was a prompt marker. A Codex agent resumed once still counted as
+  limited (only the echo counted below the notice), and the worker took the
+  echo for the input box, so a sent message of 8+ letters read as unsent: an
+  extra Enter and a false failure. Found by reading the code against the 16:59
+  screen, not reproduced. `master` has the same fault.
+- **Same agent kind is not always the same account.** Two agents of the same
+  kind can show different weekly gauges and resets, because each can run
+  under its own account. The footer veto below covers it when a footer is
+  drawn.
+- **`now` is read after the target is chosen.** The check needs it first.
+
+### Decisions (settled 2026-10-03; "implement" read as accepting the four recommendations)
+
+1. **Old-notice rule.** A dated reset in the past means the limit is over. A
+   time-only reset (`resets 4pm`) resolves to its next occurrence R. It cannot
+   be further away than the agent's own gauge for that window says (now + time
+   to reset + 1 min), or than 5 h for a session limit; when R is beyond that
+   bound, the reset already passed and the limit is over. A gauge showing more
+   than 0% left for that window also means over. With no bound and R more than
+   12 h away, R is kept but marked unconfirmed, and the report says the reset
+   may already have passed.
+2. **"Limit over" agents rank first,** marked as such; the time prompt proposes
+   now + 1 min.
+3. **Account-limited agents are marked, not moved up.** An agent whose own
+   gauge shows more than 0% left for that window is not marked, and is not
+   given another agent's reset by the time prompt either.
+4. **The Codex `»` fix is part of P2,** in the shared prompt-line rule, so the
+   worker gets it too. `master` is not changed.
+
+Assumptions: `--pick best` without `--at` takes the top row, so a limited
+agent; several limited agents order by soonest reset (over first, unknown
+reset last); the pane the command runs in is never read; `key=value` output is
+unchanged; plain panes are never read.
+
+### Steps
+
+1. Screen parsing: `»` is a prompt marker; footer gauges (Claude statusline,
+   Codex) parsed from the lines below the last prompt line; notices know their
+   window (session, weekly, or unknown) → verify: tests on the saved screens.
+2. Limit state per agent from notice, gauge and the old-notice rule → verify:
+   the 15:16 screen reads limited until 16:00 at 15:22 and over at 16:16; a
+   session notice 6 h out reads over; a resumed Codex agent reads not limited.
+3. The parallel check before the picker; ranking without `--at`; picker marks
+   as in the mock-up → verify: picker text tests; parity cases that change on
+   purpose listed with reasons; check time measured on live panes, read-only.
+4. The `--at` warning and the time prompt reusing the check → verify: a warning
+   for `--at 15:30` against a 16:00 reset and none after; no screen read twice.
+5. Worker: the shared prompt rule → verify: a Codex echo above a `»` input box
+   reports a 24-character message sent, with no extra Enter.
+6. Hand check: `--dry-run` against live panes (read-only); a typed, unsent
+   Codex draft read back to see its marker.
+7. Gate, As built, fast-forward into `ss-1`.
+
+### Not included
+
+Near-limit hints (a low gauge with no notice), a gauge alone marking an agent
+limited, styling the report, prompt and receipt (P3), JSON (P4), and changes
+to `master`.
