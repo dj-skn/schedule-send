@@ -1,9 +1,11 @@
 // Package show holds what a run reports, built before it is printed: the
 // scheduled send, the usage-limit report and the job list. Each has a plain
-// rendering, which is what scripts read, and a styled one for a terminal.
+// rendering, which is what scripts read, a styled one for a terminal, and a
+// JSON one for --json.
 package show
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -376,4 +378,147 @@ func (p palette) sent(message, keys string) span {
 	}
 	tail := p.dim(more)
 	return span{out.s + tail.s, out.n + tail.n}
+}
+
+// JSON writes s as one object. st is the target's usage limit; a None state is
+// left out. note is the picker's short description of it.
+func (s Scheduled) JSON(w io.Writer, st limit.Status, note string) {
+	unit := s.Unit
+	if !strings.HasSuffix(unit, ".timer") {
+		unit += ".timer"
+	}
+	out := scheduledJSON{
+		DryRun: s.DryRun, ID: s.ID, Unit: unit,
+		At: s.At, RunAt: s.RunAt, Delay: s.Delay,
+		Mode: s.Mode, Payload: s.Payload, Persistent: s.Persistent,
+		IfBusy: s.IfBusy, Recover: s.Recover, Grace: s.Grace,
+		Limit: limitAsJSON(st, note),
+	}
+	out.Target.Kind, out.Target.Pane, out.Target.Agent = s.Kind, s.Pane, s.Agent
+	out.Target.Status, out.Target.Cwd = s.Status, s.Cwd
+	if s.DryRun {
+		out.UnitFiles, out.WouldRun = s.UnitFiles, s.WouldRun
+	} else {
+		out.Cancel = "schedule-send --cancel " + s.ID
+	}
+	writeJSON(w, out)
+}
+
+type scheduledJSON struct {
+	DryRun     bool       `json:"dry_run"`
+	ID         string     `json:"id"`
+	Unit       string     `json:"unit"`
+	Target     targetJSON `json:"target"`
+	At         string     `json:"at"`
+	RunAt      int64      `json:"run_at_epoch"`
+	Delay      int64      `json:"delay_seconds"`
+	Mode       string     `json:"mode"`
+	Payload    string     `json:"payload"`
+	Persistent bool       `json:"persistent"`
+	IfBusy     string     `json:"if_busy"`
+	Recover    string     `json:"recover"`
+	Grace      string     `json:"submit_grace"`
+	UnitFiles  string     `json:"unit_files,omitempty"`
+	WouldRun   string     `json:"would_run,omitempty"`
+	Cancel     string     `json:"cancel,omitempty"`
+	Limit      *limitJSON `json:"limit,omitempty"`
+}
+
+type targetJSON struct {
+	Kind   string `json:"kind"`
+	Pane   string `json:"pane"`
+	Agent  string `json:"agent"`
+	Status string `json:"status"`
+	Cwd    string `json:"cwd"`
+}
+
+// ListJSON writes jobs as {"jobs":[...]}. An empty list is an empty array.
+func ListJSON(w io.Writer, jobs []Job) {
+	rows := make([]jobJSON, 0, len(jobs))
+	for _, j := range jobs {
+		rows = append(rows, jobJSON{
+			ID: j.ID, At: j.At, RunAt: j.RunAt, Kind: j.Kind,
+			Agent: j.Agent, Pane: j.Pane, State: j.State, Payload: j.Payload,
+		})
+	}
+	writeJSON(w, struct {
+		Jobs []jobJSON `json:"jobs"`
+	}{rows})
+}
+
+type jobJSON struct {
+	ID      string `json:"id"`
+	At      string `json:"at"`
+	RunAt   int64  `json:"run_at_epoch"`
+	Kind    string `json:"kind"`
+	Agent   string `json:"agent"`
+	Pane    string `json:"pane"`
+	State   string `json:"state"`
+	Payload string `json:"payload"`
+}
+
+// Target is one pane as --targets --json prints it.
+type Target struct {
+	Kind, Pane, Agent, Status, Cwd, Title string
+	Limit                                 limit.Status
+	Note                                  string
+}
+
+// TargetsJSON writes rows as {"targets":[...]}.
+func TargetsJSON(w io.Writer, rows []Target) {
+	out := make([]listedJSON, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, listedJSON{
+			Kind: r.Kind, Pane: r.Pane, Agent: r.Agent, Status: r.Status,
+			Cwd: r.Cwd, Title: r.Title, Limit: limitAsJSON(r.Limit, r.Note),
+		})
+	}
+	writeJSON(w, struct {
+		Targets []listedJSON `json:"targets"`
+	}{out})
+}
+
+type listedJSON struct {
+	Kind   string     `json:"kind"`
+	Pane   string     `json:"pane"`
+	Agent  string     `json:"agent"`
+	Status string     `json:"status"`
+	Cwd    string     `json:"cwd"`
+	Title  string     `json:"title"`
+	Limit  *limitJSON `json:"limit,omitempty"`
+}
+
+// limitJSON is a usage limit as --json prints it.
+type limitJSON struct {
+	State       string `json:"state"`
+	Window      string `json:"window,omitempty"`
+	Reset       int64  `json:"reset,omitempty"`
+	Unconfirmed bool   `json:"unconfirmed,omitempty"`
+	Source      string `json:"source,omitempty"`
+	Quote       string `json:"quote,omitempty"`
+	Note        string `json:"note,omitempty"`
+}
+
+func limitAsJSON(st limit.Status, note string) *limitJSON {
+	var name string
+	switch st.State {
+	case limit.Limited:
+		name = "limited"
+	case limit.Over:
+		name = "over"
+	case limit.Account:
+		name = "account"
+	default:
+		return nil
+	}
+	return &limitJSON{
+		State: name, Window: st.Window, Reset: st.Reset, Unconfirmed: st.Unconfirmed,
+		Source: st.Source, Quote: st.Quote, Note: note,
+	}
+}
+
+func writeJSON(w io.Writer, v any) {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(v)
 }

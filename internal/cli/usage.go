@@ -4,6 +4,7 @@ const usage = `Usage:
   schedule-send --at TIME (--message TEXT | --message-file PATH | --keys KEYS) [options]
   schedule-send [--auto] [--message TEXT | ...] [options]
   schedule-send --list
+  schedule-send --targets
   schedule-send --cancel ID
   schedule-send --status ID
 
@@ -52,6 +53,9 @@ Delivery:
 Other:
   --quiet                Do not raise a Herdr notification when a job fails.
   --dry-run              Print the resolved target and the timer, change nothing.
+  --json                 Print JSON instead. Prompts are unchanged, and a pipe
+                         without this flag stays key=value.
+  --targets              List every pane, with each agent's usage limit.
   -h, --help             Show this help.
 
 Examples:

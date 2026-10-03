@@ -53,6 +53,7 @@ type options struct {
 	panesOnly, allowSelf, force  bool
 	quiet, dryRun, persistent    bool
 	auto, haveMessage, defaulted bool
+	json, targets                bool
 }
 
 type app struct {
@@ -101,20 +102,80 @@ func (a *app) main(args []string) int {
 		}
 		return worker.Fire(args[1])
 	}
+	// Noticed before the arguments are walked, so --list --json still counts.
+	for _, arg := range args {
+		if arg == "--json" {
+			a.o.json = true
+			break
+		}
+	}
 	err := a.run(args)
 	var f failure
 	switch {
 	case err == nil:
 		return 0
 	case errors.As(err, &f):
-		if f.msg != "" {
+		if f.code == 0 || f.msg == "" {
+			return f.code
+		}
+		if a.o.json {
+			a.writeError(f)
+		} else {
 			fmt.Fprintln(a.stderr, f.msg)
 		}
 		return f.code
 	default:
-		fmt.Fprintln(a.stderr, err)
+		if a.o.json {
+			a.writeError(failure{msg: err.Error(), code: 1})
+		} else {
+			fmt.Fprintln(a.stderr, err)
+		}
 		return 1
 	}
+}
+
+// writeError prints a failure as {"error":{"code","message"}}, the shape herdr
+// uses. The code names the kind of failure; the exit status is unchanged.
+func (a *app) writeError(f failure) {
+	code := "failed"
+	switch {
+	case f.code == 2:
+		code = "usage"
+	case strings.HasPrefix(f.msg, "No scheduled send"), strings.HasPrefix(f.msg, "No state file"):
+		code = "not_found"
+	case strings.HasPrefix(f.msg, "Multiple targets matched"):
+		code = "ambiguous"
+	}
+	emit(a.stderr, map[string]any{"error": map[string]string{"code": code, "message": f.msg}})
+}
+
+// emit writes v as one JSON line, without escaping < and >.
+func emit(w io.Writer, v any) {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(v)
+}
+
+// note and warn are the asides on stderr. Under --json each is its own object,
+// so stderr stays something a script can read.
+func (a *app) note(msg string) {
+	if a.o.json {
+		emit(a.stderr, struct {
+			Note string `json:"note"`
+		}{msg})
+		return
+	}
+	fmt.Fprintln(a.stderr, msg)
+}
+
+func (a *app) warn(msg string) {
+	if a.o.json {
+		emit(a.stderr, struct {
+			Warning string `json:"warning"`
+		}{msg})
+		return
+	}
+	fmt.Fprintln(a.stderr, msg)
 }
 
 // errDone ends a run that has already printed its result.
@@ -185,6 +246,10 @@ func (a *app) parse(args []string) error {
 			on(&o.persistent)
 		case "--dry-run":
 			on(&o.dryRun)
+		case "--json":
+			on(&o.json)
+		case "--targets":
+			on(&o.targets)
 		case "--list":
 			if err := a.locateHerdr(); err != nil {
 				return err
@@ -211,6 +276,9 @@ func (a *app) parse(args []string) error {
 			fmt.Fprint(a.stdout, usage)
 			return errDone
 		default:
+			if a.o.json {
+				return failure{code: 2, msg: "Unknown argument: " + flag}
+			}
 			fmt.Fprintln(a.stderr, "Unknown argument: "+flag)
 			fmt.Fprint(a.stderr, usage)
 			return failure{code: 2}
@@ -227,6 +295,9 @@ var digits = regexp.MustCompile(`^[0-9]+$`)
 func (a *app) run(args []string) error {
 	if err := a.parse(args); err != nil {
 		return err
+	}
+	if a.o.targets {
+		return a.showTargets()
 	}
 	o := &a.o
 
@@ -333,7 +404,7 @@ func (a *app) run(args []string) error {
 		return die("Pane %s is a plain shell, where the default '%s' would run as a command. Pass --message.", t.Pane, resumeMessage)
 	}
 	if t.IsAgent() && t.Status == "blocked" && o.keys == "" {
-		fmt.Fprintf(a.stderr, "Warning: agent in %s is blocked on a prompt right now.\n", t.Pane)
+		a.warn(fmt.Sprintf("Warning: agent in %s is blocked on a prompt right now.", t.Pane))
 	}
 
 	var runAt int64
@@ -432,6 +503,22 @@ func (a *app) run(args []string) error {
 // receipt prints the send armed, or the dry run, styled when stdout is a
 // terminal and as key=value lines for anything reading it.
 func (a *app) receipt(s show.Scheduled, now int64) {
+	if a.o.json {
+		var st limit.Status
+		note := ""
+		if a.tgt.IsAgent() {
+			st = a.limits()[a.tgt.Pane]
+			switch st.State {
+			case limit.Account:
+				note = "account limited"
+			case limit.None:
+			default:
+				note = limitNote(st, a.now)
+			}
+		}
+		s.JSON(a.stdout, st, note)
+		return
+	}
 	if a.stdoutTTY() {
 		s.Styled(a.stdout, term.ColorsFor(a.stdout), now)
 		return
@@ -519,7 +606,7 @@ func (a *app) chooseTarget() (target.Row, error) {
 	// One match skips the picker, so this note is the only place the choice
 	// is stated before the send is armed.
 	if len(rows) == 1 {
-		fmt.Fprintf(a.stderr, "Only one target matched; selecting %s.\n", target.Summary(rows[0]))
+		a.note(fmt.Sprintf("Only one target matched; selecting %s.", target.Summary(rows[0])))
 		return rows[0], nil
 	}
 	rows = target.Sort(rows)
@@ -536,8 +623,11 @@ func (a *app) chooseTarget() (target.Row, error) {
 
 	if !a.stdinTTY() {
 		if o.pick == "best" {
-			fmt.Fprintf(a.stderr, "Multiple targets matched; picking %s.\n", target.Summary(rows[0]))
+			a.note(fmt.Sprintf("Multiple targets matched; picking %s.", target.Summary(rows[0])))
 			return rows[0], nil
+		}
+		if a.o.json {
+			return target.Row{}, die("Multiple targets matched. Narrow with --cwd/--kind/--pane, or use --pick best.")
 		}
 		fmt.Fprintln(a.stderr, "Multiple targets matched. Narrow with --cwd/--kind/--pane, or use --pick best.")
 		target.Render(a.stderr, rows, marks, term.ColorsFor(a.stderr), a.selfPane, a.h.ProcName)
@@ -678,12 +768,12 @@ func (a *app) warnBeforeReset(runAt int64) {
 	}
 	reset, at := when.Format(st.Reset, when.WeekdayMinute), when.Format(runAt, when.WeekdayMinute)
 	if st.State == limit.Limited {
-		fmt.Fprintf(a.stderr, "Warning: %s in %s is usage-limited until %s; this send at %s comes before the reset.\n",
-			t.Agent, t.Pane, reset, at)
+		a.warn(fmt.Sprintf("Warning: %s in %s is usage-limited until %s; this send at %s comes before the reset.",
+			t.Agent, t.Pane, reset, at))
 		return
 	}
-	fmt.Fprintf(a.stderr, "Warning: %s's account looks usage-limited until %s (notice in %s); this send to %s at %s comes before the reset.\n",
-		t.Agent, reset, st.Source, t.Pane, at)
+	a.warn(fmt.Sprintf("Warning: %s's account looks usage-limited until %s (notice in %s); this send to %s at %s comes before the reset.",
+		t.Agent, reset, st.Source, t.Pane, at))
 }
 
 // detectAt is the send time for a run without --at: the reset of the limit
@@ -711,10 +801,12 @@ func (a *app) detectAt(now int64) (int64, error) {
 		if proposed == 0 {
 			return 0, die("%s\n--auto needs a notice that names its reset time; pass --at instead.", report.Plain())
 		}
-		if a.stderrTTY() {
-			fmt.Fprint(a.stderr, "\n"+report.Styled(term.ColorsFor(a.stderr))+"\n")
-		} else {
-			fmt.Fprintln(a.stderr, report.Plain())
+		if !a.o.json {
+			if a.stderrTTY() {
+				fmt.Fprint(a.stderr, "\n"+report.Styled(term.ColorsFor(a.stderr))+"\n")
+			} else {
+				fmt.Fprintln(a.stderr, report.Plain())
+			}
 		}
 		return proposed, nil
 	}
@@ -792,6 +884,10 @@ func (a *app) list() {
 		}
 		jobs = append(jobs, j)
 	}
+	if a.o.json {
+		show.ListJSON(a.stdout, jobs)
+		return
+	}
 	if !a.stdoutTTY() {
 		show.List(a.stdout, jobs)
 		return
@@ -807,6 +903,12 @@ func (a *app) cancel(id string) error {
 		return die("No scheduled send with id: %s", id)
 	}
 	a.paths.Remove(a.sys, id)
+	if a.o.json {
+		emit(a.stdout, struct {
+			Cancelled string `json:"cancelled"`
+		}{id})
+		return nil
+	}
 	if a.stdoutTTY() {
 		c := term.ColorsFor(a.stdout)
 		fmt.Fprintf(a.stdout, "  %s✓%s cancelled %s\n", c.Green, c.Reset, id)
@@ -817,6 +919,10 @@ func (a *app) cancel(id string) error {
 }
 
 func (a *app) status(id string) {
+	if a.o.json {
+		a.statusJSON(id)
+		return
+	}
 	unit := job.UnitPrefix + "-" + id
 	if b, err := os.ReadFile(a.paths.StatePath(id)); err == nil {
 		var out bytes.Buffer
@@ -835,4 +941,79 @@ func (a *app) status(id string) {
 	cmd := exec.Command("journalctl", "--user", "-u", unit+".service", "--no-pager", "-n", "40")
 	cmd.Stdout = a.stdout
 	_ = cmd.Run()
+}
+
+// statusJSON is --status --json: the stored job, the timer text and the
+// journal, as one object. A missing state file is a warning inside it, and
+// the command still exits 0, as the plain form does.
+func (a *app) statusJSON(id string) {
+	unit := job.UnitPrefix + "-" + id
+	state := json.RawMessage("null")
+	warning := ""
+	if b, err := os.ReadFile(a.paths.StatePath(id)); err == nil && json.Valid(b) {
+		state = json.RawMessage(bytes.TrimSpace(b))
+	} else if err != nil {
+		warning = fmt.Sprintf("No state file for %s (job may have already run).", id)
+	}
+	var timer bytes.Buffer
+	_ = a.sys.Through(&timer, &timer, "status", unit+".timer", "--no-pager")
+	var journal bytes.Buffer
+	cmd := exec.Command("journalctl", "--user", "-u", unit+".service", "--no-pager", "-n", "40")
+	cmd.Stdout = &journal
+	_ = cmd.Run()
+	emit(a.stdout, struct {
+		State   json.RawMessage `json:"state"`
+		Timer   string          `json:"timer"`
+		Journal string          `json:"journal"`
+		Warning string          `json:"warning,omitempty"`
+	}{state, strings.TrimRight(timer.String(), "\n"), strings.TrimRight(journal.String(), "\n"), warning})
+}
+
+// showTargets lists every pane and, for an agent, the usage limit read from
+// its screen. It needs no message and does not talk to systemd.
+func (a *app) showTargets() error {
+	if err := a.locateHerdr(); err != nil {
+		return err
+	}
+	if err := a.startClock(); err != nil {
+		return err
+	}
+	a.now = a.clock()
+	var err error
+	if a.rows, err = a.h.Targets(); err != nil {
+		return failure{code: 1}
+	}
+	if len(a.rows) == 0 {
+		return die("Herdr reported no panes.")
+	}
+	rows := target.Sort(a.rows)
+	var marks map[string]target.Mark
+	lim := map[string]limit.Status{}
+	if slices.ContainsFunc(rows, target.Row.IsAgent) {
+		lim = a.limits()
+		rows = limitedFirst(rows, lim)
+		marks = limitMarks(lim, a.now)
+	}
+	if a.o.json {
+		listed := make([]show.Target, 0, len(rows))
+		for _, r := range rows {
+			st := lim[r.Pane]
+			note := ""
+			switch st.State {
+			case limit.Account:
+				note = "account limited"
+			case limit.None:
+			default:
+				note = limitNote(st, a.now)
+			}
+			listed = append(listed, show.Target{
+				Kind: r.Kind, Pane: r.Pane, Agent: r.Agent, Status: r.Status,
+				Cwd: r.Cwd, Title: r.Title, Limit: st, Note: note,
+			})
+		}
+		show.TargetsJSON(a.stdout, listed)
+		return nil
+	}
+	target.Render(a.stdout, rows, marks, term.ColorsFor(a.stdout), a.selfPane, a.h.ProcName)
+	return nil
 }

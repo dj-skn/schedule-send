@@ -60,6 +60,11 @@ known+=(
   confirm-no-notice "on the terminal the report, prompt, answer and dry run are styled"
   confirm-eof "on the terminal the report and prompt are styled"
 )
+# Behaviour SS-1 P4 changed: the usage text documents the new flags.
+known+=(
+  help "the usage text documents --json and --targets"
+  unknown-arg "an unknown argument prints that same usage text"
+)
 
 # Everything a run leaves behind, with each implementation's own path written
 # as <self> so the two can be compared. Reads are left out: zsh times a fired

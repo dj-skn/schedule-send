@@ -425,6 +425,31 @@ Without `--at` it still reads the notice and asks for confirmation, so a dry
 run shows exactly what would be armed. Piped, the same facts come out as
 `key=value` lines.
 
+## JSON
+
+`--json` prints one JSON object on stdout instead of either of the text forms.
+It does not change whether the command asks. Notes and warnings on stderr are
+JSON too, and a failure is `{"error":{"code":"...","message":"..."}}` with the
+same exit status as the text form. The code is `usage`, `not_found`,
+`ambiguous` or `failed`.
+
+```zsh
+schedule-send --pane wB:p1 --at 16:30 --message hi --dry-run --json
+```
+
+```json
+{"dry_run":true,"id":"20261003-163000-wBp1","target":{"kind":"agent","pane":"wB:p1","agent":"claude","status":"idle"},"at":"2026-10-03 16:30:00","delay_seconds":4080,"payload":"hi","limit":{"state":"limited","window":"weekly","reset":1791036000,"note":"resets 16:00 (weekly)"}}
+```
+
+The object also carries the unit name, the working directory, the delivery
+settings, and, for a dry run, the unit paths and the command the timer would
+run. An armed send has `cancel` instead. `limit` is left out when the target
+is not held by one.
+
+`--list`, `--cancel` and `--status` take the flag too. `--targets` lists every
+pane with its limit: the picker listing for a person, or `{"targets":[...]}`
+with `--json`.
+
 ## Safety Test
 
 Confirm a target is the one you meant before committing to a 03:30 send:

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -638,5 +639,157 @@ cancel with: schedule-send --cancel 20261003-160100-wBp1
 `
 	if h.stdout.String() != want {
 		t.Errorf("stdout:\n%s\nwant:\n%s", h.stdout, want)
+	}
+}
+
+func jsonObject(t *testing.T, b []byte) map[string]any {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("not one JSON object: %v\n%s", err, b)
+	}
+	return m
+}
+
+func TestJSONDryRunAndNote(t *testing.T) {
+	h := newHarness(t, nil)
+	h.a.stdoutTTY = terminal
+	if code := h.a.main([]string{"--kind", "codex", "--at", "16:30", "--message", "hi", "--dry-run", "--json"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	got := jsonObject(t, h.stdout.Bytes())
+	if got["dry_run"] != true || got["id"] != "20261003-163000-wBp3" || got["delay_seconds"] != 4080.0 {
+		t.Errorf("stdout: %s", h.stdout)
+	}
+	tgt := got["target"].(map[string]any)
+	if tgt["pane"] != "wB:p3" || tgt["agent"] != "codex" {
+		t.Errorf("target: %v", tgt)
+	}
+	if _, ok := got["limit"]; ok {
+		t.Errorf("codex has a limit: %s", h.stdout)
+	}
+	note := jsonObject(t, h.stderr.Bytes())
+	if note["note"] != "Only one target matched; selecting codex in wB:p3 (idle, ~/projects/shop-backend)." {
+		t.Errorf("stderr: %s", h.stderr)
+	}
+}
+
+func TestJSONStillAsks(t *testing.T) {
+	input := "\n\n"
+	h := newHarness(t, &input)
+	if code := h.a.main([]string{"--dry-run", "--json"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	if !strings.Contains(h.tty.String(), "  ◷ claude wB:p1 hit its weekly limit\n") || !strings.Contains(h.tty.String(), "  at [Sat 16:01]: ") {
+		t.Errorf("terminal:\n%s", h.tty)
+	}
+	got := jsonObject(t, h.stdout.Bytes())
+	lim := got["limit"].(map[string]any)
+	if lim["state"] != "limited" || lim["window"] != "weekly" || lim["reset"] != 1791036000.0 || lim["note"] != "resets 16:00 (weekly)" {
+		t.Errorf("limit: %v", lim)
+	}
+	if got["at"] != "2026-10-03 16:01:00" {
+		t.Errorf("at: %v", got["at"])
+	}
+	if h.stderr.Len() != 0 {
+		t.Errorf("stderr: %s", h.stderr)
+	}
+}
+
+func TestJSONErrors(t *testing.T) {
+	h := newHarness(t, nil)
+	if code := h.a.main([]string{"--json", "--bogus"}); code != 2 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	got := jsonObject(t, h.stderr.Bytes())
+	err := got["error"].(map[string]any)
+	if err["code"] != "usage" || err["message"] != "Unknown argument: --bogus" {
+		t.Errorf("stderr: %s", h.stderr)
+	}
+	if strings.Contains(h.stderr.String(), "Usage:") {
+		t.Errorf("usage text beside the error: %s", h.stderr)
+	}
+
+	h = newHarness(t, nil)
+	if code := h.a.main([]string{"--at", "16:30", "--message", "hi", "--json"}); code != 1 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	got = jsonObject(t, h.stderr.Bytes())
+	err = got["error"].(map[string]any)
+	if err["code"] != "ambiguous" || !strings.HasPrefix(err["message"].(string), "Multiple targets matched.") {
+		t.Errorf("stderr: %s", h.stderr)
+	}
+}
+
+func TestJSONWarning(t *testing.T) {
+	h := newHarness(t, nil)
+	if code := h.a.main([]string{"--pane", "wB:p1", "--at", "15:30", "--message", "x", "--dry-run", "--json"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	got := jsonObject(t, h.stderr.Bytes())
+	if got["warning"] != "Warning: claude in wB:p1 is usage-limited until Sat 16:00; this send at Sat 15:30 comes before the reset." {
+		t.Errorf("stderr: %s", h.stderr)
+	}
+	if jsonObject(t, h.stdout.Bytes())["dry_run"] != true {
+		t.Errorf("stdout: %s", h.stdout)
+	}
+}
+
+func TestJSONListCancelStatus(t *testing.T) {
+	h := newHarness(t, nil)
+	h.addJobs(t)
+	if code := h.a.main([]string{"--list", "--json"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	got := jsonObject(t, h.stdout.Bytes())
+	jobs := got["jobs"].([]any)
+	ids := map[string]bool{}
+	for _, j := range jobs {
+		ids[j.(map[string]any)["id"].(string)] = true
+	}
+	if len(jobs) != 2 || !ids["20261003-160100-wBp1"] || !ids["20261004-090000-wBp5"] {
+		t.Errorf("list: %s", h.stdout)
+	}
+
+	h = newHarness(t, nil)
+	h.addJobs(t)
+	if code := h.a.main([]string{"--cancel", "20261003-160100-wBp1", "--json"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	if jsonObject(t, h.stdout.Bytes())["cancelled"] != "20261003-160100-wBp1" {
+		t.Errorf("cancel: %s", h.stdout)
+	}
+
+	h = newHarness(t, nil)
+	h.addJobs(t)
+	if code := h.a.main([]string{"--status", "20261003-160100-wBp1", "--json"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	got = jsonObject(t, h.stdout.Bytes())
+	state := got["state"].(map[string]any)
+	if state["id"] != "20261003-160100-wBp1" || got["timer"] != "stand-in status for herdr-send-20261003-160100-wBp1.timer" {
+		t.Errorf("status: %s", h.stdout)
+	}
+}
+
+func TestJSONTargets(t *testing.T) {
+	h := newHarness(t, nil)
+	if code := h.a.main([]string{"--targets", "--json"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	got := jsonObject(t, h.stdout.Bytes())
+	rows := got["targets"].([]any)
+	first := rows[0].(map[string]any)
+	lim := first["limit"].(map[string]any)
+	if first["pane"] != "wB:p1" || lim["state"] != "limited" || lim["reset"] != 1791036000.0 || lim["note"] != "resets 16:00 (weekly)" {
+		t.Errorf("first: %v", first)
+	}
+
+	h = newHarness(t, nil)
+	if code := h.a.main([]string{"--targets"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	if !strings.Contains(h.stdout.String(), "  1  ◷ limited  claude   wB:p1") {
+		t.Errorf("listing:\n%s", h.stdout)
 	}
 }
