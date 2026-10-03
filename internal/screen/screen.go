@@ -51,7 +51,9 @@ func IsRule(line string) bool {
 
 // IsPromptLine reports whether line opens with a prompt marker: an agent's
 // composer, or a prompt it echoed into its transcript. One leading box edge is
-// allowed for composers drawn inside a frame.
+// allowed for composers drawn inside a frame. Codex echoes with "›" but draws
+// its input box with "»", and without the latter its echo would pass for the
+// composer.
 func IsPromptLine(line string) bool {
 	t := blanks.Replace(line)
 	if rest, ok := strings.CutPrefix(t, "│"); ok {
@@ -59,7 +61,8 @@ func IsPromptLine(line string) bool {
 	} else if rest, ok := strings.CutPrefix(t, "|"); ok {
 		t = rest
 	}
-	return strings.HasPrefix(t, "›") || strings.HasPrefix(t, "❯") || strings.HasPrefix(t, ">")
+	return strings.HasPrefix(t, "›") || strings.HasPrefix(t, "❯") || strings.HasPrefix(t, ">") ||
+		strings.HasPrefix(t, "»")
 }
 
 // Collapse turns tabs into spaces and squeezes each run of spaces into one, as

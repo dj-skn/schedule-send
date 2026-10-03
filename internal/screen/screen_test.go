@@ -2,6 +2,7 @@ package screen
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -53,7 +54,8 @@ func TestIsPromptLine(t *testing.T) {
 		"│ > foo":                    true,
 		"| › bar":                    true,
 		"› x":                        true,
-		"» Ask Codex to do anything": false,
+		"» Ask Codex to do anything": true,
+		"│ »":                        true,
 		"||> double edge":            false,
 		"hello ❯":                    false,
 		"":                           false,
@@ -138,12 +140,15 @@ func TestParseComposerUndelimited(t *testing.T) {
 	}
 }
 
-func TestParseComposerCodexMarkerUnrecognised(t *testing.T) {
-	// Codex's composer opened with "»" on 2026-10-03, which is not a prompt
-	// marker here, so neither detector has a composer to read. Kept as the
-	// shell version behaved.
-	c := ParseComposer(fixture(t, "visible-wB-p3.txt"))
-	if c.Tail != "" || c.BodyOK {
-		t.Errorf("got %+v", c)
+func TestParseComposerCodexInputBox(t *testing.T) {
+	// A prompt Codex echoed as "› resume" sits above its "»" input box, which
+	// is the composer. With no rule under it, emptiness cannot be judged.
+	lines := append([]string{"› resume", ""}, fixture(t, "visible-wB-p3.txt")...)
+	c := ParseComposer(lines)
+	if !strings.HasPrefix(c.Tail, "askcodextodoanything") || strings.Contains(c.Tail, "resume") {
+		t.Errorf("Tail = %q, want it to start at the input box", c.Tail)
+	}
+	if c.BodyOK || len(c.Raw) == 0 || c.Raw[0] != "» Ask Codex to do anything" {
+		t.Errorf("BodyOK=%v Raw=%q", c.BodyOK, c.Raw)
 	}
 }

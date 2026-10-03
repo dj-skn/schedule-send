@@ -29,6 +29,10 @@ type fake struct {
 	// noRule draws a Codex-style composer with no rule under it, which leaves
 	// the emptiness detector off.
 	noRule bool
+	// codex draws Codex's screen: an input box reading "» Ask Codex to do
+	// anything" when empty and the draft after this marker when not, and a
+	// submit echoed into the history as "› <message>".
+	codex string
 
 	promptOut string
 	promptErr bool
@@ -54,6 +58,13 @@ func (f *fake) Read(pane, source string, lines int) string {
 	if f.noRule {
 		return f.history + "\n› " + f.draft + "\n\n  gpt-5.5 high · 5h 100% left\n"
 	}
+	if f.codex != "" {
+		box := "» Ask Codex to do anything"
+		if f.draft != "" {
+			box = f.codex + " " + f.draft
+		}
+		return f.history + "\n" + box + "\n\n  GPT-6.1-Sol ultra · ~/projects/shop-backend · 5h 100% left\n"
+	}
 	rule := strings.Repeat("─", 60)
 	return f.history + "\n" + rule + "\n❯ " + f.draft + "\n" + rule +
 		"\n  ~/projects/a  main  Opus 5.5\n  ctx:16%  session:28% (03:44)  cost:$13.78\n"
@@ -78,6 +89,9 @@ func (f *fake) press() {
 	}
 	if f.draft == "" {
 		return
+	}
+	if f.codex != "" {
+		f.history += "\n› " + f.draft
 	}
 	f.draft = ""
 	if !f.silent {
@@ -154,6 +168,12 @@ func agentJob() job.State {
 	}
 }
 
+func codexJob() job.State {
+	st := agentJob()
+	st.PaneID, st.Agent, st.Cwd = "wB:p3", "codex", "/home/dev/projects/shop-backend"
+	return st
+}
+
 func newHarness(t *testing.T) *harness {
 	dir := t.TempDir()
 	h := &harness{
@@ -167,6 +187,7 @@ func newHarness(t *testing.T) *harness {
 			rows: []target.Row{
 				{Kind: "agent", Pane: "wA:p1", Agent: "claude", Status: "idle", Cwd: "/home/dev/projects/b", Title: "-"},
 				{Kind: "agent", Pane: "wB:p1", Agent: "claude", Status: "idle", Cwd: "/home/dev/projects/a", Title: "-"},
+				{Kind: "agent", Pane: "wB:p3", Agent: "codex", Status: "idle", Cwd: "/home/dev/projects/shop-backend", Title: "-"},
 				{Kind: "pane", Pane: "wB:p5", Agent: "-", Status: "-", Cwd: "/home/dev/projects/a", Title: "-"},
 			},
 		},
@@ -369,6 +390,36 @@ func TestUnverifiableSendIsReportedNotGuessed(t *testing.T) {
 	h.wantCalls("wait wB:p1", "prompt wB:p1 go")
 	if got := h.clock.elapsed(); got != 4*time.Second+limitWatch {
 		t.Errorf("took %v, want the grace window and the limit watch", got)
+	}
+}
+
+func TestCodexEchoIsNotADraft(t *testing.T) {
+	// The echo "› carry on…" sits above the "»" input box; taking it for the
+	// composer would read a sent message as unsent and press Enter again.
+	h := newHarness(t)
+	h.f.codex = "»"
+	h.arm(codexJob(), text("carry on with the plan please"))
+	h.fire()
+	h.wantCode(0)
+	h.wantOut("prompted agent in wB:p3\n")
+	h.wantErr("")
+	h.wantCalls("wait wB:p3", "prompt wB:p3 carry on with the plan please")
+	h.wantRemoved()
+}
+
+func TestCodexDraftStillSeen(t *testing.T) {
+	// Which marker Codex draws before a typed draft is unconfirmed.
+	for _, marker := range []string{"»", "›"} {
+		t.Run(marker, func(t *testing.T) {
+			h := newHarness(t)
+			h.f.codex = marker
+			h.f.drops = 5
+			h.arm(codexJob(), text("carry on with the plan please"))
+			h.fire()
+			h.wantFailure("Text is still unsent in wB:p3's composer:  " + marker +
+				" carry on with the plan please GPT-6.1-Sol ultra · ~/projects/shop-backend · 5h 100% left")
+			h.wantCalls("wait wB:p3", "prompt wB:p3 carry on with the plan please", "agent send-keys wB:p3 enter")
+		})
 	}
 }
 
