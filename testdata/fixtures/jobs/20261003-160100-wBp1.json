@@ -1,0 +1,17 @@
+{
+  "id": "20261003-160100-wBp1",
+  "kind": "agent",
+  "pane_id": "wB:p1",
+  "agent": "claude",
+  "cwd": "/home/dev/projects/shop-backend",
+  "at": "2026-10-03 16:01:00",
+  "mode": "text",
+  "keys": "",
+  "if_busy": "wait",
+  "force": 0,
+  "quiet": 0,
+  "recover": "keys",
+  "grace": 4,
+  "herdr_bin": "/home/dev/.local/bin/herdr",
+  "unit": "herdr-send-20261003-160100-wBp1"
+}

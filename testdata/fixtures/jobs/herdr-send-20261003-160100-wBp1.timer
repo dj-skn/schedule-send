@@ -1,0 +1,11 @@
+[Unit]
+Description=herdr scheduled send timer for 20261003-160100-wBp1
+
+[Timer]
+OnCalendar=2026-10-03 16:01:00
+AccuracySec=1s
+RemainAfterElapse=no
+Persistent=false
+
+[Install]
+WantedBy=timers.target

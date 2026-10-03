@@ -1,0 +1,70 @@
+#!/bin/sh
+# A stand-in for the herdr CLI that answers from a scenario directory and never
+# touches a real pane. Every call is appended to $HERDR_STANDIN_DIR/calls.log.
+#
+# The scenario directory holds:
+#   agent-list.json, pane-list.json    what `agent list` and `pane list` print
+#   visible-<pane>.txt                 `agent read --source visible`
+#   recent-<pane>.txt                  `agent read --source recent-unwrapped`
+#   process-<pane>.txt                 a plain pane's foreground process name
+#   prompt-error.json                  makes `agent prompt` fail with this reply
+#   state-<pane>                       "status seq", overriding agent-list.json
+# with <pane> written with ":" as "-", e.g. visible-wB-p1.txt.
+#
+# A successful `agent prompt` marks the agent working with its seq bumped, the
+# way a submitted turn shows up in herdr.
+set -eu
+dir="${HERDR_STANDIN_DIR:?HERDR_STANDIN_DIR is not set}"
+printf '%s\n' "$*" >> "$dir/calls.log"
+
+file_for() { printf '%s/%s-%s%s' "$dir" "$1" "$(printf '%s' "$2" | tr ':' '-')" "$3"; }
+
+agent_json() {
+  jq -c --arg p "$1" 'first(.result.agents[] | select(.pane_id == $p)) // empty' "$dir/agent-list.json"
+}
+
+case "${1:-} ${2:-}" in
+  "agent list") cat "$dir/agent-list.json" ;;
+  "pane list") cat "$dir/pane-list.json" ;;
+  "pane process-info")
+    f="$(file_for process "$4" .txt)"
+    name=zsh
+    [ -f "$f" ] && name="$(cat "$f")"
+    jq -n --arg n "$name" '{result: {process_info: {foreground_processes: [{name: $n}]}}}'
+    ;;
+  "agent read")
+    pane="$3" source="$5"
+    case "$source" in
+      visible) f="$(file_for visible "$pane" .txt)" ;;
+      *) f="$(file_for recent "$pane" .txt)" ;;
+    esac
+    [ -f "$f" ] && cat "$f"
+    exit 0
+    ;;
+  "agent get")
+    a="$(agent_json "$3")"
+    if [ -z "$a" ]; then
+      printf '{"error":{"code":"agent_not_found","message":"agent target %s not found"}}\n' "$3" >&2
+      exit 1
+    fi
+    f="$(file_for state "$3" "")"
+    if [ -f "$f" ]; then
+      read -r st seq < "$f"
+      a="$(printf '%s' "$a" | jq -c --arg st "$st" --argjson seq "$seq" '.agent_status = $st | .state_change_seq = $seq')"
+    fi
+    printf '{"result":{"agent":%s}}\n' "$a"
+    ;;
+  "agent prompt")
+    if [ -f "$dir/prompt-error.json" ]; then
+      cat "$dir/prompt-error.json" >&2
+      exit 1
+    fi
+    a="$(agent_json "$3")"
+    seq="$(printf '%s' "$a" | jq -r '.state_change_seq // 0')"
+    f="$(file_for state "$3" "")"
+    [ -f "$f" ] && read -r _ seq < "$f"
+    printf 'working %s\n' "$((seq + 1))" > "$f"
+    printf '{"result":{"type":"prompt_sent"}}\n'
+    ;;
+  *) exit 0 ;;
+esac
