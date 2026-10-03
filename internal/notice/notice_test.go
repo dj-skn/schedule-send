@@ -24,7 +24,7 @@ func TestCurrentClaudeWeeklyLimit(t *testing.T) {
 	if !ok {
 		t.Fatal("no notice found on the limited Claude screen")
 	}
-	if n.Time != "4pm (Europe/Warsaw)" || n.Quote != "resets 4pm (Europe/Warsaw)" {
+	if n.Time != "4pm (Europe/Warsaw)" || n.Quote != "resets 4pm (Europe/Warsaw)" || n.Window != "weekly" {
 		t.Errorf("got %+v", n)
 	}
 }
@@ -47,8 +47,21 @@ func TestCurrentCodexWrappedDate(t *testing.T) {
 		"› ",
 	)
 	n, ok := Current(tr)
-	if !ok || n.Time != "Sep 27th, 2026 12:27 AM" || n.Quote != "try again at Sep 27th, 2026 12:27 AM" {
+	if !ok || n.Time != "Sep 27th, 2026 12:27 AM" || n.Quote != "try again at Sep 27th, 2026 12:27 AM" || n.Window != "" {
 		t.Errorf("got %+v ok=%v", n, ok)
+	}
+}
+
+func TestCurrentCodexResumed(t *testing.T) {
+	// Codex echoes a sent prompt with "›" and draws its input box with "»",
+	// so one resume puts two prompt lines below the notice.
+	limit := "■ You’ve hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing), visit " +
+		"https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 27th, 2026 12:27 AM."
+	if n, ok := Current(transcript(limit, "", "› resume", "", "» Ask Codex to do anything")); ok {
+		t.Errorf("resumed: got %+v, want the limit treated as over", n)
+	}
+	if _, ok := Current(transcript(limit, "", "» Ask Codex to do anything")); !ok {
+		t.Error("not resumed: no notice found")
 	}
 }
 
@@ -65,14 +78,14 @@ func TestCurrentStopsAtIndentedTip(t *testing.T) {
 }
 
 func TestCurrentClaudeDatedForms(t *testing.T) {
-	for line, want := range map[string]string{
-		"You've hit your session limit · resets 3pm":                    "3pm",
-		"You've hit your session limit · resets 3:30pm (Europe/Warsaw)": "3:30pm (Europe/Warsaw)",
-		"You've hit your weekly limit · resets Sep 28, 3pm":             "Sep 28, 3pm",
+	for _, c := range []struct{ line, time, window string }{
+		{"You've hit your session limit · resets 3pm", "3pm", "session"},
+		{"You've hit your session limit · resets 3:30pm (Europe/Warsaw)", "3:30pm (Europe/Warsaw)", "session"},
+		{"You've hit your weekly limit · resets Sep 28, 3pm", "Sep 28, 3pm", "weekly"},
 	} {
-		n, ok := Current(transcript(line, "❯ "))
-		if !ok || n.Time != want {
-			t.Errorf("%q: got %+v ok=%v, want time %q", line, n, ok, want)
+		n, ok := Current(transcript(c.line, "❯ "))
+		if !ok || n.Time != c.time || n.Window != c.window {
+			t.Errorf("%q: got %+v ok=%v, want time %q window %q", c.line, n, ok, c.time, c.window)
 		}
 	}
 }

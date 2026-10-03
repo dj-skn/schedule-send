@@ -68,6 +68,9 @@ type Notice struct {
 	Time string
 	// Quote is the phrase to show back.
 	Quote string
+	// Window is the limit's window, "session" or "weekly", or "" when the
+	// notice does not say, as Codex's "usage limit" does not.
+	Window string
 }
 
 // resetPhrase matches Codex's "try again at Sep 27th, 2026 12:27 AM" and
@@ -99,10 +102,22 @@ func Current(t Transcript) (n Notice, ok bool) {
 		return Notice{}, false
 	}
 	text := t.Text(last)
+	n = Notice{Quote: screen.Truncate(text, 160), Window: window(text)}
 	if m := resetPhrase.FindStringSubmatch(text); m != nil {
-		return Notice{Time: m[2], Quote: m[0]}, true
+		n.Time, n.Quote = m[2], m[0]
 	}
-	return Notice{Quote: screen.Truncate(text, 160)}, true
+	return n, true
+}
+
+func window(text string) string {
+	sq := screen.Squash(text)
+	switch {
+	case strings.Contains(sq, "sessionlimit"):
+		return "session"
+	case strings.Contains(sq, "weeklylimit"):
+		return "weekly"
+	}
+	return ""
 }
 
 // After looks for a notice that opens below the last copy of anchor, the

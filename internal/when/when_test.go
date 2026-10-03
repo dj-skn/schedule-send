@@ -59,6 +59,22 @@ func TestResolveRejects(t *testing.T) {
 	}
 }
 
+func TestTimeOnly(t *testing.T) {
+	cases := map[string]bool{
+		"4pm (Europe/Warsaw)":     true,
+		"3:30pm":                  true,
+		"15:50":                   true,
+		"Sep 28, 3pm":             false,
+		"Sep 27th, 2026 12:27 AM": false,
+		"2026-10-04T09:00:00":     false,
+	}
+	for in, want := range cases {
+		if got := TimeOnly(in); got != want {
+			t.Errorf("TimeOnly(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
 func TestResolveAcrossDST(t *testing.T) {
 	// Summer time ends on 2026-10-25. Advancing 24 hours from noon on the 24th
 	// would land on 11:00; re-parsing against the 25th keeps it at noon.

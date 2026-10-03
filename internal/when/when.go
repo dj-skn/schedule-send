@@ -66,29 +66,17 @@ var (
 // against tomorrow's calendar date rather than advanced by 86400, so a DST
 // transition between the two days cannot shift the result by an hour.
 func Resolve(at string, now int64) (epoch int64, ok bool) {
-	// Only an ISO timestamp has its T separator swapped out; anywhere else a
-	// capital T is part of the text, as in "Tue 3pm".
-	if isoT.MatchString(at) {
-		at = strings.Replace(at, "T", " ", 1)
-	}
-
-	// Agents print reset times in forms date(1) rejects as written: an ordinal
-	// day ("Sep 27th"), a comma before the time ("Sep 28, 3pm"), and a zone in
-	// brackets ("3pm (Europe/Warsaw)"). They are normalised here rather than in
-	// the detector, so a time copied out of a notice parses the same as one
-	// read from it.
-	zone, prefix := "", ""
-	if m := zoned.FindStringSubmatch(at); m != nil {
-		at, zone = m[1], m[2]
+	at, zone := normalise(at)
+	prefix := ""
+	if zone != "" {
 		prefix = `TZ="` + zone + `" `
 		// glibc reads a zone it does not know as UTC, without a word.
 		if !zoneKnown(zone) {
 			return 0, false
 		}
 	}
-	at = ordinal.ReplaceAllString(strings.ReplaceAll(at, ",", ""), "${1}")
 
-	if !clock24.MatchString(at) && !clock12.MatchString(at) {
+	if !isClock(at) {
 		return parse(prefix + at)
 	}
 	// "Today" is the zone's own date, which differs from ours near midnight.
@@ -103,6 +91,36 @@ func Resolve(at string, now int64) (epoch int64, ok bool) {
 		epoch, ok = parse(prefix + nextDay(day) + " " + at)
 	}
 	return epoch, ok
+}
+
+// TimeOnly reports whether at is a clock time with no date, which Resolve
+// takes as its next occurrence.
+func TimeOnly(at string) bool {
+	at, _ = normalise(at)
+	return isClock(at)
+}
+
+func isClock(at string) bool { return clock24.MatchString(at) || clock12.MatchString(at) }
+
+// normalise rewrites at into a form date(1) accepts, with a bracketed zone
+// split off.
+func normalise(at string) (string, string) {
+	// Only an ISO timestamp has its T separator swapped out; anywhere else a
+	// capital T is part of the text, as in "Tue 3pm".
+	if isoT.MatchString(at) {
+		at = strings.Replace(at, "T", " ", 1)
+	}
+
+	// Agents print reset times in forms date(1) rejects as written: an ordinal
+	// day ("Sep 27th"), a comma before the time ("Sep 28, 3pm"), and a zone in
+	// brackets ("3pm (Europe/Warsaw)"). They are normalised here rather than in
+	// the detector, so a time copied out of a notice parses the same as one
+	// read from it.
+	zone := ""
+	if m := zoned.FindStringSubmatch(at); m != nil {
+		at, zone = m[1], m[2]
+	}
+	return ordinal.ReplaceAllString(strings.ReplaceAll(at, ",", ""), "${1}"), zone
 }
 
 func zoneKnown(zone string) bool {
