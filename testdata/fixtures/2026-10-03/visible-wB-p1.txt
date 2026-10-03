@@ -1,0 +1,40 @@
+   ├ Rerun webhook retry backoffs
+   └ Rerun webhook signature check
+
+● All three first-round runs passed their signature checks, but two of them took
+  about twice as long as expected and the third skipped its retry after a slow
+  reply. I adjusted the handler (a shorter wait, one retry after a small delay,
+  a few log lines the runs were missing) and am re-running the three cases now;
+  results in about ten minutes.
+
+✻ Waiting for 3 background agents to finish
+
+● Agent "Rerun webhook signature check" failed: Agent terminated early due to an
+API error: You've hit your weekly limit · resets 4pm (Europe/Warsaw) (error type
+rate_limit, HTTP 429, request id req_011CaB3dE5fG7hJ9kL2mN4pQ, model sent to the
+API: claude-opus-5-5)
+  ⎿  You've hit your weekly limit · resets 4pm (Europe/Warsaw)
+     /upgrade to increase your usage limit.
+
+✻ Waiting for 2 background agents to finish
+
+● Agent "Rerun webhook retry backoffs" failed: Agent terminated early due to an
+API error: You've hit your weekly limit · resets 4pm (Europe/Warsaw) (error type
+rate_limit, HTTP 429, request id req_011CrS6tU8vW1xY3zA5bC7dE, model sent to the
+API: claude-opus-5-5)
+
+● Agent "Rerun webhook replay handling" failed: Agent terminated early due to an
+API error: You've hit your weekly limit · resets 4pm (Europe/Warsaw) (error type
+rate_limit, HTTP 429, request id req_011CfG9hJ2kL4mN6pQ8rS1tU, model sent to the
+API: claude-opus-5-5)
+  ⎿  You've hit your weekly limit · resets 4pm (Europe/Warsaw)
+     /upgrade to increase your usage limit.
+
+✻ Baked for 17m 26s · done 3:15 PM
+
+───────────────────────────────────────────────────── checkout-webhook-migration ─
+❯
+──────────────────────────────────────────────────────────────────────────────────
+  ~/projects/shop-backend  sb-42-retry-jobs  Opus 5.5 ◉
+  ctx:16%  session:28% (03:44)  week:0% (44m)  cost:$11.20
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
