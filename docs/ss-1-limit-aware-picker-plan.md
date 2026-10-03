@@ -3,7 +3,7 @@
 ## Status
 
 P1 (Go port) and P2 (limits before the picker) are done and fast-forwarded
-into `ss-1`; P3–P4 are not started.
+into `ss-1`. P3 is being built on `ss-1-p3`; P4 is not started.
 `master` still runs the zsh script; nothing in this story is live until `ss-1`
 merges and `tools/install` is run in the main checkout.
 
@@ -36,7 +36,7 @@ builds each result once to render it either for a person or for a program.
 |---|---|---|
 | P1 | Go port, identical behaviour, with tests | done |
 | P2 | Limits detected for every agent before the picker, from pane output | done |
-| P3 | Styled terminal output; `key=value` unchanged when piped | not started |
+| P3 | Styled terminal output; `key=value` unchanged when piped | building |
 | P4 | `--json` everywhere, a `--targets` listing, JSON errors on stderr | not started |
 
 ## P1 — Go port
@@ -301,3 +301,65 @@ and read its screen to see that the draft sits behind `»`.
 **What this gives later phases.** `limit.Status` holds everything the
 report shows: state, window, reset, unconfirmed, quote and source pane. P3
 can style the output from it, and P4 can print it as JSON.
+
+## P3 — styled terminal output
+
+### What the code check found
+
+- **Where each output goes.** The limit report and the time prompt are
+  written to `/dev/tty`, except under `--auto`, where the report goes to
+  stderr. The receipt, the dry run, `--list` and `--cancel` write to stdout.
+  The command can ask whether stdin is a terminal, but not stdout or stderr.
+- **Nothing is built before it is printed.** Each result is written line by
+  line with `Fprintf` as it is worked out. Printing one result two ways, and
+  later as JSON, needs the result as a value first.
+- **Parity has a strong check for this phase.** Of its 78 cases, 7 run on a
+  pseudo-terminal: the picker and confirm cases. Those change on purpose. The
+  other 71 are piped and must stay byte-identical.
+- **The mock-up covers the report, the prompt and the receipt.** The dry run
+  and `--list` are not in it.
+
+### Decisions (settled 2026-10-03; "implement the p3" read as building to story decisions 3 and 5)
+
+1. **Styled only where the output is going to a terminal.** Anything piped
+   or redirected stays byte-identical to P2, including `--auto`'s report on
+   stderr. `NO_COLOR` turns off the colour but keeps the styled layout.
+2. **The report, prompt and receipt follow the mock-up.** The dry run,
+   `--list` and `--cancel` use the same layout:
+
+   ```
+   target [1]:
+
+     ◷ claude wB:p1 hit its weekly limit
+       resets   Sat 16:00   in 44m
+       send     "resume"    1 min after
+
+     at [Sat 16:01]:
+
+     ✓ scheduled "resume" for claude wB:p1
+       at       Sat 16:01   in 45m
+       cancel   schedule-send --cancel 20261003-160100-wBp1
+   ```
+
+3. **Left unstyled:** `--status`, errors, warnings, the usage text, and the
+   picker listing printed when there is no terminal.
+
+### Steps
+
+1. Results built once: a `show` package holds the receipt, the dry run, the
+   limit report and the job list as values, each with today's plain
+   rendering → verify: tests pass; `tools/parity` unchanged (68 identical,
+   10 known).
+2. A styled rendering of each, chosen by where the output is going →
+   verify: snapshot tests under `NO_COLOR` for every block; colour placement
+   tested with marker colours; in parity, the 71 piped cases are identical
+   and the 7 terminal cases are listed as known, with reasons.
+3. README → verify: its examples match the snapshot tests.
+4. Hand check: a dry run with colour on a pseudo-terminal against the live
+   panes, read back as text → verify: you look at it.
+5. Gate, As built, fast-forward into `ss-1`.
+
+### Not included
+
+`--json` (P4), styling errors, warnings and `--status`, and an arrow-key
+picker.
