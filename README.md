@@ -99,21 +99,49 @@ What is recognised:
 
 A notice that names no time (`try again later`, `Usage limit reached`) is
 still shown, and the prompt then has no default. Only the newest notice
-counts, and it is ignored once its time has passed or once a prompt has gone
-through below it. If the target itself shows none, other agents of the same
-kind are checked, since the limit belongs to the account; the report says which
-pane it came from. The pane you run the command in is never read this way.
+counts, and it is ignored once a prompt has gone through below it.
 
 These forms are accepted by `--at` too, so a time copied out of a notice works
 as written.
 
-Claude's short form, `resets 3pm`, carries no date. A notice left on screen
-after its reset, with no prompt sent since, therefore reads as tomorrow's
-3pm; the report's "in 23h" gives it away, but `--auto` would take it.
+Every agent's visible screen is read once, before the picker, and the time
+prompt reuses that read; the pane you run the command in is never read. If the
+target shows no notice of its own, another agent of the same kind lends its
+reset, since the limit belongs to the account, and the report says which pane
+it came from. It does not when the target's own footer shows usage left in that
+window (`week:11% (1h58m)`), which means a different account.
+
+A notice stays on screen after its limit lifts, until the agent is prompted
+again. Once its reset has passed, or the agent's own footer shows usage left,
+the limit is over and the proposal is one minute from now:
+
+```
+Usage limit in claude wB:p1:
+  resets 4pm (Europe/Warsaw)
+That reset passed at Sat 16:00; sending "resume" 1 min from now.
+```
+
+Claude's short form, `resets 3pm`, carries no date. It is taken as the next
+3pm, unless the footer's time to reset (or a session limit's five hours) says
+the reset cannot be that far off; then it was the last 3pm and the limit is
+over. With no footer to go by and the next 3pm more than 12 hours away, the
+report adds a line, since the notice may be yesterday's (under `--auto`, which
+has no prompt, it says to rerun with `--at '+1 min'`):
+
+```
+The notice names no day; if it was shown before Sat 15:00, the limit is already over: type +1 min.
+```
+
+With `--at`, a message timed before a known reset of a limit holding the target
+is still scheduled, with a warning on stderr:
+
+```
+Warning: claude in wB:p1 is usage-limited until Sat 16:00; this send at Sat 15:30 comes before the reset.
+```
 
 With no terminal there is nobody to confirm, so leaving out `--at` fails unless
-`--auto` is passed. `--auto` takes the detected time as found, prints the report
-on stderr, and fails if no notice names a time:
+`--auto` is passed. `--auto` takes the proposed time unconfirmed, prints the
+report on stderr, and fails when there is none:
 
 ```zsh
 schedule-send --cwd ~/projects/shop-backend --auto
@@ -139,10 +167,25 @@ panes
 target [1]:
 ```
 
-`○` idle · `✓` done · `●` working · `◐` blocked · `?` unknown · `·` plain pane.
-Colour is dropped when the output is not a terminal, and under `NO_COLOR`.
-Enter accepts the highlighted default, which is the best-ranked target: idle and
-done agents first, then unknown, working, blocked, then plain panes.
+`○` idle · `✓` done · `●` working · `◐` blocked · `?` unknown · `◷` limited ·
+`·` plain pane. Colour is dropped when the output is not a terminal, and under
+`NO_COLOR`. Enter accepts the highlighted default, which is the best-ranked
+target: idle and done agents first, then unknown, working, blocked, then plain
+panes.
+
+An agent held by its own usage limit is drawn as `◷ limited`, with its reset
+after the title. Another agent of the same kind that may share its account
+(see [Resuming After a Usage Limit](#resuming-after-a-usage-limit)) is marked
+`account limited`:
+
+```
+  1  ◷ limited  claude   wB:p1    ~/projects/shop-backend    checkout-webhook-migration  resets 16:00 (weekly)
+  2  ○ idle     claude   wA:p1    ~/projects/analytics       Analytics backend rewrite  account limited
+```
+
+Without `--at` the send waits for a limit to lift, so limited agents come first,
+the soonest reset (or a limit already over) at the top, and `--pick best` takes
+that one. With `--at` the order is unchanged and the marks are only shown.
 
 The pane you are running in is listed but never auto-selected — targeting it
 needs `--allow-self`. Without that guard an agent could schedule a prompt to

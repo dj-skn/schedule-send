@@ -38,28 +38,35 @@ unset NO_COLOR
 typeset -a only=("$@")
 pass=0 fail=0 known_seen=0
 
-# Differences kept on purpose, each a bug in the zsh version.
+# Differences kept on purpose, first the bugs in the zsh version.
 typeset -A known=(
   cwd-tilde-two "zsh never expanded a quoted ~ in --cwd (\${~1} inside quotes), so it matched nothing"
   fire-no-message "zsh died under set -e on a missing message file, leaving the job and its units behind"
   fire-herdr-unreadable "zsh died under set -e when herdr's pane list could not be read, leaving the job behind"
 )
+# Behaviour SS-1 P2 changed: limits are read for every agent before the picker.
+known+=(
+  ambiguous "the listing marks wB:p1 as limited, with its reset"
+  picker-retry "with --at the order is kept, and wB:p1 is marked as limited"
+  picker-default "without --at the limited wB:p1 ranks first, so Enter takes it, with its own notice"
+  picker-no-color "picker-default without colour"
+  picker-choose "row 2 is now wA:p1, whose own footer shows usage left, so there is no notice, no default, and the run ends at EOF"
+  auto-per-account "wA:p1's own footer shows week:11%, a different account, so wB:p1's reset is not borrowed and --auto fails"
+  auto-stale "at 16:16 the 4pm notice reads as over, so it proposes one minute from now rather than tomorrow's 4pm"
+)
 
 # Everything a run leaves behind, with each implementation's own path written
-# as <self> so the two can be compared. A fired job's polling reads are left
-# out: zsh times its waits in whole seconds, so how often it polls depends on
-# where in a second it started. Every action it takes is still compared.
+# as <self> so the two can be compared. Reads are left out: zsh times a fired
+# job's waits in whole seconds, so how often it polls depends on where in a
+# second it started, and from P2 on every agent's screen is read before the
+# picker. Every action either takes is still compared.
 capture() {
   local name=$1 out=$2
   mkdir -p $out
   for f in stdout stderr exit; do
     sed -e "s|$work/ref.zsh|<self>|g" -e "s|$work/go-bin|<self>|g" -e 's/\r$//' $run/$f > $out/$f
   done
-  if [[ $name == fire-* ]]; then
-    grep -v -e '^agent read ' -e '^agent get ' $run/herdr/calls.log > $out/herdr-calls 2>/dev/null
-  else
-    cp $run/herdr/calls.log $out/herdr-calls 2>/dev/null || : > $out/herdr-calls
-  fi
+  grep -v -e '^agent read ' -e '^agent get ' $run/herdr/calls.log > $out/herdr-calls 2>/dev/null
   cp $run/systemctl.log $out/systemctl-calls 2>/dev/null || : > $out/systemctl-calls
   (cd $run && find state config -printf "%m %y %p\n" 2>/dev/null | sort) > $out/modes
   (cd $run && find state config -type f 2>/dev/null | sort | while read -r f; do

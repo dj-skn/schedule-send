@@ -22,12 +22,14 @@ var Loc = time.Local
 
 // Layouts for Format, named after the date(1) formats they replace.
 const (
-	DayMinute     = "2006-01-02 15:04"        // %F %H:%M
-	WeekdayMinute = "Mon 15:04"               // %a %H:%M
-	WeekdayFull   = "Mon 2006-01-02 15:04:05" // %a %F %H:%M:%S
-	Calendar      = "2006-01-02 15:04:05"     // %F %T
-	Stamp         = "20060102-150405"         // %Y%m%d-%H%M%S
-	Day           = "2006-01-02"              // %F
+	DayMinute      = "2006-01-02 15:04"        // %F %H:%M
+	WeekdayMinute  = "Mon 15:04"               // %a %H:%M
+	WeekdayFull    = "Mon 2006-01-02 15:04:05" // %a %F %H:%M:%S
+	Calendar       = "2006-01-02 15:04:05"     // %F %T
+	Stamp          = "20060102-150405"         // %Y%m%d-%H%M%S
+	Day            = "2006-01-02"              // %F
+	Minute         = "15:04"                   // %H:%M
+	MonthDayMinute = "Jan 2 15:04"             // %b %-d %H:%M
 )
 
 // Format formats an epoch in Loc.

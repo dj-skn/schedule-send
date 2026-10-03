@@ -177,9 +177,16 @@ func Glyph(r Row, c term.Colors) string {
 	}
 }
 
+// Mark is what the picker shows of an agent's usage limit.
+type Mark struct {
+	Limited bool   // held by its own limit: drawn as "◷ limited"
+	Note    string // shown dim after the title, e.g. "resets 16:00 (weekly)"
+}
+
 // Render draws the picker: agents and plain panes in separate groups, each row
-// numbered by its place in rows. proc names a plain pane's foreground process.
-func Render(w io.Writer, rows []Row, c term.Colors, self string, proc func(pane string) string) {
+// numbered by its place in rows. marks, keyed by pane, may be nil. proc names a
+// plain pane's foreground process.
+func Render(w io.Writer, rows []Row, marks map[string]Mark, c term.Colors, self string, proc func(pane string) string) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, c.Bold+"agents"+c.Reset)
 	any := false
@@ -188,17 +195,28 @@ func Render(w io.Writer, rows []Row, c term.Colors, self string, proc func(pane 
 			continue
 		}
 		any = true
-		mark := ""
-		if r.Pane == self {
-			mark = " " + c.Dim + "← this pane" + c.Reset
+		m := marks[r.Pane]
+		glyph, status := Glyph(r, c), r.Status
+		if m.Limited {
+			glyph, status = c.Yellow+"◷"+c.Reset, "limited"
 		}
 		title := r.Title
 		if title == "-" {
 			title = ""
 		}
+		text := c.Dim + title + c.Reset
+		if m.Note != "" {
+			if title != "" {
+				text += "  "
+			}
+			text += c.Dim + m.Note + c.Reset
+		}
+		here := ""
+		if r.Pane == self {
+			here = " " + c.Dim + "← this pane" + c.Reset
+		}
 		fmt.Fprintf(w, "%3d  %s %-8s %-8s %-8s %-26s %s%s\n",
-			i+1, Glyph(r, c), r.Status, r.Agent, r.Pane, PrettyCwd(r.Cwd),
-			c.Dim+title+c.Reset, mark)
+			i+1, glyph, status, r.Agent, r.Pane, PrettyCwd(r.Cwd), text, here)
 	}
 	if !any {
 		fmt.Fprintln(w, "     "+c.Dim+"none"+c.Reset)

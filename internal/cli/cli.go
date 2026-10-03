@@ -12,13 +12,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"schedule-send/internal/herdr"
 	"schedule-send/internal/job"
-	"schedule-send/internal/notice"
+	"schedule-send/internal/limit"
 	"schedule-send/internal/target"
 	"schedule-send/internal/term"
 	"schedule-send/internal/when"
@@ -58,6 +59,7 @@ type app struct {
 	stdout, stderr io.Writer
 	stdinTTY       func() bool
 	openTTY        func() (io.ReadWriteCloser, error)
+	clock          func() int64 // the time now, as an epoch; run sets it when nil
 	paths          job.Paths
 	sys            job.Systemctl
 	h              herdr.Client
@@ -66,10 +68,9 @@ type app struct {
 
 	rows []target.Row
 	tgt  target.Row
+	now  int64 // when the run started; screens are judged at this moment
 
-	// The usage-limit notice behind a detected time.
-	lnTime, lnQuote, limitSource string
-	limitReset                   int64 // 0 when the notice names no readable time
+	lim map[string]limit.Status // set by limits
 }
 
 // Main runs the command and returns its exit status.
@@ -298,6 +299,19 @@ func (a *app) run(args []string) error {
 		return die("Herdr reported no panes.")
 	}
 
+	if a.clock == nil {
+		a.clock = func() int64 { return time.Now().Unix() }
+		if v := os.Getenv("HERDR_SCHEDULE_NOW_EPOCH"); v != "" {
+			if !digits.MatchString(v) {
+				return die("HERDR_SCHEDULE_NOW_EPOCH must be an integer epoch.")
+			}
+			fixed, _ := strconv.ParseInt(v, 10, 64)
+			a.clock = func() int64 { return fixed }
+		}
+	}
+	a.now = a.clock()
+	now := a.now
+
 	if o.pane != "" {
 		found := false
 		for _, r := range a.rows {
@@ -324,17 +338,6 @@ func (a *app) run(args []string) error {
 		fmt.Fprintf(a.stderr, "Warning: agent in %s is blocked on a prompt right now.\n", t.Pane)
 	}
 
-	nowOverride := os.Getenv("HERDR_SCHEDULE_NOW_EPOCH")
-	var now int64
-	if nowOverride != "" {
-		if !digits.MatchString(nowOverride) {
-			return die("HERDR_SCHEDULE_NOW_EPOCH must be an integer epoch.")
-		}
-		now, _ = strconv.ParseInt(nowOverride, 10, 64)
-	} else {
-		now = time.Now().Unix()
-	}
-
 	var runAt int64
 	if detect {
 		if runAt, err = a.detectAt(now); err != nil {
@@ -342,9 +345,7 @@ func (a *app) run(args []string) error {
 		}
 		// A confirmation can sit unanswered for a while, so "already passed"
 		// and the delay are judged from the moment it was answered.
-		if nowOverride == "" {
-			now = time.Now().Unix()
-		}
+		now = a.clock()
 	} else {
 		var ok bool
 		if runAt, ok = when.Resolve(o.at, now); !ok {
@@ -353,6 +354,9 @@ func (a *app) run(args []string) error {
 	}
 	if runAt <= now {
 		return die("Target time has already passed: %s", when.Format(runAt, when.Calendar))
+	}
+	if !detect && t.IsAgent() && o.keys == "" {
+		a.warnBeforeReset(runAt)
 	}
 
 	// systemd is handed the resolved wall-clock time, so what it fires on is
@@ -508,6 +512,16 @@ func (a *app) chooseTarget() (target.Row, error) {
 		return rows[0], nil
 	}
 	rows = target.Sort(rows)
+	var marks map[string]target.Mark
+	if slices.ContainsFunc(rows, target.Row.IsAgent) {
+		lim := a.limits()
+		// Without --at the send waits for a limit to lift, so the agents held
+		// by one are what it is most likely for.
+		if o.at == "" {
+			rows = limitedFirst(rows, lim)
+		}
+		marks = limitMarks(lim, a.now)
+	}
 
 	if !a.stdinTTY() {
 		if o.pick == "best" {
@@ -515,7 +529,7 @@ func (a *app) chooseTarget() (target.Row, error) {
 			return rows[0], nil
 		}
 		fmt.Fprintln(a.stderr, "Multiple targets matched. Narrow with --cwd/--kind/--pane, or use --pick best.")
-		target.Render(a.stderr, rows, term.ColorsFor(a.stderr), a.selfPane, a.h.ProcName)
+		target.Render(a.stderr, rows, marks, term.ColorsFor(a.stderr), a.selfPane, a.h.ProcName)
 		return target.Row{}, failure{code: 1}
 	}
 
@@ -524,7 +538,7 @@ func (a *app) chooseTarget() (target.Row, error) {
 		return target.Row{}, die("Could not open /dev/tty for target selection.")
 	}
 	defer tty.Close()
-	target.Render(tty, rows, term.ColorsFor(tty), a.selfPane, a.h.ProcName)
+	target.Render(tty, rows, marks, term.ColorsFor(tty), a.selfPane, a.h.ProcName)
 	for {
 		fmt.Fprint(tty, "target [1]: ")
 		choice, ok := term.ReadLine(tty)
@@ -540,61 +554,132 @@ func (a *app) chooseTarget() (target.Row, error) {
 
 // ------------------------------------------------------- usage-limit timing
 
-// limitNotice reads the pane's current usage-limit notice into lnTime and
-// lnQuote. Claude draws on the alternate screen, whose rows never reach the
-// host scrollback, and herdr can recover that history only from an idle agent,
-// so a recent read can come back empty; the visible screen, which still holds
-// the latest exchange, stands in for it.
-func (a *app) limitNotice(pane string) bool {
-	a.lnTime, a.lnQuote = "", ""
-	out := a.h.Read(pane, "recent-unwrapped", 120)
-	if strings.TrimSpace(out) == "" {
-		out = a.h.Read(pane, "visible", 120)
-	}
-	n, ok := notice.Current(notice.NewTranscript(out))
-	if ok {
-		a.lnTime, a.lnQuote = n.Time, n.Quote
-	}
-	return ok
-}
-
-// findLimit looks for the target's reset: its own notice first, then another
-// agent of the same kind, since the limit belongs to the account rather than
-// the pane. A notice whose reset already passed is old scrollback and is
-// skipped. The pane this command runs in is never read.
-func (a *app) findLimit(now int64) bool {
-	t := a.tgt
-	panes := []string{t.Pane}
-	for _, r := range a.rows {
-		if r.IsAgent() && r.Agent == t.Agent && r.Pane != t.Pane && r.Pane != a.selfPane {
-			panes = append(panes, r.Pane)
-		}
-	}
-	a.limitSource, a.limitReset = "", 0
-	for _, p := range panes {
-		if !a.limitNotice(p) {
-			continue
-		}
-		var epoch int64
-		if a.lnTime != "" {
-			if e, ok := when.Resolve(a.lnTime, now); ok {
-				epoch = e
+// limits is every agent's usage-limit state at the start of the run, keyed by
+// pane. The screens are read on the first call only, so a run that never asks
+// reads none. Only the visible screen is read: herdr can return a busy Claude
+// agent's history empty, and a history read can take seconds.
+func (a *app) limits() map[string]limit.Status {
+	if a.lim == nil {
+		var agents []limit.Agent
+		for _, r := range a.rows {
+			if r.IsAgent() {
+				agents = append(agents, limit.Agent{Pane: r.Pane, Kind: r.Agent})
 			}
 		}
-		if epoch != 0 && epoch <= now {
-			continue
-		}
-		a.limitSource, a.limitReset = p, epoch
-		return true
+		a.lim = limit.Scan(agents, a.selfPane, a.now, func(p string) string { return a.h.Read(p, "visible", 120) })
 	}
-	return false
+	return a.lim
+}
+
+// held reports whether an agent is held by its own usage limit.
+func held(st limit.Status) bool { return st.State == limit.Limited || st.State == limit.Over }
+
+// limitedFirst moves the agents held by their own limit to the front, in
+// limit.Before's order, and keeps the rest of rows as they were.
+func limitedFirst(rows []target.Row, lim map[string]limit.Status) []target.Row {
+	var front, rest []target.Row
+	for _, r := range rows {
+		if r.IsAgent() && held(lim[r.Pane]) {
+			front = append(front, r)
+		} else {
+			rest = append(rest, r)
+		}
+	}
+	slices.SortFunc(front, func(x, y target.Row) int {
+		sx, sy := lim[x.Pane], lim[y.Pane]
+		switch {
+		case limit.Before(sx, sy):
+			return -1
+		case limit.Before(sy, sx):
+			return 1
+		}
+		return strings.Compare(x.Pane, y.Pane)
+	})
+	return append(front, rest...)
+}
+
+// limitMarks is the picker's mark for each agent a usage limit holds.
+func limitMarks(lim map[string]limit.Status, now int64) map[string]target.Mark {
+	marks := map[string]target.Mark{}
+	for pane, st := range lim {
+		switch {
+		case held(st):
+			marks[pane] = target.Mark{Limited: true, Note: limitNote(st, now)}
+		case st.State == limit.Account:
+			marks[pane] = target.Mark{Note: "account limited"}
+		}
+	}
+	return marks
+}
+
+// limitNote is how the picker describes an agent's own limit, e.g. "resets
+// 16:00 (weekly)".
+func limitNote(st limit.Status, now int64) string {
+	var note string
+	switch {
+	case st.State == limit.Over && st.Reset != 0:
+		note = "limit over since " + noteTime(st.Reset, now)
+	case st.State == limit.Over:
+		note = "limit over"
+	case st.Reset != 0:
+		note = "resets " + noteTime(st.Reset, now)
+	default:
+		note = "reset unknown"
+	}
+	var parts []string
+	if st.Window != "" {
+		parts = append(parts, st.Window)
+	}
+	if st.Unconfirmed {
+		parts = append(parts, "unconfirmed")
+	}
+	if len(parts) > 0 {
+		note += " (" + strings.Join(parts, ", ") + ")"
+	}
+	return note
+}
+
+// noteTime formats a reset as briefly as it reads unambiguously: the time
+// alone today, with the weekday in the six days after, with the date beyond.
+func noteTime(epoch, now int64) string {
+	day := func(e int64) time.Time {
+		y, m, d := time.Unix(e, 0).In(when.Loc).Date()
+		return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	}
+	switch days := day(epoch).Sub(day(now)) / (24 * time.Hour); {
+	case days == 0:
+		return when.Format(epoch, when.Minute)
+	case days > 0 && days <= 6:
+		return when.Format(epoch, when.WeekdayMinute)
+	default:
+		return when.Format(epoch, when.MonthDayMinute)
+	}
+}
+
+// warnBeforeReset warns when a text send set with --at lands before the reset
+// of a limit that holds the target. An unconfirmed reset may have passed
+// already, so it is not warned about.
+func (a *app) warnBeforeReset(runAt int64) {
+	t := a.tgt
+	st := a.limits()[t.Pane]
+	if st.State != limit.Limited && st.State != limit.Account || st.Reset == 0 || st.Unconfirmed || runAt >= st.Reset {
+		return
+	}
+	reset, at := when.Format(st.Reset, when.WeekdayMinute), when.Format(runAt, when.WeekdayMinute)
+	if st.State == limit.Limited {
+		fmt.Fprintf(a.stderr, "Warning: %s in %s is usage-limited until %s; this send at %s comes before the reset.\n",
+			t.Agent, t.Pane, reset, at)
+		return
+	}
+	fmt.Fprintf(a.stderr, "Warning: %s's account looks usage-limited until %s (notice in %s); this send to %s at %s comes before the reset.\n",
+		t.Agent, reset, st.Source, t.Pane, at)
 }
 
 // limitReport says what was found, for the confirmation prompt or --auto's
 // note on stderr.
-func (a *app) limitReport(now int64) string {
+func (a *app) limitReport(st limit.Status, now int64) string {
 	t := a.tgt
-	if a.limitSource == "" {
+	if st.State == limit.None {
 		return "No usage-limit notice found for " + target.Summary(t) + "."
 	}
 	what := `"` + firstLine(a.o.message) + `"`
@@ -602,34 +687,54 @@ func (a *app) limitReport(now int64) string {
 		what = "keys: " + a.o.keys
 	}
 	var b strings.Builder
-	if a.limitSource == t.Pane {
+	if st.State == limit.Account {
+		fmt.Fprintf(&b, "Usage limit in %s %s (per account; %s shows none):\n", t.Agent, st.Source, t.Pane)
+	} else {
 		fmt.Fprintf(&b, "Usage limit in %s %s:\n", t.Agent, t.Pane)
-	} else {
-		fmt.Fprintf(&b, "Usage limit in %s %s (per account; %s shows none):\n", t.Agent, a.limitSource, t.Pane)
 	}
-	fmt.Fprintf(&b, "  %s\n", a.lnQuote)
-	if a.limitReset != 0 {
+	fmt.Fprintf(&b, "  %s\n", st.Quote)
+	switch {
+	case st.State == limit.Over && st.Reset != 0:
+		fmt.Fprintf(&b, "That reset passed at %s; sending %s %d min from now.",
+			when.Format(st.Reset, when.WeekdayMinute), what, limitMargin/60)
+	case st.State == limit.Over:
+		fmt.Fprintf(&b, "Its footer shows usage left again; sending %s %d min from now.", what, limitMargin/60)
+	case st.Reset != 0:
 		fmt.Fprintf(&b, "Resets %s (in %s); sending %s %d min after.",
-			when.Format(a.limitReset, when.WeekdayMinute), when.Delay(a.limitReset-now), what, limitMargin/60)
-	} else {
+			when.Format(st.Reset, when.WeekdayMinute), when.Delay(st.Reset-now), what, limitMargin/60)
+		if st.Unconfirmed {
+			// A calendar day earlier, which is not 24 h across a DST change.
+			before := time.Unix(st.Reset, 0).In(when.Loc).AddDate(0, 0, -1).Unix()
+			advice := "type +1 min"
+			if a.o.auto {
+				advice = "rerun with --at '+1 min'"
+			}
+			fmt.Fprintf(&b, "\nThe notice names no day; if it was shown before %s, the limit is already over: %s.",
+				when.Format(before, when.WeekdayMinute), advice)
+		}
+	default:
 		fmt.Fprintf(&b, "It names no reset time that can be read; sending %s at the time given.", what)
 	}
 	return b.String()
 }
 
-// detectAt is the send time for a run without --at: the target's usage-limit
-// reset plus the margin, confirmed on the terminal, or taken as found under
-// --auto.
+// detectAt is the send time for a run without --at: the reset of the limit
+// holding the target plus the margin, or the margin from now once that limit
+// is over, confirmed on the terminal or taken as found under --auto.
 func (a *app) detectAt(now int64) (int64, error) {
-	a.limitSource, a.limitReset = "", 0
+	var st limit.Status
 	if a.tgt.IsAgent() {
-		a.findLimit(now)
+		st = a.limits()[a.tgt.Pane]
 	}
 	var proposed int64
-	if a.limitReset != 0 {
-		proposed = a.limitReset + limitMargin
+	fromNow := false
+	switch {
+	case st.State == limit.Over:
+		proposed, fromNow = now+limitMargin, true
+	case st.State != limit.None && st.Reset != 0:
+		proposed = st.Reset + limitMargin
 	}
-	report := a.limitReport(now)
+	report := a.limitReport(st, now)
 
 	if a.o.auto {
 		if proposed == 0 {
@@ -638,14 +743,17 @@ func (a *app) detectAt(now int64) (int64, error) {
 		fmt.Fprintln(a.stderr, report)
 		return proposed, nil
 	}
-	return a.confirmAt(proposed, now, report)
+	return a.confirmAt(proposed, fromNow, report)
 }
 
 // confirmAt asks on the terminal when to send, after showing the report,
-// offering def (an epoch, or 0 for no default). Enter takes the default.
-// Anything typed is resolved, shown back, and becomes the new default, so a
-// correction is confirmed the same way the detected time is.
-func (a *app) confirmAt(def, now int64, report string) (int64, error) {
+// offering def (an epoch, or 0 for no default). Enter takes the default; when
+// fromNow, def is limitMargin from the start of the run, and Enter keeps it at
+// least that far ahead of the moment it is pressed. Anything typed is
+// resolved, shown back, and becomes the new default, so a correction is
+// confirmed the same way the detected time is. Each answer is judged at the
+// time it is given.
+func (a *app) confirmAt(def int64, fromNow bool, report string) (int64, error) {
 	tty, err := a.openTTY()
 	if err != nil {
 		return 0, die("Could not open /dev/tty to confirm the send time.")
@@ -665,11 +773,15 @@ func (a *app) confirmAt(def, now int64, report string) (int64, error) {
 		if !ok {
 			return 0, die("No send time given.")
 		}
+		now := a.clock()
 		if input == "" {
-			if def != 0 {
-				return def, nil
+			switch {
+			case def == 0:
+				continue
+			case fromNow:
+				return max(def, now+limitMargin), nil
 			}
-			continue
+			return def, nil
 		}
 		epoch, parsed := when.Resolve(input, now)
 		switch {
@@ -679,7 +791,7 @@ func (a *app) confirmAt(def, now int64, report string) (int64, error) {
 			fmt.Fprintf(tty, "%s has already passed.\n", when.Format(epoch, when.DayMinute))
 		default:
 			fmt.Fprintf(tty, "  → %s (in %s)\n", when.Format(epoch, when.WeekdayFull), when.Delay(epoch-now))
-			def = epoch
+			def, fromNow = epoch, false
 		}
 	}
 }

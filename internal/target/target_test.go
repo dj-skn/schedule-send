@@ -68,7 +68,7 @@ func TestRenderMatchesShellPicker(t *testing.T) {
 	shown := Sort(Filter{Self: "wB:p2"}.Apply(rows[:3]))
 	shown = append(shown, rows[5])
 	var b strings.Builder
-	Render(&b, shown, term.Colors{}, "wB:p2", func(string) string { return "zsh" })
+	Render(&b, shown, nil, term.Colors{}, "wB:p2", func(string) string { return "zsh" })
 	want := `
 agents
   1  ○ idle     claude   wA:p1    ~/projects/analytics       Analytics backend rewrite
@@ -86,12 +86,39 @@ panes
 
 func TestRenderEmptyGroupsAndSelfMark(t *testing.T) {
 	var b strings.Builder
-	Render(&b, []Row{{"agent", "wB:p2", "claude", "done", "/x", "-"}}, term.Colors{}, "wB:p2", nil)
+	Render(&b, []Row{{"agent", "wB:p2", "claude", "done", "/x", "-"}}, nil, term.Colors{}, "wB:p2", nil)
 	// An empty title still leaves the column's separator before the mark.
 	want := "\nagents\n  1  ✓ done     claude   wB:p2    /x" + strings.Repeat(" ", 26) +
 		"← this pane\n\npanes\n     none\n\n"
 	if b.String() != want {
 		t.Errorf("got %q\nwant %q", b.String(), want)
+	}
+}
+
+func TestRenderLimitMarks(t *testing.T) {
+	// The walkthrough's mock-up, run from wB:p2.
+	t.Setenv("HOME", "/home/dev")
+	shown := []Row{rows[1], rows[0], rows[2], {"agent", "wB:p2", "claude", "idle", "/x", "-"}}
+	marks := map[string]Mark{
+		"wB:p1": {Limited: true, Note: "resets 16:00 (weekly)"},
+		"wA:p1": {Note: "account limited"},
+		"wB:p2": {Limited: true, Note: "limit over"},
+	}
+	var b strings.Builder
+	Render(&b, shown, marks, term.Colors{}, "wB:p2", nil)
+	want := `
+agents
+  1  ◷ limited  claude   wB:p1    ~/projects/shop-backend    checkout-webhook-migration  resets 16:00 (weekly)
+  2  ○ idle     claude   wA:p1    ~/projects/analytics       Analytics backend rewrite  account limited
+  3  ○ idle     codex    wB:p3    ~/projects/shop-backend    Implement SB-42 phase 3.1 | shop-backend
+  4  ◷ limited  claude   wB:p2    /x                         limit over ← this pane
+
+panes
+     none
+
+`
+	if b.String() != want {
+		t.Errorf("got:\n%s\nwant:\n%s", b.String(), want)
 	}
 }
 
