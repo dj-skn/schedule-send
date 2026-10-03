@@ -11,25 +11,33 @@ Leave out the time and it is read from the agent's usage-limit notice instead,
 so an agent that ran out of usage can be told to `resume` the minute its limit
 resets — see [Resuming After a Usage Limit](#resuming-after-a-usage-limit).
 
-## Install Once
+## Install
+
+Written in Go; building it needs Go 1.27 or newer and nothing else.
 
 ```zsh
-ln -s "$HOME/src/schedule-send/schedule-send.zsh" "$HOME/.local/bin/schedule-send"
+cd ~/src/schedule-send
+tools/install
 hash -r
 ```
 
-Verify:
+That builds `bin/schedule-send` and links it into `~/.local/bin`. Verify:
 
 ```zsh
 command -v schedule-send
 schedule-send --help
 ```
 
-The symlink points at the source file, so edits and pulls take effect
-immediately. Recreate the link only if the script moves.
+Run `tools/install` again after every pull or edit: armed timers run
+`bin/schedule-send`, so they pick up a rebuild immediately, including jobs
+that are already scheduled. Timers armed by the old zsh version run
+`schedule-send.zsh`, which now hands over to the same binary.
 
-Requires `jq`, `systemctl --user`, and `herdr` on `PATH`. Lingering must be
-enabled for reboot survival (`loginctl show-user "$USER" -p Linger`).
+Requires `systemctl --user` and `herdr` on `PATH`. Lingering must be enabled
+for reboot survival (`loginctl show-user "$USER" -p Linger`).
+
+Before committing a change, run `tools/check`: formatting, vet, and the tests,
+which drive herdr and systemctl through stand-ins and never touch a real pane.
 
 ## Basic Usage
 
@@ -335,7 +343,7 @@ herdr pane send-keys 'wX:p1' enter
 ## Notes
 
 - Explicit full timestamps such as `2026-06-24 15:50:00` never roll forward. If
-  they are in the past the script exits instead of sending immediately.
+  they are in the past schedule-send exits instead of sending immediately.
 - A job id is the fire time plus the pane, so a second send to the same pane at
   the same time is refused until the first is cancelled. Running the command
   twice on the same usage-limit notice lands on that case.
