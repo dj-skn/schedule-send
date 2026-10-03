@@ -59,6 +59,8 @@ type app struct {
 	o              options
 	stdout, stderr io.Writer
 	stdinTTY       func() bool
+	stdoutTTY      func() bool
+	stderrTTY      func() bool
 	openTTY        func() (io.ReadWriteCloser, error)
 	clock          func() int64 // the time now, as an epoch; run sets it when nil
 	paths          job.Paths
@@ -77,9 +79,11 @@ type app struct {
 // Main runs the command and returns its exit status.
 func Main(args []string) int {
 	a := &app{
-		stdout:   os.Stdout,
-		stderr:   os.Stderr,
-		stdinTTY: func() bool { return term.IsTerminal(os.Stdin.Fd()) },
+		stdout:    os.Stdout,
+		stderr:    os.Stderr,
+		stdinTTY:  func() bool { return term.IsTerminal(os.Stdin.Fd()) },
+		stdoutTTY: func() bool { return term.IsTerminal(os.Stdout.Fd()) },
+		stderrTTY: func() bool { return term.IsTerminal(os.Stderr.Fd()) },
 		openTTY: func() (io.ReadWriteCloser, error) {
 			return os.OpenFile("/dev/tty", os.O_RDWR, 0)
 		},
@@ -300,15 +304,8 @@ func (a *app) run(args []string) error {
 		return die("Herdr reported no panes.")
 	}
 
-	if a.clock == nil {
-		a.clock = func() int64 { return time.Now().Unix() }
-		if v := os.Getenv("HERDR_SCHEDULE_NOW_EPOCH"); v != "" {
-			if !digits.MatchString(v) {
-				return die("HERDR_SCHEDULE_NOW_EPOCH must be an integer epoch.")
-			}
-			fixed, _ := strconv.ParseInt(v, 10, 64)
-			a.clock = func() int64 { return fixed }
-		}
+	if err := a.startClock(); err != nil {
+		return err
 	}
 	a.now = a.clock()
 	now := a.now
@@ -389,7 +386,7 @@ func (a *app) run(args []string) error {
 	}
 
 	if o.dryRun {
-		sched.Plain(a.stdout)
+		a.receipt(sched, now)
 		return nil
 	}
 
@@ -428,7 +425,35 @@ func (a *app) run(args []string) error {
 		_ = a.sys.Quiet("daemon-reload")
 		return die("Could not arm %s.timer.", unit)
 	}
-	sched.Plain(a.stdout)
+	a.receipt(sched, now)
+	return nil
+}
+
+// receipt prints the send armed, or the dry run, styled when stdout is a
+// terminal and as key=value lines for anything reading it.
+func (a *app) receipt(s show.Scheduled, now int64) {
+	if a.stdoutTTY() {
+		s.Styled(a.stdout, term.ColorsFor(a.stdout), now)
+		return
+	}
+	s.Plain(a.stdout)
+}
+
+// startClock sets a.clock, unless a test has, to HERDR_SCHEDULE_NOW_EPOCH when
+// that is set, else to the real time, which it stays when the variable is not
+// an epoch.
+func (a *app) startClock() error {
+	if a.clock != nil {
+		return nil
+	}
+	a.clock = func() int64 { return time.Now().Unix() }
+	if v := os.Getenv("HERDR_SCHEDULE_NOW_EPOCH"); v != "" {
+		if !digits.MatchString(v) {
+			return die("HERDR_SCHEDULE_NOW_EPOCH must be an integer epoch.")
+		}
+		fixed, _ := strconv.ParseInt(v, 10, 64)
+		a.clock = func() int64 { return fixed }
+	}
 	return nil
 }
 
@@ -677,20 +702,20 @@ func (a *app) detectAt(now int64) (int64, error) {
 	case st.State != limit.None && st.Reset != 0:
 		proposed = st.Reset + limitMargin
 	}
-	what := `"` + firstLine(a.o.message) + `"`
-	if a.o.keys != "" {
-		what = "keys: " + a.o.keys
-	}
 	report := show.Report{
-		Agent: a.tgt.Agent, Pane: a.tgt.Pane, Summary: target.Summary(a.tgt),
-		Limit: st, What: what, Margin: limitMargin, Auto: a.o.auto, Now: now,
-	}.Plain()
+		Kind: a.tgt.Kind, Agent: a.tgt.Agent, Pane: a.tgt.Pane, Summary: target.Summary(a.tgt),
+		Limit: st, Message: a.o.message, Keys: a.o.keys, Margin: limitMargin, Auto: a.o.auto, Now: now,
+	}
 
 	if a.o.auto {
 		if proposed == 0 {
-			return 0, die("%s\n--auto needs a notice that names its reset time; pass --at instead.", report)
+			return 0, die("%s\n--auto needs a notice that names its reset time; pass --at instead.", report.Plain())
 		}
-		fmt.Fprintln(a.stderr, report)
+		if a.stderrTTY() {
+			fmt.Fprint(a.stderr, "\n"+report.Styled(term.ColorsFor(a.stderr))+"\n")
+		} else {
+			fmt.Fprintln(a.stderr, report.Plain())
+		}
 		return proposed, nil
 	}
 	return a.confirmAt(proposed, fromNow, report)
@@ -703,27 +728,27 @@ func (a *app) detectAt(now int64) (int64, error) {
 // resolved, shown back, and becomes the new default, so a correction is
 // confirmed the same way the detected time is. Each answer is judged at the
 // time it is given.
-func (a *app) confirmAt(def int64, fromNow bool, report string) (int64, error) {
+func (a *app) confirmAt(def int64, fromNow bool, report show.Report) (int64, error) {
 	tty, err := a.openTTY()
 	if err != nil {
 		return 0, die("Could not open /dev/tty to confirm the send time.")
 	}
 	defer tty.Close()
-	fmt.Fprintln(tty)
-	fmt.Fprintln(tty, report)
-	fmt.Fprintln(tty)
+	c := term.ColorsFor(tty)
+	fmt.Fprint(tty, "\n"+report.Styled(c)+"\n\n")
 
+	now := report.Now
 	for {
 		if def != 0 {
-			fmt.Fprintf(tty, "at [%s]: ", when.Format(def, when.DayMinute))
+			fmt.Fprintf(tty, "  at [%s]: ", show.Time(def, now))
 		} else {
-			fmt.Fprint(tty, "at: ")
+			fmt.Fprint(tty, "  at: ")
 		}
 		input, ok := term.ReadLine(tty)
 		if !ok {
 			return 0, die("No send time given.")
 		}
-		now := a.clock()
+		now = a.clock()
 		if input == "" {
 			switch {
 			case def == 0:
@@ -736,11 +761,11 @@ func (a *app) confirmAt(def int64, fromNow bool, report string) (int64, error) {
 		epoch, parsed := when.Resolve(input, now)
 		switch {
 		case !parsed:
-			fmt.Fprintf(tty, "Could not parse '%s'. Try 00:45, 12:45 AM, Sep 27 1am, or +30 min.\n", input)
+			fmt.Fprintf(tty, "    %sCould not parse '%s'. Try 00:45, 12:45 AM, Sep 27 1am, or +30 min.%s\n", c.Red, input, c.Reset)
 		case epoch <= now:
-			fmt.Fprintf(tty, "%s has already passed.\n", when.Format(epoch, when.DayMinute))
+			fmt.Fprintf(tty, "    %s%s has already passed.%s\n", c.Red, show.Time(epoch, now), c.Reset)
 		default:
-			fmt.Fprintf(tty, "  → %s (in %s)\n", when.Format(epoch, when.WeekdayFull), when.Delay(epoch-now))
+			fmt.Fprintf(tty, "    → %-11s %s\n", show.Time(epoch, now), c.Dim+"in "+when.Delay(epoch-now)+c.Reset)
 			def, fromNow = epoch, false
 		}
 	}
@@ -756,17 +781,25 @@ func (a *app) list() {
 		if state == "" {
 			state = "gone"
 		}
-		msg := job.Preview(f)
+		j := show.Job{ID: s.ID, At: s.At, Kind: s.Kind, Agent: s.Agent, Pane: s.PaneID, State: state, Payload: job.Preview(f)}
 		if s.Mode == "keys" {
-			msg = "keys: " + s.Keys
+			j.Payload, j.Keys = "keys: "+s.Keys, s.Keys
+		} else if b, err := os.ReadFile(strings.TrimSuffix(f, ".json") + ".msg"); err == nil {
+			j.Message = string(b)
 		}
-		var runAt int64
 		if at, err := time.ParseInLocation(when.Calendar, s.At, when.Loc); err == nil {
-			runAt = at.Unix()
+			j.RunAt = at.Unix()
 		}
-		jobs = append(jobs, show.Job{ID: s.ID, At: s.At, RunAt: runAt, Pane: s.PaneID, State: state, Payload: msg})
+		jobs = append(jobs, j)
 	}
-	show.List(a.stdout, jobs)
+	if !a.stdoutTTY() {
+		show.List(a.stdout, jobs)
+		return
+	}
+	// A bad HERDR_SCHEDULE_NOW_EPOCH leaves the real time, which is good
+	// enough to say how soon each job fires.
+	_ = a.startClock()
+	show.ListStyled(a.stdout, term.ColorsFor(a.stdout), jobs, a.clock())
 }
 
 func (a *app) cancel(id string) error {
@@ -774,6 +807,11 @@ func (a *app) cancel(id string) error {
 		return die("No scheduled send with id: %s", id)
 	}
 	a.paths.Remove(a.sys, id)
+	if a.stdoutTTY() {
+		c := term.ColorsFor(a.stdout)
+		fmt.Fprintf(a.stdout, "  %s✓%s cancelled %s\n", c.Green, c.Reset, id)
+		return nil
+	}
 	fmt.Fprintln(a.stdout, "cancelled "+id)
 	return nil
 }

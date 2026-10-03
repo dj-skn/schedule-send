@@ -53,8 +53,29 @@ it is taken without a picker and named on stderr:
 Only one target matched; selecting codex in wV:p1 (idle, ~/projects/shop-backend).
 ```
 
-stdout stays the plain `key=value` receipt, so this is still usable from
-scripts:
+On a terminal the receipt is styled:
+
+```
+  ✓ scheduled "resume, then commit when done" for claude wB:p1
+    at       Sat 15:50   in 12m
+    cancel   schedule-send --cancel 20261003-155000-wBp1
+```
+
+Piped or redirected, stdout stays `key=value`, which is what a script should
+read:
+
+```
+id=20261003-155000-wBp1
+unit=herdr-send-20261003-155000-wBp1.timer
+target=agent wB:p1 (claude, idle)
+at=2026-10-03 15:50:00
+delay_seconds=720
+payload=resume, then commit when done
+
+cancel with: schedule-send --cancel 20261003-155000-wBp1
+```
+
+A script can rely on that, for instance to send a file:
 
 ```zsh
 schedule-send --at '03:30' --cwd ~/projects/website --message-file prompt.txt
@@ -74,17 +95,22 @@ schedule-send --cwd ~/projects/shop-backend
 ```
 
 ```
-Usage limit in codex w9:p1:
-  try again at Sep 27th, 2026 12:27 AM
-Resets Sun 00:27 (in 37m); sending "resume" 1 min after.
+  ◷ codex w9:p1 hit a usage limit
+    resets   Sun 00:27   in 37m
+    send     "resume"    1 min after
 
-at [2026-09-27 00:28]:
+  at [Sun 00:28]:
 ```
 
 Enter takes the proposed time. Anything typed instead — `00:45`, `12:45 AM`,
-`Sep 27 1am`, `+30 min` — is shown back as a full date and becomes the new
-default, so a correction is confirmed the same way. With no `--message` the
-payload is `resume`; pass one to send something else.
+`Sep 27 1am`, `+30 min` — is shown back with how long away it is, and becomes
+the new default, so a correction is confirmed the same way:
+
+```
+    → Sat 16:30   in 1h 8m
+```
+
+With no `--message` the payload is `resume`; pass one to send something else.
 
 The notice names its reset to the minute and the reset lands somewhere inside
 it (one reading 12:27 AM was for 00:27:52), so the proposal is one minute
@@ -116,9 +142,9 @@ again. Once its reset has passed, or the agent's own footer shows usage left,
 the limit is over and the proposal is one minute from now:
 
 ```
-Usage limit in claude wB:p1:
-  resets 4pm (Europe/Warsaw)
-That reset passed at Sat 16:00; sending "resume" 1 min from now.
+  ✓ claude wB:p1's weekly limit is over
+    reset    Sat 16:00   passed
+    send     "resume"    1 min from now
 ```
 
 Claude's short form, `resets 3pm`, carries no date. It is taken as the next
@@ -129,7 +155,7 @@ report adds a line, since the notice may be yesterday's (under `--auto`, which
 has no prompt, it says to rerun with `--at '+1 min'`):
 
 ```
-The notice names no day; if it was shown before Sat 15:00, the limit is already over: type +1 min.
+    note     the notice names no day; if it was shown before Sat 15:00, the limit is already over: type +1 min
 ```
 
 With `--at`, a message timed before a known reset of a limit holding the target
@@ -344,9 +370,17 @@ schedule-send --status <id>
 schedule-send --cancel <id>
 ```
 
-`--list` shows id, time, target, timer state, and the payload's first line.
-`--status` prints the stored job, the timer, and the job's journal. `--cancel`
-disarms the timer and removes its unit and state files.
+On a terminal `--list` is one row per job, with how soon it fires. A timer that
+is not active is marked, and its state stands in for how soon:
+
+```
+  ○ Sat 16:01   in 39m    claude wB:p1   "resume"                   20261003-160100-wBp1
+  ✗ Sun 09:00   inactive  pane wB:p5     keys: ctrl+c               20261004-090000-wBp5
+```
+
+Piped, it stays a table of id, time, target, timer state and the payload's
+first line. `--status` prints the stored job, the timer and the job's journal.
+`--cancel` disarms the timer and removes its unit and state files.
 
 Underneath, each job is a `herdr-send-<id>.timer` plus `.service` in
 `~/.config/systemd/user`, so the plain systemd tools work too:
@@ -371,9 +405,25 @@ Pass `--persistent` to have it fire at the next boot instead.
 schedule-send --at '03:30' --cwd ~/projects/website --message hello --dry-run
 ```
 
-Resolves the target and prints the schedule, the unit name, and the unit file
-paths without creating anything. Without `--at` it still reads the notice and
-asks for confirmation, so a dry run shows exactly what would be armed.
+Resolves the target and prints what would be armed, without creating anything.
+On a terminal:
+
+```
+  · dry run: would schedule "hello" for codex wV:p1
+    at       Sun 03:30   in 11h
+    cwd      ~/projects/website
+    if-busy  wait
+    recover  keys
+    grace    4s
+    persist  no
+    id       20261004-033000-wVp1
+    units    ~/.config/systemd/user/herdr-send-20261004-033000-wVp1.{service,timer}
+    runs     schedule-send __fire 20261004-033000-wVp1
+```
+
+Without `--at` it still reads the notice and asks for confirmation, so a dry
+run shows exactly what would be armed. Piped, the same facts come out as
+`key=value` lines.
 
 ## Safety Test
 

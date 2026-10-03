@@ -65,9 +65,11 @@ func newHarness(t *testing.T, ttyInput *string) *harness {
 
 	h := &harness{stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, tty: &bytes.Buffer{}, dir: dir}
 	h.a = &app{
-		stdout:   h.stdout,
-		stderr:   h.stderr,
-		stdinTTY: func() bool { return ttyInput != nil },
+		stdout:    h.stdout,
+		stderr:    h.stderr,
+		stdinTTY:  func() bool { return ttyInput != nil },
+		stdoutTTY: func() bool { return false },
+		stderrTTY: func() bool { return false },
 		openTTY: func() (io.ReadWriteCloser, error) {
 			return fakeTTY{strings.NewReader(*ttyInput), h.tty}, nil
 		},
@@ -200,11 +202,11 @@ panes
   5  · zsh      wB:p5    ~/projects/shop-backend
 
 target [1]: 
-Usage limit in claude wB:p1:
-  resets 4pm (Europe/Warsaw)
-Resets Sat 16:00 (in 38m); sending "resume" 1 min after.
+  ◷ claude wB:p1 hit its weekly limit
+    resets   Sat 16:00   in 38m
+    send     "resume"    1 min after
 
-at [2026-10-03 16:01]: `
+  at [Sat 16:01]: `
 	if h.tty.String() != want {
 		t.Errorf("terminal:\n%s\nwant:\n%s", h.tty, want)
 	}
@@ -382,7 +384,7 @@ func TestConfirmUnconfirmedResetSaysTypeOneMinute(t *testing.T) {
 	if code := h.a.main([]string{"--pane", "wB:p1", "--dry-run"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.stderr)
 	}
-	want := "The notice names no day; if it was shown before Sat 16:00, the limit is already over: type +1 min.\n\nat [2026-10-04 16:01]: "
+	want := "    note     the notice names no day; if it was shown before Sat 16:00, the limit is already over: type +1 min\n\n  at [Sun 16:01]: "
 	if !strings.HasSuffix(h.tty.String(), want) {
 		t.Errorf("terminal:\n%s\nwant it to end:\n%s", h.tty, want)
 	}
@@ -395,7 +397,7 @@ func TestConfirmOverDefaultStaysAMinuteAhead(t *testing.T) {
 	if code := h.a.main([]string{"--pane", "wB:p1", "--dry-run"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.stderr)
 	}
-	if want := "sending \"resume\" 1 min from now.\n\nat [2026-10-03 16:17]: "; !strings.HasSuffix(h.tty.String(), want) {
+	if want := "    send     \"resume\"    1 min from now\n\n  at [Sat 16:17:40]: "; !strings.HasSuffix(h.tty.String(), want) {
 		t.Errorf("terminal:\n%s\nwant it to end:\n%s", h.tty, want)
 	}
 	for _, want := range []string{"at=2026-10-03 16:19:40\n", "delay_seconds=60\n"} {
@@ -436,7 +438,7 @@ func TestConfirmJudgesAnswersWhenGiven(t *testing.T) {
 		if d := runAt - answered; d < 60 || d > 65 {
 			t.Fatalf("sends %d s after the answer, want about 60:\n%s", d, h.stdout)
 		}
-		if want := "(in " + when.Delay(runAt-answered) + ")\n"; !strings.Contains(h.tty.String(), want) {
+		if want := " in " + when.Delay(runAt-answered) + "\n"; !strings.Contains(h.tty.String(), want) {
 			t.Errorf("terminal lacks %q:\n%s", want, h.tty)
 		}
 	})
@@ -447,7 +449,7 @@ func TestConfirmJudgesAnswersWhenGiven(t *testing.T) {
 		if code := h.a.main([]string{"--pane", "wB:p3", "--dry-run"}); code != 0 {
 			t.Fatalf("exit %d: %s", code, h.stderr)
 		}
-		for _, want := range []string{"2026-10-03 16:18 has already passed.\n", "  → Sat 2026-10-03 16:20:00 (in 2m)\n"} {
+		for _, want := range []string{"    Sat 16:18 has already passed.\n", "    → Sat 16:20   in 2m\n"} {
 			if !strings.Contains(h.tty.String(), want) {
 				t.Errorf("terminal lacks %q:\n%s", want, h.tty)
 			}
@@ -477,5 +479,164 @@ func TestArmWritesStateAndUnits(t *testing.T) {
 	}
 	if !strings.HasSuffix(h.stdout.String(), "payload=two\n\ncancel with: schedule-send --cancel "+id+"\n") {
 		t.Errorf("stdout:\n%s", h.stdout)
+	}
+}
+
+func terminal() bool { return true }
+
+func TestReceiptOnATerminal(t *testing.T) {
+	h := newHarness(t, nil)
+	h.a.stdoutTTY = terminal
+	if code := h.a.main([]string{"--pane", "wB:p3", "--at", "16:30", "--message", "two\nlines"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	want := `
+  ✓ scheduled "two" (+1 line) for codex wB:p3
+    at       Sat 16:30   in 1h 8m
+    cancel   schedule-send --cancel 20261003-163000-wBp3
+`
+	if h.stdout.String() != want {
+		t.Errorf("stdout:\n%s\nwant:\n%s", h.stdout, want)
+	}
+}
+
+func TestDryRunOnATerminal(t *testing.T) {
+	h := newHarness(t, nil)
+	h.a.stdoutTTY = terminal
+	if code := h.a.main([]string{"--kind", "codex", "--at", "16:30", "--message", "hi", "--dry-run"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	want := `
+  · dry run: would schedule "hi" for codex wB:p3
+    at       Sat 16:30   in 1h 8m
+    cwd      ~/projects/shop-backend
+    if-busy  wait
+    recover  keys
+    grace    4s
+    persist  no
+    id       20261003-163000-wBp3
+    units    ` + filepath.Join(h.dir, "units") + `/herdr-send-20261003-163000-wBp3.{service,timer}
+    runs     /opt/schedule-send __fire 20261003-163000-wBp3
+`
+	if h.stdout.String() != want {
+		t.Errorf("stdout:\n%s\nwant:\n%s", h.stdout, want)
+	}
+	if h.stderr.String() != "Only one target matched; selecting codex in wB:p3 (idle, ~/projects/shop-backend).\n" {
+		t.Errorf("stderr %q", h.stderr)
+	}
+}
+
+func TestAutoReportOnAStderrTerminal(t *testing.T) {
+	t.Run("styled", func(t *testing.T) {
+		h := newHarness(t, nil)
+		h.a.stderrTTY = terminal
+		if code := h.a.main([]string{"--pane", "wB:p1", "--auto", "--dry-run"}); code != 0 {
+			t.Fatalf("exit %d: %s", code, h.stderr)
+		}
+		want := `
+  ◷ claude wB:p1 hit its weekly limit
+    resets   Sat 16:00   in 38m
+    send     "resume"    1 min after
+`
+		if h.stderr.String() != want {
+			t.Errorf("stderr:\n%s\nwant:\n%s", h.stderr, want)
+		}
+		if !strings.Contains(h.stdout.String(), "at=2026-10-03 16:01:00\n") {
+			t.Errorf("stdout:\n%s", h.stdout)
+		}
+	})
+	t.Run("its failure stays plain", func(t *testing.T) {
+		h := newHarness(t, nil)
+		h.a.stderrTTY = terminal
+		if code := h.a.main([]string{"--pane", "wB:p3", "--auto", "--dry-run"}); code != 1 {
+			t.Fatalf("exit %d: %s", code, h.stderr)
+		}
+		want := "No usage-limit notice found for codex in wB:p3 (idle, ~/projects/shop-backend).\n" +
+			"--auto needs a notice that names its reset time; pass --at instead.\n"
+		if h.stderr.String() != want {
+			t.Errorf("stderr %q, want %q", h.stderr, want)
+		}
+	})
+}
+
+// addJobs stores two sends: "resume" to wB:p1 at 16:01, whose timer the
+// stand-in reports active, and ctrl+c to the plain pane wB:p5 tomorrow.
+func (h *harness) addJobs(t *testing.T) {
+	t.Helper()
+	msg := "resume"
+	for _, j := range []struct {
+		s   job.State
+		msg *string
+	}{
+		{job.State{ID: "20261003-160100-wBp1", Kind: "agent", PaneID: "wB:p1", Agent: "claude", At: "2026-10-03 16:01:00", Mode: "text"}, &msg},
+		{job.State{ID: "20261004-090000-wBp5", Kind: "pane", PaneID: "wB:p5", Agent: "-", At: "2026-10-04 09:00:00", Mode: "keys", Keys: "ctrl+c"}, nil},
+	} {
+		if err := h.a.paths.Write(j.s, j.msg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("SYSTEMCTL_STANDIN_ACTIVE", "herdr-send-20261003-160100-wBp1.timer")
+}
+
+func TestListOnATerminal(t *testing.T) {
+	h := newHarness(t, nil)
+	h.a.stdoutTTY = terminal
+	h.addJobs(t)
+	if code := h.a.main([]string{"--list"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	want := `
+  ○ Sat 16:01   in 39m    claude wB:p1   "resume"                   20261003-160100-wBp1
+  ✗ Sun 09:00   inactive  pane wB:p5     keys: ctrl+c               20261004-090000-wBp5
+`
+	if h.stdout.String() != want {
+		t.Errorf("stdout:\n%s\nwant:\n%s", h.stdout, want)
+	}
+
+	t.Run("a bad clock override falls back to the real time", func(t *testing.T) {
+		h := newHarness(t, nil)
+		h.a.stdoutTTY = terminal
+		h.addJobs(t)
+		t.Setenv("HERDR_SCHEDULE_NOW_EPOCH", "soon")
+		if code := h.a.main([]string{"--list"}); code != 0 || h.stderr.Len() != 0 {
+			t.Fatalf("exit %d: %s", code, h.stderr)
+		}
+		if !strings.Contains(h.stdout.String(), " 20261003-160100-wBp1\n") {
+			t.Errorf("stdout:\n%s", h.stdout)
+		}
+	})
+}
+
+func TestCancelOnATerminal(t *testing.T) {
+	h := newHarness(t, nil)
+	h.a.stdoutTTY = terminal
+	h.addJobs(t)
+	if code := h.a.main([]string{"--cancel", "20261003-160100-wBp1"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	if want := "  ✓ cancelled 20261003-160100-wBp1\n"; h.stdout.String() != want {
+		t.Errorf("stdout %q, want %q", h.stdout, want)
+	}
+}
+
+func TestReceiptIntoAPipeStaysKeyValue(t *testing.T) {
+	// Every stream but stdout is a terminal.
+	input := "\n"
+	h := newHarness(t, &input)
+	h.a.stderrTTY = terminal
+	if code := h.a.main([]string{"--pane", "wB:p1"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	want := `id=20261003-160100-wBp1
+unit=herdr-send-20261003-160100-wBp1.timer
+target=agent wB:p1 (claude, idle)
+at=2026-10-03 16:01:00
+delay_seconds=2340
+payload=resume
+
+cancel with: schedule-send --cancel 20261003-160100-wBp1
+`
+	if h.stdout.String() != want {
+		t.Errorf("stdout:\n%s\nwant:\n%s", h.stdout, want)
 	}
 }
