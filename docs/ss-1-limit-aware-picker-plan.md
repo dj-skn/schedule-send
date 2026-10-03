@@ -2,8 +2,8 @@
 
 ## Status
 
-P1 (Go port) is done and fast-forwarded into `ss-1`. P2 is being built on
-`ss-1-p2`; P3–P4 are not started.
+P1 (Go port) and P2 (limits before the picker) are done and fast-forwarded
+into `ss-1`; P3–P4 are not started.
 `master` still runs the zsh script; nothing in this story is live until `ss-1`
 merges and `tools/install` is run in the main checkout.
 
@@ -35,7 +35,7 @@ builds each result once to render it either for a person or for a program.
 | Phase | What | Status |
 |---|---|---|
 | P1 | Go port, identical behaviour, with tests | done |
-| P2 | Limits detected for every agent before the picker, from pane output | building |
+| P2 | Limits detected for every agent before the picker, from pane output | done |
 | P3 | Styled terminal output; `key=value` unchanged when piped | not started |
 | P4 | `--json` everywhere, a `--targets` listing, JSON errors on stderr | not started |
 
@@ -241,3 +241,63 @@ unchanged; plain panes are never read.
 Near-limit hints (a low gauge with no notice), a gauge alone marking an agent
 limited, styling the report, prompt and receipt (P3), JSON (P4), and changes
 to `master`.
+
+### As built
+
+**What exists.** A new package, `internal/limit` (308 lines, 276 of tests),
+reads each agent's state from its screen: `Gauges`, `Read`, `Scan` (every
+agent in parallel, with the account marks and the footer veto) and `Before`
+(ranking order). `screen` accepts `»`, `notice` knows its window, and `when`
+can tell a time-only reset. The command line runs one check per run, only
+when its answer is used. That check feeds the picker marks and ranking,
+`--pick best`, the time prompt and the `--at` warning. The README covers all
+of it. The module is now 3,017 lines of code and 2,249 of tests.
+
+**Measured on 2026-10-03.**
+
+- `tools/check`: 94 tests and 15 subtests pass, none skipped.
+- `tools/parity`: 78 cases. 68 are identical, and 10 are known differences:
+  the 3 zsh bugs from P1, and 7 cases whose output changes on purpose. Each
+  of the 7 is listed in `tools/parity` with its reason. Screen reads are no
+  longer compared for any case; every action still is.
+- **Live and read-only, at 18:38.** On the real panes, the listing and the
+  terminal picker both drew `◷ limited  claude  wB:p1 … sb-42  resets 19:00
+  (session)`. The time prompt proposed 19:01, the time of a send to wB:p1
+  that was already armed. Each run stopped at the duplicate check, so
+  nothing was armed. A run that checks one agent takes 30–40 ms, against
+  10 ms for one that reads no screen. wE:p1 was the pane running the command.
+
+**Differences from the plan.**
+
+- The time prompt judges each answer at the moment it is given. A "1 min
+  from now" default accepted late moves to a minute after Enter. Otherwise a
+  slow Enter on the new over case failed with "already passed".
+- Under `--auto` the unconfirmed line says to rerun with `--at '+1 min'`,
+  since there is no prompt to type into.
+- An unconfirmed reset gets no `--at` warning, because it may already have
+  passed.
+- Picker reset times are `16:00` for today, `Sun 16:00` within six days, and
+  `Oct 10 00:27` beyond that.
+- The clock is read before the target is chosen, so a bad
+  `HERDR_SCHEDULE_NOW_EPOCH` now fails before the picker.
+
+**Found while building and left alone.**
+
+- **Claude's footer redraws only when Claude does.** An idle agent's
+  time-to-reset counts from when it was drawn: at 18:38 wB:p1 still showed
+  the afternoon's `session:-1% (01:11)`. The bound can only come out later
+  than the true one. So a stale footer can delay an "over" reading but never
+  produce a false one. It can also hide an "account limited" mark.
+- **Relative times ignore `HERDR_SCHEDULE_NOW_EPOCH`.** `+1 min`, typed or
+  given to `--at`, is resolved by date(1) from the real clock. The zsh
+  version did the same.
+- **No race detector.** There is no C compiler here, so `Scan` was not run
+  under it.
+
+**To confirm by hand.** The Codex draft read-back did not happen, because no
+Codex agent was open. To do it: open one, type a message without sending it,
+and read its screen to see that the draft sits behind `»`.
+
+**What this gives later phases.** `limit.Status` holds everything the
+report shows: state, window, reset, unconfirmed, quote and source pane. P3
+can style the output from it, and P4 can print it as JSON.
