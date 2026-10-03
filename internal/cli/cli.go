@@ -20,6 +20,7 @@ import (
 	"schedule-send/internal/herdr"
 	"schedule-send/internal/job"
 	"schedule-send/internal/limit"
+	"schedule-send/internal/show"
 	"schedule-send/internal/target"
 	"schedule-send/internal/term"
 	"schedule-send/internal/when"
@@ -377,24 +378,18 @@ func (a *app) run(args []string) error {
 	if o.keys != "" {
 		mode, payload = "keys", "keys: "+o.keys
 	}
+	sched := show.Scheduled{
+		DryRun: o.dryRun, ID: id, Unit: unit,
+		Kind: t.Kind, Pane: t.Pane, Agent: t.Agent, Status: t.Status, Cwd: t.Cwd,
+		At: calendar, RunAt: runAt, Delay: delay,
+		Mode: mode, Payload: payload, Message: o.message, Keys: o.keys,
+		Persistent: o.persistent, IfBusy: o.ifBusy, Recover: o.recover, Grace: o.grace,
+		UnitFiles: a.paths.UnitDir + "/" + unit + ".{service,timer}",
+		WouldRun:  a.selfPath() + " __fire " + id,
+	}
 
 	if o.dryRun {
-		w := a.stdout
-		fmt.Fprintf(w, "target=%s %s (%s, %s)\n", t.Kind, t.Pane, t.Agent, t.Status)
-		fmt.Fprintf(w, "cwd=%s\n", t.Cwd)
-		fmt.Fprintf(w, "at=%s\n", calendar)
-		fmt.Fprintf(w, "run_at_epoch=%d\n", runAt)
-		fmt.Fprintf(w, "delay_seconds=%d\n", delay)
-		fmt.Fprintf(w, "mode=%s\n", mode)
-		fmt.Fprintf(w, "payload=%s\n", payload)
-		fmt.Fprintf(w, "id=%s\n", id)
-		fmt.Fprintf(w, "unit=%s.timer\n", unit)
-		fmt.Fprintf(w, "persistent=%d\n", b2i(o.persistent))
-		fmt.Fprintf(w, "if_busy=%s\n", o.ifBusy)
-		fmt.Fprintf(w, "recover=%s\n", o.recover)
-		fmt.Fprintf(w, "submit_grace=%s\n", o.grace)
-		fmt.Fprintf(w, "unit_files=%s/%s.{service,timer}\n", a.paths.UnitDir, unit)
-		fmt.Fprintf(w, "would_run=%s __fire %s\n", a.selfPath(), id)
+		sched.Plain(a.stdout)
 		return nil
 	}
 
@@ -433,16 +428,7 @@ func (a *app) run(args []string) error {
 		_ = a.sys.Quiet("daemon-reload")
 		return die("Could not arm %s.timer.", unit)
 	}
-
-	w := a.stdout
-	fmt.Fprintf(w, "id=%s\n", id)
-	fmt.Fprintf(w, "unit=%s.timer\n", unit)
-	fmt.Fprintf(w, "target=%s %s (%s, %s)\n", t.Kind, t.Pane, t.Agent, t.Status)
-	fmt.Fprintf(w, "at=%s\n", calendar)
-	fmt.Fprintf(w, "delay_seconds=%d\n", delay)
-	fmt.Fprintf(w, "payload=%s\n", payload)
-	fmt.Fprintln(w)
-	fmt.Fprintf(w, "cancel with: schedule-send --cancel %s\n", id)
+	sched.Plain(a.stdout)
 	return nil
 }
 
@@ -675,49 +661,6 @@ func (a *app) warnBeforeReset(runAt int64) {
 		t.Agent, reset, st.Source, t.Pane, at)
 }
 
-// limitReport says what was found, for the confirmation prompt or --auto's
-// note on stderr.
-func (a *app) limitReport(st limit.Status, now int64) string {
-	t := a.tgt
-	if st.State == limit.None {
-		return "No usage-limit notice found for " + target.Summary(t) + "."
-	}
-	what := `"` + firstLine(a.o.message) + `"`
-	if a.o.keys != "" {
-		what = "keys: " + a.o.keys
-	}
-	var b strings.Builder
-	if st.State == limit.Account {
-		fmt.Fprintf(&b, "Usage limit in %s %s (per account; %s shows none):\n", t.Agent, st.Source, t.Pane)
-	} else {
-		fmt.Fprintf(&b, "Usage limit in %s %s:\n", t.Agent, t.Pane)
-	}
-	fmt.Fprintf(&b, "  %s\n", st.Quote)
-	switch {
-	case st.State == limit.Over && st.Reset != 0:
-		fmt.Fprintf(&b, "That reset passed at %s; sending %s %d min from now.",
-			when.Format(st.Reset, when.WeekdayMinute), what, limitMargin/60)
-	case st.State == limit.Over:
-		fmt.Fprintf(&b, "Its footer shows usage left again; sending %s %d min from now.", what, limitMargin/60)
-	case st.Reset != 0:
-		fmt.Fprintf(&b, "Resets %s (in %s); sending %s %d min after.",
-			when.Format(st.Reset, when.WeekdayMinute), when.Delay(st.Reset-now), what, limitMargin/60)
-		if st.Unconfirmed {
-			// A calendar day earlier, which is not 24 h across a DST change.
-			before := time.Unix(st.Reset, 0).In(when.Loc).AddDate(0, 0, -1).Unix()
-			advice := "type +1 min"
-			if a.o.auto {
-				advice = "rerun with --at '+1 min'"
-			}
-			fmt.Fprintf(&b, "\nThe notice names no day; if it was shown before %s, the limit is already over: %s.",
-				when.Format(before, when.WeekdayMinute), advice)
-		}
-	default:
-		fmt.Fprintf(&b, "It names no reset time that can be read; sending %s at the time given.", what)
-	}
-	return b.String()
-}
-
 // detectAt is the send time for a run without --at: the reset of the limit
 // holding the target plus the margin, or the margin from now once that limit
 // is over, confirmed on the terminal or taken as found under --auto.
@@ -734,7 +677,14 @@ func (a *app) detectAt(now int64) (int64, error) {
 	case st.State != limit.None && st.Reset != 0:
 		proposed = st.Reset + limitMargin
 	}
-	report := a.limitReport(st, now)
+	what := `"` + firstLine(a.o.message) + `"`
+	if a.o.keys != "" {
+		what = "keys: " + a.o.keys
+	}
+	report := show.Report{
+		Agent: a.tgt.Agent, Pane: a.tgt.Pane, Summary: target.Summary(a.tgt),
+		Limit: st, What: what, Margin: limitMargin, Auto: a.o.auto, Now: now,
+	}.Plain()
 
 	if a.o.auto {
 		if proposed == 0 {
@@ -799,13 +749,8 @@ func (a *app) confirmAt(def int64, fromNow bool, report string) (int64, error) {
 // ------------------------------------------------------------- subcommands
 
 func (a *app) list() {
-	files := a.paths.StateFiles()
-	if len(files) == 0 {
-		fmt.Fprintln(a.stdout, "No scheduled sends.")
-		return
-	}
-	fmt.Fprintf(a.stdout, "%-24s %-20s %-10s %-9s %s\n", "ID", "AT", "TARGET", "STATE", "PAYLOAD")
-	for _, f := range files {
+	var jobs []show.Job
+	for _, f := range a.paths.StateFiles() {
 		s, _ := job.Load(f)
 		state := a.sys.Output("is-active", job.UnitPrefix+"-"+s.ID+".timer")
 		if state == "" {
@@ -815,8 +760,13 @@ func (a *app) list() {
 		if s.Mode == "keys" {
 			msg = "keys: " + s.Keys
 		}
-		fmt.Fprintf(a.stdout, "%-24s %-20s %-10s %-9s %s\n", s.ID, s.At, s.PaneID, state, msg)
+		var runAt int64
+		if at, err := time.ParseInLocation(when.Calendar, s.At, when.Loc); err == nil {
+			runAt = at.Unix()
+		}
+		jobs = append(jobs, show.Job{ID: s.ID, At: s.At, RunAt: runAt, Pane: s.PaneID, State: state, Payload: msg})
 	}
+	show.List(a.stdout, jobs)
 }
 
 func (a *app) cancel(id string) error {
