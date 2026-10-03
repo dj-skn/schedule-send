@@ -17,8 +17,10 @@ git -C $root show "${ref_commit}:schedule-send.zsh" > $work/ref.zsh || exit 1
 chmod +x $work/ref.zsh
 (cd $root && go build -o $work/go-bin ./cmd/schedule-send) || exit 1
 
+# herdr is shadowed too: a fired job falls back to herdr on PATH when its stored
+# binary is gone, and that must never reach a real pane.
 mkdir -p $work/path
-for tool in systemctl journalctl; do
+for tool in herdr systemctl journalctl; do
   ln -s $root/testdata/standin/$tool $work/path/$tool
 done
 fixtures=$root/testdata/fixtures
@@ -39,17 +41,25 @@ pass=0 fail=0 known_seen=0
 # Differences kept on purpose, each a bug in the zsh version.
 typeset -A known=(
   cwd-tilde-two "zsh never expanded a quoted ~ in --cwd (\${~1} inside quotes), so it matched nothing"
+  fire-no-message "zsh died under set -e on a missing message file, leaving the job and its units behind"
+  fire-herdr-unreadable "zsh died under set -e when herdr's pane list could not be read, leaving the job behind"
 )
 
 # Everything a run leaves behind, with each implementation's own path written
-# as <self> so the two can be compared.
+# as <self> so the two can be compared. A fired job's polling reads are left
+# out: zsh times its waits in whole seconds, so how often it polls depends on
+# where in a second it started. Every action it takes is still compared.
 capture() {
-  local out=$1
+  local name=$1 out=$2
   mkdir -p $out
   for f in stdout stderr exit; do
     sed -e "s|$work/ref.zsh|<self>|g" -e "s|$work/go-bin|<self>|g" -e 's/\r$//' $run/$f > $out/$f
   done
-  cp $run/herdr/calls.log $out/herdr-calls 2>/dev/null || : > $out/herdr-calls
+  if [[ $name == fire-* ]]; then
+    grep -v -e '^agent read ' -e '^agent get ' $run/herdr/calls.log > $out/herdr-calls 2>/dev/null
+  else
+    cp $run/herdr/calls.log $out/herdr-calls 2>/dev/null || : > $out/herdr-calls
+  fi
   cp $run/systemctl.log $out/systemctl-calls 2>/dev/null || : > $out/systemctl-calls
   (cd $run && find state config -printf "%m %y %p\n" 2>/dev/null | sort) > $out/modes
   (cd $run && find state config -type f 2>/dev/null | sort | while read -r f; do
@@ -74,14 +84,21 @@ _case() {
     bin=$work/ref.zsh
     [[ $impl == go ]] && bin=$work/go-bin
     if [[ $how == tty ]]; then
-      (cd $run && eval "$setup" && printf "$input" | script -qe -E never \
+      (cd $run && eval "$setup" || exit
+       printf "$input" | script -qe -E never \
         -c "${(j: :)${(q)bin}} ${(j: :)${(q)@}}" /dev/null >$run/stdout 2>$run/stderr
        print -r -- $? > $run/exit)
     else
-      (cd $run && eval "$setup" && $bin "$@" </dev/null >$run/stdout 2>$run/stderr
+      (cd $run && eval "$setup" || exit
+       $bin "$@" </dev/null >$run/stdout 2>$run/stderr
        print -r -- $? > $run/exit)
     fi
-    capture $work/out/$name/$impl
+    if [[ ! -f $run/exit ]]; then
+      fail=$(( fail + 1 ))
+      print -r -- "SETUP $name: the setup failed"
+      return
+    fi
+    capture $name $work/out/$name/$impl
   done
   if [[ -n ${PARITY_SHOW:-} ]]; then
     print -r -- "----- $name (exit $(<$work/out/$name/go/exit))"
@@ -180,6 +197,53 @@ onterm confirm-typed       'garbage\n2026-10-03 15:00\n16:30\n\n' '' --pane wB:p
 onterm confirm-no-notice   '\n17:00\n\n'    '' --pane wB:p3 --dry-run
 onterm confirm-eof         ''               '' --pane wB:p3 --dry-run
 onterm picker-no-color     '\n\n'           'export NO_COLOR=1' --dry-run
+
+# The worker. arm_job [FILTER [MESSAGE]] arms the fixture job in the run
+# directory, edited by the jq FILTER, with MESSAGE (printf %b) as its text and
+# its stored herdr pointed at the stand-in.
+id=20261003-160100-wBp1
+arm_job() {
+  mkdir -p state/herdr-send config/systemd/user
+  jq --arg bin $HERDR_BIN_OVERRIDE ".herdr_bin = \$bin | ${1:-.}" $job.json > state/herdr-send/$id.json
+  if (( $# > 1 )); then printf '%b' "$2" > state/herdr-send/$id.msg
+  else cp $job.msg state/herdr-send/; fi
+  cp $fixtures/jobs/herdr-send-$id.{service,timer} config/systemd/user/
+}
+# The agent answers the resume with the limit notice again.
+limited_again() {
+  arm_job
+  print -rl -- '❯ resume' '' "  ⎿  You've hit your weekly limit · resets 4pm (Europe/Warsaw)" \
+    '     /upgrade to increase your usage limit.' '' > herdr/recent-wB-p1.txt
+}
+# The composer still holds the message after every Enter.
+draft_stuck() {
+  arm_job ".grace = 1 | .recover = \"$1\"" 'carry on with the plan please'
+  local rule=''
+  rule=${(l:40::─:)rule}
+  print -rl -- '● Done.' '' $rule '❯ carry on with the plan please' $rule '  ctx:16%' > herdr/visible-wB-p1.txt
+}
+codex='.pane_id = "wB:p3" | .agent = "codex"'
+
+check fire-no-state       ''  __fire nope
+check fire-resume         'arm_job' __fire $id
+check fire-old-state      'arm_job "del(.recover, .grace) | $codex" "carry on with the plan please\n"' __fire $id
+check fire-keys           'arm_job ".mode = \"keys\" | .keys = \"ctrl+c  enter\""' __fire $id
+check fire-pane-run       'arm_job ".kind = \"pane\" | .pane_id = \"wB:p5\" | .agent = \"-\"" "make test\n\n"' __fire $id
+check fire-force          'arm_job ".pane_id = \"wZ:p9\" | .force = 1 | .mode = \"keys\" | .keys = \"esc\""' __fire $id
+check fire-gone           'arm_job ".pane_id = \"wZ:p9\""' __fire $id
+check fire-gone-quiet     'arm_job ".pane_id = \"wZ:p9\" | .quiet = 1"' __fire $id
+check fire-not-an-agent   'arm_job ".pane_id = \"wB:p5\""' __fire $id
+check fire-other-agent    'arm_job ".agent = \"codex\""' __fire $id
+check fire-moved          'arm_job ".cwd = \"/tmp\""' __fire $id
+check fire-abort-busy     'arm_job ".if_busy = \"abort\"" && echo "working 300" > herdr/state-wB-p1' __fire $id
+check fire-still-working  'arm_job && echo "working 300" > herdr/state-wB-p1' __fire $id
+check fire-refused        'arm_job && echo "{\"error\":{\"code\":\"agent_blocked\",\"message\":\"agent is blocked\"}}" > herdr/prompt-error.json' __fire $id
+check fire-still-limited  'limited_again' __fire $id
+check fire-draft-stuck    'draft_stuck keys' __fire $id
+check fire-draft-focus    'draft_stuck focus' __fire $id
+check fire-draft-none     'draft_stuck none' __fire $id
+check fire-no-message     'arm_job && rm state/herdr-send/$id.msg' __fire $id
+check fire-herdr-unreadable 'arm_job && echo "not json" > herdr/agent-list.json' __fire $id
 
 print -r -- ""
 print -r -- "parity: $pass identical, $known_seen known differences, $fail unexpected"
