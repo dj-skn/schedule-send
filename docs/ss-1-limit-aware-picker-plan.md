@@ -3,8 +3,8 @@
 ## Status
 
 P1 (Go port) and P2 (limits before the picker) are done and fast-forwarded
-into `ss-1`. P3 (styled terminal output) is done and fast-forwarded into
-`ss-1`; P4 is not started.
+into `ss-1`. P3 is done and fast-forwarded into `ss-1`. P4 is being
+built on `ss-1-p4`.
 `master` still runs the zsh script; nothing in this story is live until `ss-1`
 merges and `tools/install` is run in the main checkout.
 
@@ -38,7 +38,7 @@ builds each result once to render it either for a person or for a program.
 | P1 | Go port, identical behaviour, with tests | done |
 | P2 | Limits detected for every agent before the picker, from pane output | done |
 | P3 | Styled terminal output; `key=value` unchanged when piped | done |
-| P4 | `--json` everywhere, a `--targets` listing, JSON errors on stderr | not started |
+| P4 | `--json` everywhere, a `--targets` listing, JSON errors on stderr | building |
 
 ## P1 — Go port
 
@@ -391,3 +391,31 @@ the colour. The module is 3,384 lines of code and 2,835 of tests.
   can show a live row. It changes nothing unless that variable is set.
 - A limit that is already over was not on screen during the live check. The
   snapshot tests cover that block.
+
+## P4 — JSON
+
+### What the code check found
+
+- **Herdr's error is one object on stderr.** `herdr agent get not-a-pane`
+  prints `{"error":{"code":"agent_not_found","message":"agent target not-a-pane not found"},"id":"cli:agent:get"}` and exits 0. The shape is the part worth matching. This command's exit codes stay as they are.
+- **The results already exist.** P3 built the receipt, the report and the job list as values, so JSON is a third way to print them.
+- **`--list` is handled while the arguments are read.** A `--json` later in the same command would otherwise be missed. It has to be noticed first.
+- **`--help` is a parity case.** Documenting the new flags changes that output on purpose.
+
+### Decisions (settled 2026-10-03; "finish the rest" read as building story decision 3)
+
+1. **`--json` changes only what is printed.** The prompts still happen. stdout is one JSON object, on a terminal too. stderr is JSON as well: a note, a warning, or one error. Exit codes are unchanged. `__fire` is unchanged, because the journal is not a caller.
+2. **Errors match herdr's shape, without its exit 0.** `{"error":{"code":"...","message":"..."}}`. The code is `usage` (exit 2), `not_found`, `ambiguous`, or `failed`. The usage text is not printed beside it.
+3. **`--targets` lists every pane with its limit.** On a terminal it is the picker listing; piped, the same listing without colour; with `--json`, one object. It needs no message and no systemd.
+4. **The limit rides on the result.** A successful `--json` run does not repeat the human report. The object's `limit` holds the state, window, reset, quote and source pane. A failed `--auto` keeps today's explanation inside the error message.
+
+### Steps
+
+1. JSON for the receipt, the dry run, `--list`, `--cancel` and `--status`, and JSON errors, notes and warnings → verify: each output unmarshals; a run without `--json` is unchanged; the prompt still appears under `--json`.
+2. `--targets` → verify: wB:p1 comes out limited until 16:00, as JSON and as the listing.
+3. README, and the help parity case listed as known → verify: `tools/parity` is 64 identical, 14 known, 0 unexpected.
+4. Gate, As built, fast-forward into `ss-1`.
+
+### Not included
+
+JSON for the worker's journal lines, styling `--status`, and merging into `master`.
