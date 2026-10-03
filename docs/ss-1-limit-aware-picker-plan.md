@@ -2,9 +2,8 @@
 
 ## Status
 
-P1 (Go port) and P2 (limits before the picker) are done and fast-forwarded
-into `ss-1`. P3 is done and fast-forwarded into `ss-1`. P4 is being
-built on `ss-1-p4`.
+P1 through P4 are done and fast-forwarded into `ss-1`. The story is
+complete there.
 `master` still runs the zsh script; nothing in this story is live until `ss-1`
 merges and `tools/install` is run in the main checkout.
 
@@ -38,7 +37,7 @@ builds each result once to render it either for a person or for a program.
 | P1 | Go port, identical behaviour, with tests | done |
 | P2 | Limits detected for every agent before the picker, from pane output | done |
 | P3 | Styled terminal output; `key=value` unchanged when piped | done |
-| P4 | `--json` everywhere, a `--targets` listing, JSON errors on stderr | building |
+| P4 | `--json` everywhere, a `--targets` listing, JSON errors on stderr | done |
 
 ## P1 — Go port
 
@@ -419,3 +418,18 @@ the colour. The module is 3,384 lines of code and 2,835 of tests.
 ### Not included
 
 JSON for the worker's journal lines, styling `--status`, and merging into `master`.
+
+### As built
+
+**What exists.** `--json` prints the receipt, the dry run, `--list`, `--cancel` and `--status` as one JSON object, and prints notes, warnings and errors as JSON on stderr. The error is `{"error":{"code":"usage|not_found|ambiguous|failed","message":"..."}}`. `--targets` lists every pane with its usage limit: the picker listing for a person, and `{"targets":[...]}` with `--json`. The prompts are unchanged. A pipe without the flag is still `key=value`.
+
+**Measured on 2026-10-03.**
+
+- `tools/check`: 114 tests and 18 subtests pass, none skipped.
+- `tools/parity`: 78 cases. 63 are identical. 15 are known differences: the 13 from P3, plus `help` and `unknown-arg`, which both print the usage text and so mention the new flags. The plan's step expected 14 known; `unknown-arg` was the extra, and it is only the usage text.
+- **Live and read-only, late that evening.** `--targets --json` parsed and listed three panes. wB:p1 was working and showed no limit, so its object had no `limit`. A dry run for 23:59 printed one object and armed nothing. `--json --bogus` exited 2 with `{"error":{"code":"usage","message":"Unknown argument: --bogus"}}`.
+
+**Found while building and left alone.**
+
+- Herdr exits 0 when it reports an error. This command keeps its exit codes, and only the JSON shape follows herdr.
+- The worker's journal lines are still plain text. `__fire` does not take `--json`.
