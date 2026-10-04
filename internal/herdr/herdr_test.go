@@ -1,10 +1,13 @@
 package herdr
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"schedule-send/internal/target"
 )
@@ -71,10 +74,10 @@ func TestStateAndRead(t *testing.T) {
 	if st, seq := c.State("wZ:p9"); st != "unknown" || seq != -1 {
 		t.Errorf("State of a missing agent = %s %d", st, seq)
 	}
-	if out := c.Read("wB:p1", "visible", 40); !strings.Contains(out, "weekly limit") {
+	if out, err := c.Read("wB:p1", "visible", 40); err != nil || !strings.Contains(out, "weekly limit") {
 		t.Errorf("Read visible = %q", out)
 	}
-	if out := c.Read("wB:p1", "recent-unwrapped", 80); out != "" {
+	if out, err := c.Read("wB:p1", "recent-unwrapped", 80); err != nil || out != "" {
 		t.Errorf("Read recent with no file = %q", out)
 	}
 	if got := c.ProcName("wB:p5"); got != "zsh" {
@@ -111,5 +114,60 @@ func TestLocate(t *testing.T) {
 	t.Setenv("HERDR_BIN_OVERRIDE", "/no/such/herdr")
 	if _, err := Locate(); err == nil || err.Error() != "herdr is not on PATH." {
 		t.Errorf("missing override: %v", err)
+	}
+}
+
+func TestExitZeroJSONErrors(t *testing.T) {
+	for _, stream := range []string{"stdout", "stderr"} {
+		t.Run(stream, func(t *testing.T) {
+			bin := filepath.Join(t.TempDir(), "herdr")
+			redirect := ""
+			if stream == "stderr" {
+				redirect = " >&2"
+			}
+			script := "#!/bin/sh\nprintf '%s\\n' '{\"error\":{\"code\":\"agent_not_found\",\"message\":\"no agent\"}}'" + redirect + "\nexit 0\n"
+			if err := os.WriteFile(bin, []byte(script), 0755); err != nil {
+				t.Fatal(err)
+			}
+			c := Client{Bin: bin}
+			_, promptErr := c.Prompt("gone", "resume")
+			_, readErr := c.Read("gone", "visible", 40)
+			_, targetsErr := c.Targets()
+			errs := map[string]error{
+				"Prompt": promptErr, "Targets": targetsErr,
+				"SendKeys": c.SendKeys("agent", "gone", []string{"enter"}, nil),
+				"Run":      c.Run("gone", "resume", nil), "Wait": c.Wait("gone", 900000), "Focus": c.Focus("gone"),
+			}
+			if stream == "stderr" {
+				errs["Read"] = readErr
+			} else if readErr != nil {
+				t.Errorf("raw JSON transcript caused Read error: %v", readErr)
+			}
+			for name, err := range errs {
+				if err == nil || err.Error() != "no agent" {
+					t.Errorf("%s error=%v, want no agent", name, err)
+				}
+			}
+			if status, seq := c.State("gone"); status != "unknown" || seq != -1 {
+				t.Errorf("State=%s %d", status, seq)
+			}
+		})
+	}
+}
+
+func TestCommandDeadline(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "herdr")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexec sleep 2\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	c := Client{Bin: bin, Timeout: 20 * time.Millisecond}
+	started := time.Now()
+	_, err := c.Prompt("pane", "resume")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error=%v", err)
+	}
+	c.Notify("failure", "message")
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Errorf("commands took %v", elapsed)
 	}
 }

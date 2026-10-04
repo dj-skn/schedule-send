@@ -151,3 +151,22 @@ func TestAfterExcerpt(t *testing.T) {
 		t.Errorf("joined excerpt = %q", got)
 	}
 }
+
+func TestCurrentHardWrappedResetTokens(t *testing.T) {
+	const reset = "Sep 27th, 2026 12:27 AM (Europe/Warsaw)"
+	// Every split inside the printed date, including month, ordinal, year,
+	// hour/minute and timezone, should preserve the same parsed reset.
+	for split := 1; split < len(reset); split++ {
+		tr := transcript("■ You’ve hit your usage limit. Try again at "+reset[:split], reset[split:]+".", "", "› ")
+		n, ok := Current(tr)
+		if !ok || n.Time != reset {
+			t.Errorf("split %d: got %+v ok=%v, want %q", split, n, ok, reset)
+		}
+	}
+	// A date can occupy several lines, with both word and hard wrapping.
+	tr := transcript("■ You’ve hit your usage limit. Try again at Sep 27th, 202", "6 12:", "27 AM (Europe/War", "saw).", "", "› ")
+	n, ok := Current(tr)
+	if !ok || n.Time != reset {
+		t.Fatalf("multiple wraps: got %+v ok=%v", n, ok)
+	}
+}

@@ -2,6 +2,8 @@
 package herdr
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -9,6 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 
 	"schedule-send/internal/target"
 )
@@ -40,21 +44,87 @@ func executable(p string) bool {
 // Client runs one herdr binary.
 type Client struct {
 	Bin string
+	// Timeout overrides command deadlines, primarily for tests.
+	Timeout time.Duration
 	// Stderr receives herdr's own error output for the calls whose failures
 	// the user should see. Nil discards it.
 	Stderr io.Writer
 }
 
-func (c Client) cmd(stderr io.Writer, args ...string) *exec.Cmd {
-	cmd := exec.Command(c.Bin, args...)
-	cmd.Stderr = stderr
-	return cmd
+const commandTimeout = 10 * time.Second
+
+// execute also checks Herdr's JSON error envelope: Herdr can reject a command
+// while exiting zero. All subprocesses have deadlines, including pipe draining.
+func (c Client) execute(timeout time.Duration, stderr io.Writer, args ...string) (string, string, error) {
+	if c.Timeout > 0 {
+		timeout = c.Timeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, c.Bin, args...)
+	cmd.WaitDelay = 500 * time.Millisecond
+	var out, diagnostic bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &diagnostic
+	err := cmd.Run()
+	if stderr != nil {
+		_, _ = stderr.Write(diagnostic.Bytes())
+	}
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	if err == nil {
+		// agent read stdout is raw terminal text, which may itself contain
+		// JSON examples or logs. Herdr command errors use stderr.
+		if len(args) < 2 || args[0] != "agent" || args[1] != "read" {
+			err = responseError(out.String())
+		}
+		if err == nil {
+			err = responseError(diagnostic.String())
+		}
+	}
+	return out.String(), diagnostic.String(), err
 }
 
-// output runs herdr and returns its stdout, also when it failed.
+func responseError(out string) error {
+	decode := func(s string) error {
+		var v struct {
+			Error *struct {
+				Message string `json:"message"`
+				Code    string `json:"code"`
+			} `json:"error"`
+		}
+		if json.Unmarshal([]byte(s), &v) != nil || v.Error == nil {
+			return nil
+		}
+		if v.Error.Message != "" {
+			return errors.New(v.Error.Message)
+		}
+		if v.Error.Code != "" {
+			return errors.New(v.Error.Code)
+		}
+		return errors.New("herdr rejected the command")
+	}
+	if err := decode(out); err != nil {
+		return err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if err := decode(line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// output returns stdout even when Herdr rejected the command.
 func (c Client) output(stderr io.Writer, args ...string) (string, error) {
-	out, err := c.cmd(stderr, args...).Output()
-	return string(out), err
+	out, _, err := c.execute(commandTimeout, stderr, args...)
+	return out, err
+}
+
+func (c Client) run(timeout time.Duration, stderr io.Writer, args ...string) error {
+	_, _, err := c.execute(timeout, stderr, args...)
+	return err
 }
 
 type agentJSON struct {
@@ -153,10 +223,9 @@ func (c Client) ProcName(pane string) string {
 }
 
 // Read returns a pane's text from source ("visible" or "recent-unwrapped"),
-// or whatever came back before a failure.
-func (c Client) Read(pane, source string, lines int) string {
-	out, _ := c.output(nil, "agent", "read", pane, "--source", source, "--lines", strconv.Itoa(lines))
-	return out
+// and reports failures separately from a valid empty screen.
+func (c Client) Read(pane, source string, lines int) (string, error) {
+	return c.output(nil, "agent", "read", pane, "--source", source, "--lines", strconv.Itoa(lines))
 }
 
 // State is an agent's lifecycle status and its state_change_seq, a counter
@@ -186,8 +255,8 @@ func (c Client) State(pane string) (status string, seq int64) {
 // Prompt submits text to an agent, returning herdr's combined output for the
 // error it explains.
 func (c Client) Prompt(pane, msg string) (string, error) {
-	out, err := exec.Command(c.Bin, "agent", "prompt", pane, msg).CombinedOutput()
-	return string(out), err
+	out, diagnostic, err := c.execute(commandTimeout, nil, "agent", "prompt", pane, msg)
+	return out + diagnostic, err
 }
 
 // PromptError is the message in herdr's JSON error reply, or its first line.
@@ -212,22 +281,22 @@ func PromptError(out string) string {
 // agent's identity first, or "pane" for a plain terminal. stderr receives
 // herdr's error output; nil discards it.
 func (c Client) SendKeys(surface, pane string, keys []string, stderr io.Writer) error {
-	return c.cmd(stderr, append([]string{surface, "send-keys", pane}, keys...)...).Run()
+	return c.run(commandTimeout, stderr, append([]string{surface, "send-keys", pane}, keys...)...)
 }
 
 // Run types text into a plain pane and presses Enter.
 func (c Client) Run(pane, msg string, stderr io.Writer) error {
-	return c.cmd(stderr, "pane", "run", pane, msg).Run()
+	return c.run(commandTimeout, stderr, "pane", "run", pane, msg)
 }
 
 // Wait blocks until the agent settles or the timeout passes.
 func (c Client) Wait(pane string, timeoutMs int) error {
-	return c.cmd(nil, "agent", "wait", pane, "--timeout", strconv.Itoa(timeoutMs)).Run()
+	return c.run(time.Duration(timeoutMs)*time.Millisecond+commandTimeout, nil, "agent", "wait", pane, "--timeout", strconv.Itoa(timeoutMs))
 }
 
 // Focus focuses an agent's pane.
 func (c Client) Focus(pane string) error {
-	return c.cmd(nil, "agent", "focus", pane).Run()
+	return c.run(commandTimeout, nil, "agent", "focus", pane)
 }
 
 // Focused is the pane id of the focused agent, or "".
@@ -247,5 +316,5 @@ func (c Client) Focused() string {
 
 // Notify raises a Herdr notification, ignoring failure.
 func (c Client) Notify(title, body string) {
-	_ = c.cmd(nil, "notification", "show", title, "--body", body, "--sound", "request").Run()
+	_ = c.run(2*time.Second, nil, "notification", "show", title, "--body", body, "--sound", "request")
 }

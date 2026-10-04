@@ -73,7 +73,7 @@ func (f Filter) Apply(rows []Row) []Row {
 
 // CwdMatches reports whether dir is want or inside it.
 func CwdMatches(dir, want string) bool {
-	return dir == want || strings.HasPrefix(dir, want+"/")
+	return dir == want || (want == "/" && strings.HasPrefix(dir, "/")) || strings.HasPrefix(dir, want+"/")
 }
 
 // NormPath expands a leading ~, makes p absolute, resolves symlinks as far as
@@ -87,7 +87,7 @@ func NormPath(p string) string {
 	if abs, err := filepath.Abs(p); err == nil {
 		p = abs
 	}
-	return strings.TrimSuffix(realpath(p), "/")
+	return realpath(p)
 }
 
 // realpath resolves symlinks in the longest prefix of p that exists and keeps

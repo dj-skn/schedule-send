@@ -43,8 +43,9 @@ type gate struct {
 	empty bool
 }
 
-func (w *Worker) composer(pane string) screen.Composer {
-	return screen.ParseComposer(screen.Lines(w.h.Read(pane, "visible", 40)))
+func (w *Worker) composer(pane string) (screen.Composer, error) {
+	out, err := w.h.Read(pane, "visible", 40)
+	return screen.ParseComposer(screen.Lines(out)), err
 }
 
 func (w *Worker) deliver(pane, msg string) error {
@@ -54,8 +55,8 @@ func (w *Worker) deliver(pane, msg string) error {
 	// detector stays off and only the needle speaks.
 	g := gate{pane: pane, needle: screen.MessageNeedle(msg)}
 	_, g.seq0 = w.h.State(pane)
-	c := w.composer(pane)
-	g.empty = c.BodyOK && c.Body == ""
+	c, err := w.composer(pane)
+	g.empty = err == nil && c.BodyOK && c.Body == ""
 	w.sawDraft = false
 	w.recovery = ""
 
@@ -72,7 +73,7 @@ func (w *Worker) deliver(pane, msg string) error {
 	if out, err := w.h.Prompt(pane, msg); err != nil {
 		detail := herdr.PromptError(trimNewlines(out))
 		if detail == "" {
-			detail = "unknown error"
+			detail = err.Error()
 		}
 		return w.fail("agent prompt to %s was refused: %s", pane, detail)
 	}
@@ -81,6 +82,9 @@ func (w *Worker) deliver(pane, msg string) error {
 	switch w.await(g) {
 	case sent:
 	case unknown:
+		if w.sawDraft {
+			return w.fail("Could not verify the draft in %s after its screen became unreadable; send aborted.", pane)
+		}
 		// Nothing in the composer and nothing moved. Pressing Enter here would
 		// be the blind keystroke this gate replaced, so the send is reported as
 		// delivered but unverified instead of being guessed either way.
@@ -111,7 +115,10 @@ func trimNewlines(s string) string { return strings.TrimRight(s, "\n") }
 // is read first on purpose: whatever the lifecycle says, a draft we can still
 // see means the Enter did not land.
 func (w *Worker) verdict(g gate) verdict {
-	c := w.composer(g.pane)
+	c, err := w.composer(g.pane)
+	if err != nil || len(c.Raw) == 0 {
+		return unknown
+	}
 	if g.needle != "" && strings.Contains(c.Tail, g.needle) {
 		w.sawDraft = true
 		return unsent
@@ -133,8 +140,9 @@ func (w *Worker) verdict(g gate) verdict {
 		return sent
 	}
 	// A draft that was on screen a moment ago and is not there now went
-	// somewhere, and the only way out of a composer is a submit.
-	if w.sawDraft {
+	// somewhere. Only a successfully read, delimited empty composer supports
+	// this inference; a changed layout or transformed draft is not proof.
+	if w.sawDraft && c.BodyOK && c.Body == "" {
 		return sent
 	}
 	return unknown
@@ -188,6 +196,16 @@ func (w *Worker) recoverSubmission(g gate) outcome {
 
 	prevFocus := ""
 	for _, rung := range rungs {
+		// A previous poll is not permission to press Enter after the screen
+		// changes or becomes unreadable. Refresh the draft evidence each time.
+		switch w.verdict(g) {
+		case sent:
+			w.restoreFocus(prevFocus, g.pane)
+			return recovered
+		case unknown:
+			w.restoreFocus(prevFocus, g.pane)
+			return exhausted
+		}
 		if status, _ := w.h.State(g.pane); status == "blocked" {
 			w.restoreFocus(prevFocus, g.pane)
 			return dialog
@@ -199,7 +217,18 @@ func (w *Worker) recoverSubmission(g gate) outcome {
 			// as idle.
 			fmt.Fprintf(w.Err, "Retried Enter did not land in %s; focusing the pane and trying again.\n", g.pane)
 			prevFocus = w.h.Focused()
-			_ = w.h.Focus(g.pane)
+			if err := w.h.Focus(g.pane); err != nil {
+				fmt.Fprintf(w.Err, "Could not focus %s: %v\n", g.pane, err)
+				continue
+			}
+			switch w.verdict(g) {
+			case sent:
+				w.restoreFocus(prevFocus, g.pane)
+				return recovered
+			case unknown:
+				w.restoreFocus(prevFocus, g.pane)
+				return exhausted
+			}
 			w.recovery = "focused, Enter retried"
 		} else {
 			fmt.Fprintf(w.Err, "Enter was dropped by the agent in %s; retrying the submit.\n", g.pane)
@@ -234,7 +263,8 @@ func (w *Worker) restoreFocus(prev, pane string) {
 // only that something is.
 func (w *Worker) excerpt(pane string) string {
 	out := ""
-	for _, l := range w.composer(pane).Raw {
+	c, _ := w.composer(pane)
+	for _, l := range c.Raw {
 		if !screen.IsBlank(l) {
 			out += " " + l
 		}
@@ -269,9 +299,12 @@ func (w *Worker) awaitLimitNotice(pane, anchor string) (string, bool) {
 // that history only from an idle agent, so a recent read can come back empty
 // and the visible screen, which still holds the latest exchange, stands in.
 func (w *Worker) transcript(pane string) notice.Transcript {
-	out := w.h.Read(pane, "recent-unwrapped", 80)
-	if strings.TrimSpace(out) == "" {
-		out = w.h.Read(pane, "visible", 80)
+	out, err := w.h.Read(pane, "recent-unwrapped", 80)
+	if err != nil || strings.TrimSpace(out) == "" {
+		out, err = w.h.Read(pane, "visible", 80)
+	}
+	if err != nil {
+		return notice.NewTranscript("")
 	}
 	return notice.NewTranscript(out)
 }

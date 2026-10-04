@@ -145,3 +145,16 @@ func TestNormPath(t *testing.T) {
 		}
 	}
 }
+
+func TestRootCwdSelector(t *testing.T) {
+	root := NormPath("/")
+	if root != "/" {
+		t.Fatalf("NormPath(/)=%q", root)
+	}
+	if !CwdMatches("/tmp/a", root) || !CwdMatches("/", root) || CwdMatches("relative", root) {
+		t.Fatal("root does not match absolute paths correctly")
+	}
+	if got := panes((Filter{Cwd: root}).Apply(rows)); got != "wA:p1 wB:p1 wB:p3 wE:p1" {
+		t.Fatalf("root selector got %q, want matching agents preferred", got)
+	}
+}

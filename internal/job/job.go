@@ -4,13 +4,19 @@ package job
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"syscall"
+	"time"
+	"unicode/utf8"
 )
 
 // UnitPrefix names every unit this tool writes.
@@ -62,6 +68,7 @@ type State struct {
 	Grace    int    `json:"grace"`
 	HerdrBin string `json:"herdr_bin"`
 	Unit     string `json:"unit"`
+	RunAt    int64  `json:"run_at,omitempty"`
 }
 
 // Load reads a state file. recover and grace default to "keys" and 4, so a
@@ -75,13 +82,23 @@ func Load(path string) (State, error) {
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return State{}, err
 	}
+	for _, key := range []string{"id", "kind", "pane_id", "agent", "cwd", "at", "mode", "keys", "if_busy", "recover", "herdr_bin", "unit"} {
+		if v := raw[key]; v != nil {
+			if _, ok := v.(string); !ok {
+				return State{}, fmt.Errorf("job field %s must be a string", key)
+			}
+		}
+	}
 	s := State{
 		ID: str(raw["id"]), Kind: str(raw["kind"]), PaneID: str(raw["pane_id"]),
 		Agent: str(raw["agent"]), Cwd: str(raw["cwd"]), At: str(raw["at"]),
 		Mode: str(raw["mode"]), Keys: str(raw["keys"]), IfBusy: str(raw["if_busy"]),
 		Force: whole(raw["force"], 0), Quiet: whole(raw["quiet"], 0),
 		Recover: str(raw["recover"]), Grace: whole(raw["grace"], 4),
-		HerdrBin: str(raw["herdr_bin"]), Unit: str(raw["unit"]),
+		HerdrBin: str(raw["herdr_bin"]), Unit: str(raw["unit"]), RunAt: int64(whole(raw["run_at"], 0)),
+	}
+	if s.IfBusy == "" {
+		s.IfBusy = "wait"
 	}
 	if s.Recover == "" {
 		s.Recover = "keys"
@@ -120,20 +137,141 @@ func Encode(s State) []byte {
 	return b.Bytes()
 }
 
-// Write stores a job's state, and its message unless msg is nil. The state
-// directory is created mode 700, since messages are stored verbatim.
-func (p Paths) Write(s State, msg *string) error {
+// ErrBusy means another process is changing this job.
+var ErrBusy = errors.New("job is busy in another process")
+var validID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
+// Validate checks fields required to fire safely, while retaining defaults for
+// old optional fields. A malformed kind must never fall through to pane run.
+func (s State) Validate(id string) error {
+	if !validID.MatchString(id) || s.ID != id {
+		return errors.New("invalid or mismatched job id")
+	}
+	if s.Kind != "agent" && s.Kind != "pane" {
+		return errors.New("invalid job kind")
+	}
+	if s.PaneID == "" || s.Cwd == "" || s.Kind == "agent" && s.Agent == "" {
+		return errors.New("job target identity is incomplete")
+	}
+	if s.Mode != "text" && s.Mode != "keys" {
+		return errors.New("invalid job mode")
+	}
+	if s.Mode == "keys" && len(strings.Fields(s.Keys)) == 0 {
+		return errors.New("job has no keys")
+	}
+	if s.IfBusy != "wait" && s.IfBusy != "abort" {
+		return errors.New("invalid busy policy")
+	}
+	if s.Recover != "keys" && s.Recover != "focus" && s.Recover != "none" {
+		return errors.New("invalid recovery policy")
+	}
+	if s.Grace < 1 || s.Grace > 60 || s.Force < 0 || s.Force > 1 || s.Quiet < 0 || s.Quiet > 1 {
+		return errors.New("invalid job controls")
+	}
+	return nil
+}
+
+// Lock serializes reservation, arming, cancellation, and cleanup. Lock files
+// remain in place: removing one would let another process lock a different inode.
+type Lock struct{ file *os.File }
+
+func (p Paths) Lock(id string) (*Lock, error) {
+	if !validID.MatchString(id) {
+		return nil, errors.New("invalid job id")
+	}
 	if err := os.MkdirAll(p.StateDir, 0o700); err != nil {
-		return err
+		return nil, err
 	}
 	if err := os.Chmod(p.StateDir, 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(p.StateDir, "."+id+".lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, ErrBusy
+		}
+		return nil, err
+	}
+	return &Lock{f}, nil
+}
+func (l *Lock) Close() error {
+	if l.file == nil {
+		return nil
+	}
+	err := l.file.Close()
+	l.file = nil
+	return err
+}
+
+// lockUntil lets a firing worker wait for the scheduler to finish enabling its
+// timer. Scheduling itself remains nonblocking and cannot overwrite a job.
+func (p Paths) lockUntil(id string, timeout time.Duration) (*Lock, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		lock, err := p.Lock(id)
+		if !errors.Is(err, ErrBusy) || !time.Now().Before(deadline) {
+			return lock, err
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+// AtomicWrite publishes a complete file in one rename within its directory.
+func AtomicWrite(path string, data []byte, mode os.FileMode) error {
+	f, err := os.CreateTemp(filepath.Dir(path), ".schedule-send-*")
+	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(p.StatePath(s.ID), Encode(s), 0o666); err != nil {
+	defer os.Remove(f.Name())
+	if err = f.Chmod(mode); err == nil {
+		_, err = f.Write(data)
+	}
+	if err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Rename(f.Name(), path)
+}
+
+// Write reserves and publishes a job. The scheduler holds the reservation
+// through arming and uses Publish directly instead.
+func (p Paths) Write(s State, msg *string) error {
+	lock, err := p.Lock(s.ID)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	return p.Publish(s, msg)
+}
+
+// Publish requires the caller to hold the job's lock. The message is complete
+// before the state appears, so a worker never sees a half-written payload.
+func (p Paths) Publish(s State, msg *string) error {
+	if _, err := os.Stat(p.StatePath(s.ID)); err == nil {
+		return os.ErrExist
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	if msg != nil {
-		return os.WriteFile(p.MessagePath(s.ID), []byte(*msg), 0o666)
+		if err := AtomicWrite(p.MessagePath(s.ID), []byte(*msg), 0o600); err != nil {
+			return err
+		}
+	}
+	if err := AtomicWrite(p.StatePath(s.ID), Encode(s), 0o600); err != nil {
+		if msg != nil {
+			_ = os.Remove(p.MessagePath(s.ID))
+		}
+		return err
 	}
 	return nil
 }
@@ -166,68 +304,170 @@ WantedBy=timers.target
 `, id, calendar, persistent)
 }
 
-// Systemctl runs systemctl --user.
+// Systemctl runs systemctl --user with a deadline. Output includes non-zero
+// is-active responses; mutating callers receive the diagnostics as errors.
 type Systemctl struct{}
 
-// Quiet runs it with all output discarded.
-func (Systemctl) Quiet(args ...string) error {
-	return exec.Command("systemctl", append([]string{"--user"}, args...)...).Run()
+func systemctlCommand(args ...string) (*exec.Cmd, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	cmd := exec.CommandContext(ctx, "systemctl", append([]string{"--user"}, args...)...)
+	cmd.WaitDelay = time.Second
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	return cmd, cancel
 }
-
-// Output runs it and returns its stdout, whatever the exit status: is-active
-// prints "inactive" while exiting non-zero.
+func (Systemctl) Quiet(args ...string) error {
+	cmd, cancel := systemctlCommand(args...)
+	defer cancel()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("systemctl %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
 func (Systemctl) Output(args ...string) string {
-	out, _ := exec.Command("systemctl", append([]string{"--user"}, args...)...).Output()
+	cmd, cancel := systemctlCommand(args...)
+	defer cancel()
+	out, _ := cmd.Output()
 	return strings.TrimRight(string(out), "\n")
 }
-
-// Through runs it with its output passed to ours.
 func (Systemctl) Through(stdout, stderr io.Writer, args ...string) error {
-	cmd := exec.Command("systemctl", append([]string{"--user"}, args...)...)
+	cmd, cancel := systemctlCommand(args...)
+	defer cancel()
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	return cmd.Run()
 }
 
-// Remove disarms a job and deletes its units and state, ignoring what is
-// already gone.
-func (p Paths) Remove(sys Systemctl, id string) {
+// Missing units are already stopped; transport errors are never treated as
+// missing. Diagnostics are read only from a real systemctl exit failure.
+func missingUnit(err error) bool {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "not loaded") || strings.Contains(text, "does not exist") || strings.Contains(text, "could not be found")
+}
+func stopUnit(sys Systemctl, args ...string) error {
+	err := sys.Quiet(args...)
+	if missingUnit(err) {
+		return nil
+	}
+	return err
+}
+func (p Paths) disarm(sys Systemctl, id string, stopService bool) error {
 	unit := UnitPrefix + "-" + id
-	_ = sys.Quiet("disable", "--now", unit+".timer")
-	_ = sys.Quiet("stop", unit+".service")
-	_ = sys.Quiet("reset-failed", unit+".timer", unit+".service")
-	os.Remove(p.UnitPath(id, "timer"))
-	os.Remove(p.UnitPath(id, "service"))
-	_ = sys.Quiet("daemon-reload")
-	os.Remove(p.StatePath(id))
-	os.Remove(p.MessagePath(id))
+	if err := stopUnit(sys, "stop", unit+".timer"); err != nil {
+		return err
+	}
+	if stopService {
+		if err := stopUnit(sys, "stop", unit+".service"); err != nil {
+			return err
+		}
+	}
+	return stopUnit(sys, "disable", unit+".timer")
+}
+func removeFile(path string) error {
+	err := os.Remove(path)
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		return nil
+	}
+	return err
+}
+func (p Paths) removeFiles(id string) error {
+	for _, path := range []string{p.UnitPath(id, "timer"), p.UnitPath(id, "service"), p.MessagePath(id), p.StatePath(id)} {
+		if err := removeFile(path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// Cleanup is what a fired job does to itself. A one-shot timer must not
-// linger in timers.target.wants, or it would be re-armed at the next boot.
-func (p Paths) Cleanup(sys Systemctl, id string) {
-	os.Remove(p.StatePath(id))
-	os.Remove(p.MessagePath(id))
-	_ = sys.Quiet("disable", UnitPrefix+"-"+id+".timer")
-	os.Remove(p.UnitPath(id, "timer"))
-	os.Remove(p.UnitPath(id, "service"))
-	_ = sys.Quiet("daemon-reload")
+// finishRemoval retains state/message until removed units have been reloaded.
+// That leaves a failed cleanup inspectable and safe to retry.
+func (p Paths) finishRemoval(sys Systemctl, id string) error {
+	for _, path := range []string{p.UnitPath(id, "timer"), p.UnitPath(id, "service")} {
+		if err := removeFile(path); err != nil {
+			return err
+		}
+	}
+	if err := sys.Quiet("daemon-reload"); err != nil {
+		return err
+	}
+	if err := removeFile(p.MessagePath(id)); err != nil {
+		return err
+	}
+	return removeFile(p.StatePath(id))
 }
 
-// Sweep clears failed units, which leave the user manager degraded, and drops
-// unit files whose job finished or was never recorded.
+// Remove keeps inspectable state when stopping/disabling a job fails.
+func (p Paths) Remove(sys Systemctl, id string) error {
+	lock, err := p.Lock(id)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if _, err := os.Stat(p.StatePath(id)); err != nil {
+		return err
+	}
+	if err := p.disarm(sys, id, true); err != nil {
+		return err
+	}
+	_ = sys.Quiet("reset-failed", UnitPrefix+"-"+id+".timer", UnitPrefix+"-"+id+".service")
+	return p.finishRemoval(sys, id)
+}
+
+// Rollback is used while the scheduler still holds the reservation. Before
+// enable was attempted, none of the job's units can be running. Afterwards
+// it must be stopped before deleting the state, even if enable returned an error.
+func (p Paths) Rollback(sys Systemctl, id string, activationAttempted bool) error {
+	if activationAttempted {
+		if err := p.disarm(sys, id, true); err != nil {
+			return err
+		}
+	}
+	if err := p.removeFiles(id); err != nil {
+		return err
+	}
+	// Failed reloads cannot arm a timer. Files have been removed and a later
+	// successful reload will reconcile the manager's metadata.
+	_ = sys.Quiet("daemon-reload")
+	return nil
+}
+
+// Cleanup never stops its own service. Retain state on cleanup failures so
+// --list and cancellation can repair the remaining artifacts.
+func (p Paths) Cleanup(sys Systemctl, id string) error {
+	lock, err := p.lockUntil(id, 35*time.Second)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err := p.disarm(sys, id, false); err != nil {
+		return err
+	}
+	return p.finishRemoval(sys, id)
+}
+
+// Sweep only removes orphan units after acquiring the same lock as scheduling.
 func (p Paths) Sweep(sys Systemctl) {
 	_ = sys.Quiet("reset-failed", UnitPrefix+"-*")
 	timers, _ := filepath.Glob(filepath.Join(p.UnitDir, UnitPrefix+"-*.timer"))
 	swept := false
 	for _, t := range timers {
 		id := strings.TrimPrefix(strings.TrimSuffix(filepath.Base(t), ".timer"), UnitPrefix+"-")
-		if _, err := os.Stat(p.StatePath(id)); err == nil {
+		lock, err := p.Lock(id)
+		if err != nil {
 			continue
 		}
-		_ = sys.Quiet("disable", UnitPrefix+"-"+id+".timer")
-		os.Remove(p.UnitPath(id, "timer"))
-		os.Remove(p.UnitPath(id, "service"))
-		swept = true
+		if _, err := os.Stat(p.StatePath(id)); errors.Is(err, os.ErrNotExist) {
+			if err := p.disarm(sys, id, false); err == nil {
+				if err := removeFile(p.UnitPath(id, "timer")); err == nil {
+					_ = removeFile(p.UnitPath(id, "service"))
+					swept = true
+				}
+			}
+		}
+		lock.Close()
 	}
 	if swept {
 		_ = sys.Quiet("daemon-reload")
@@ -248,7 +488,11 @@ func Preview(stateFile string) string {
 		return ""
 	}
 	if len(b) > 60 {
-		b = b[:60]
+		end := 60
+		for end > 0 && !utf8.RuneStart(b[end]) {
+			end--
+		}
+		b = b[:end]
 	}
 	line, _, _ := strings.Cut(string(b), "\n")
 	return line

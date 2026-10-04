@@ -31,11 +31,16 @@ import (
 type failure struct {
 	msg  string
 	code int
+	kind string
 }
 
 func (f failure) Error() string { return f.msg }
 
-func die(format string, a ...any) error { return failure{fmt.Sprintf(format, a...), 1} }
+func die(format string, a ...any) error { return fail("failed", format, a...) }
+
+func fail(kind, format string, a ...any) error {
+	return failure{msg: fmt.Sprintf(format, a...), code: 1, kind: kind}
+}
 
 // What a run without --at sends when no payload was given: resuming after the
 // limit is what a detected time is for.
@@ -53,7 +58,8 @@ type options struct {
 	panesOnly, allowSelf, force  bool
 	quiet, dryRun, persistent    bool
 	auto, haveMessage, defaulted bool
-	json, targets                bool
+	json                         bool
+	operation, operationID       string
 }
 
 type app struct {
@@ -137,14 +143,9 @@ func (a *app) main(args []string) int {
 // writeError prints a failure as {"error":{"code","message"}}, the shape herdr
 // uses. The code names the kind of failure; the exit status is unchanged.
 func (a *app) writeError(f failure) {
-	code := "failed"
-	switch {
-	case f.code == 2:
-		code = "usage"
-	case strings.HasPrefix(f.msg, "No scheduled send"), strings.HasPrefix(f.msg, "No state file"):
-		code = "not_found"
-	case strings.HasPrefix(f.msg, "Multiple targets matched"):
-		code = "ambiguous"
+	code := f.kind
+	if code == "" {
+		code = "failed"
 	}
 	emit(a.stderr, map[string]any{"error": map[string]string{"code": code, "message": f.msg}})
 }
@@ -178,24 +179,34 @@ func (a *app) warn(msg string) {
 	fmt.Fprintln(a.stderr, msg)
 }
 
-// errDone ends a run that has already printed its result.
-var errDone = failure{code: 0}
-
 func (a *app) parse(args []string) error {
 	o := &a.o
 	o.pick, o.ifBusy, o.recover, o.grace = "unique", "wait", "keys", "4"
+	scheduling := false
+	operation := func(name string) error {
+		if o.operation != "" {
+			return fail("usage", "Use only one operation: %s and %s cannot be combined.", o.operation, name)
+		}
+		o.operation = name
+		return nil
+	}
 	for i := 0; i < len(args); {
 		flag := args[i]
+		switch flag {
+		case "--json", "--targets", "--list", "--cancel", "--status", "--help", "-h":
+		default:
+			scheduling = true
+		}
 		value := func() (string, error) {
 			v := ""
 			if i+1 < len(args) {
 				v = args[i+1]
 			}
 			if v == "" {
-				return "", die("Missing value for %s.", flag)
+				return "", fail("usage", "Missing value for %s.", flag)
 			}
 			if strings.HasPrefix(v, "--") {
-				return "", die("Missing value for %s (got the flag '%s').", flag, v)
+				return "", fail("usage", "Missing value for %s (got the flag '%s').", flag, v)
 			}
 			i += 2
 			return v, nil
@@ -248,56 +259,54 @@ func (a *app) parse(args []string) error {
 			on(&o.dryRun)
 		case "--json":
 			on(&o.json)
-		case "--targets":
-			on(&o.targets)
-		case "--list":
-			if err := a.locateHerdr(); err != nil {
-				return err
+		case "--targets", "--list":
+			err = operation(flag)
+			i++
+		case "--cancel", "--status":
+			if err = operation(flag); err == nil {
+				o.operationID, err = value()
 			}
-			a.list()
-			return errDone
-		case "--cancel":
-			id, err := value()
-			if err != nil {
-				return err
-			}
-			if err := a.cancel(id); err != nil {
-				return err
-			}
-			return errDone
-		case "--status":
-			id, err := value()
-			if err != nil {
-				return err
-			}
-			a.status(id)
-			return errDone
 		case "-h", "--help":
-			fmt.Fprint(a.stdout, usage)
-			return errDone
+			err = operation("--help")
+			i++
 		default:
 			if a.o.json {
-				return failure{code: 2, msg: "Unknown argument: " + flag}
+				return failure{code: 2, kind: "usage", msg: "Unknown argument: " + flag}
 			}
 			fmt.Fprintln(a.stderr, "Unknown argument: "+flag)
 			fmt.Fprint(a.stderr, usage)
-			return failure{code: 2}
+			return failure{code: 2, kind: "usage"}
 		}
 		if err != nil {
 			return err
 		}
+	}
+	if o.operation != "" && scheduling {
+		return fail("usage", "Scheduling options cannot be combined with %s.", o.operation)
 	}
 	return nil
 }
 
 var digits = regexp.MustCompile(`^[0-9]+$`)
 
-func (a *app) run(args []string) error {
+func (a *app) run(args []string) (retErr error) {
 	if err := a.parse(args); err != nil {
 		return err
 	}
-	if a.o.targets {
+	switch a.o.operation {
+	case "--targets":
 		return a.showTargets()
+	case "--list":
+		a.list()
+		return nil
+	case "--cancel":
+		return a.cancel(a.o.operationID)
+	case "--status":
+		a.status(a.o.operationID)
+		return nil
+	case "--help":
+		fmt.Fprint(a.stdout, usage)
+		return nil
 	}
 	o := &a.o
 
@@ -366,10 +375,9 @@ func (a *app) run(args []string) error {
 		o.cwd = target.NormPath(o.cwd)
 	}
 
-	a.h.Stderr = a.stderr
-	a.rows, err = a.h.Targets()
+	a.rows, err = a.discoverTargets()
 	if err != nil {
-		return failure{code: 1}
+		return err
 	}
 	if len(a.rows) == 0 {
 		return die("Herdr reported no panes.")
@@ -461,19 +469,39 @@ func (a *app) run(args []string) error {
 		return nil
 	}
 
+	lock, err := a.paths.Lock(id)
+	if err != nil {
+		return die("Could not reserve %s: %v", id, err)
+	}
+	defer lock.Close()
+	// Recheck while holding the reservation; the preview check is not a lock.
+	if _, err := os.Stat(a.paths.StatePath(id)); err == nil {
+		return die("A send to %s at %s is already scheduled (%s). Cancel it with --cancel %s, or pick another time.", t.Pane, calendar, id, id)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return die("Could not inspect %s: %v", id, err)
+	}
 	a.paths.Sweep(a.sys)
 	state := job.State{
 		ID: id, Kind: t.Kind, PaneID: t.Pane, Agent: t.Agent, Cwd: t.Cwd, At: calendar,
 		Mode: mode, Keys: o.keys, IfBusy: o.ifBusy, Force: b2i(o.force), Quiet: b2i(o.quiet),
-		Recover: o.recover, Grace: grace, HerdrBin: a.h.Bin, Unit: unit,
+		Recover: o.recover, Grace: grace, HerdrBin: a.h.Bin, Unit: unit, RunAt: runAt,
 	}
 	var msg *string
 	if mode == "text" {
 		msg = &o.message
 	}
-	if err := a.paths.Write(state, msg); err != nil {
+	if err := a.paths.Publish(state, msg); err != nil {
 		return die("Could not write the job's state: %v", err)
 	}
+
+	activationAttempted := false
+	defer func() {
+		if retErr != nil {
+			if err := a.paths.Rollback(a.sys, id, activationAttempted); err != nil {
+				retErr = die("%v; rollback failed, job retained for inspection: %v", retErr, err)
+			}
+		}
+	}()
 
 	// Unit files live on disk rather than being transient, because transient
 	// units are written to /run and would be lost on reboot.
@@ -481,21 +509,22 @@ func (a *app) run(args []string) error {
 		return die("Could not create %s: %v", a.paths.UnitDir, err)
 	}
 	service, timer := a.paths.UnitPath(id, "service"), a.paths.UnitPath(id, "timer")
-	if err := os.WriteFile(service, []byte(job.ServiceUnit(t.Pane, calendar, a.selfPath(), id)), 0o666); err != nil {
+	if err := job.AtomicWrite(service, []byte(job.ServiceUnit(t.Pane, calendar, a.selfPath(), id)), 0o644); err != nil {
 		return die("Could not write %s: %v", service, err)
 	}
-	if err := os.WriteFile(timer, []byte(job.TimerUnit(id, calendar, o.persistent)), 0o666); err != nil {
+	if err := job.AtomicWrite(timer, []byte(job.TimerUnit(id, time.Unix(runAt, 0).UTC().Format(when.Calendar)+" UTC", o.persistent)), 0o644); err != nil {
 		return die("Could not write %s: %v", timer, err)
 	}
-	if err := a.sys.Through(a.stdout, a.stderr, "daemon-reload"); err != nil {
-		return die("systemctl daemon-reload failed.")
+	if err := a.sys.Quiet("daemon-reload"); err != nil {
+		return die("systemctl daemon-reload failed: %v", err)
 	}
+	activationAttempted = true
 	if err := a.sys.Quiet("enable", "--now", unit+".timer"); err != nil {
-		os.Remove(service)
-		os.Remove(timer)
-		_ = a.sys.Quiet("daemon-reload")
-		return die("Could not arm %s.timer.", unit)
+		return die("Could not arm %s.timer: %v", unit, err)
 	}
+	// Rendering may read panes again; release the reservation once arming is
+	// settled, before an immediately firing worker needs to clean up.
+	_ = lock.Close()
 	a.receipt(sched, now)
 	return nil
 }
@@ -538,7 +567,10 @@ func (a *app) startClock() error {
 		if !digits.MatchString(v) {
 			return die("HERDR_SCHEDULE_NOW_EPOCH must be an integer epoch.")
 		}
-		fixed, _ := strconv.ParseInt(v, 10, 64)
+		fixed, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return die("HERDR_SCHEDULE_NOW_EPOCH must be an integer epoch in range.")
+		}
 		a.clock = func() int64 { return fixed }
 	}
 	return nil
@@ -627,7 +659,7 @@ func (a *app) chooseTarget() (target.Row, error) {
 			return rows[0], nil
 		}
 		if a.o.json {
-			return target.Row{}, die("Multiple targets matched. Narrow with --cwd/--kind/--pane, or use --pick best.")
+			return target.Row{}, fail("ambiguous", "Multiple targets matched. Narrow with --cwd/--kind/--pane, or use --pick best.")
 		}
 		fmt.Fprintln(a.stderr, "Multiple targets matched. Narrow with --cwd/--kind/--pane, or use --pick best.")
 		target.Render(a.stderr, rows, marks, term.ColorsFor(a.stderr), a.selfPane, a.h.ProcName)
@@ -643,7 +675,10 @@ func (a *app) chooseTarget() (target.Row, error) {
 	for {
 		fmt.Fprint(tty, "target [1]: ")
 		choice, ok := term.ReadLine(tty)
-		if !ok || choice == "" {
+		if !ok {
+			return target.Row{}, die("Target selection cancelled: no input received.")
+		}
+		if choice == "" {
 			choice = "1"
 		}
 		if n, err := strconv.Atoi(choice); err == nil && digits.MatchString(choice) && n >= 1 && n <= len(rows) {
@@ -667,7 +702,13 @@ func (a *app) limits() map[string]limit.Status {
 				agents = append(agents, limit.Agent{Pane: r.Pane, Kind: r.Agent})
 			}
 		}
-		a.lim = limit.Scan(agents, a.selfPane, a.now, func(p string) string { return a.h.Read(p, "visible", 120) })
+		a.lim = limit.Scan(agents, a.selfPane, a.now, func(p string) string {
+			out, err := a.h.Read(p, "visible", 120)
+			if err != nil {
+				return ""
+			}
+			return out
+		})
 	}
 	return a.lim
 }
@@ -868,7 +909,16 @@ func (a *app) confirmAt(def int64, fromNow bool, report show.Report) (int64, err
 func (a *app) list() {
 	var jobs []show.Job
 	for _, f := range a.paths.StateFiles() {
-		s, _ := job.Load(f)
+		s, err := job.Load(f)
+		if err != nil {
+			a.warn(fmt.Sprintf("Could not read job state %s: %v", f, err))
+			continue
+		}
+		id := strings.TrimSuffix(filepath.Base(f), ".json")
+		if s.ID != id {
+			a.warn(fmt.Sprintf("Invalid job state %s: id does not match its filename.", f))
+			continue
+		}
 		state := a.sys.Output("is-active", job.UnitPrefix+"-"+s.ID+".timer")
 		if state == "" {
 			state = "gone"
@@ -879,8 +929,11 @@ func (a *app) list() {
 		} else if b, err := os.ReadFile(strings.TrimSuffix(f, ".json") + ".msg"); err == nil {
 			j.Message = string(b)
 		}
-		if at, err := time.ParseInLocation(when.Calendar, s.At, when.Loc); err == nil {
-			j.RunAt = at.Unix()
+		j.RunAt = s.RunAt
+		if j.RunAt == 0 {
+			if at, err := time.ParseInLocation(when.Calendar, s.At, when.Loc); err == nil {
+				j.RunAt = at.Unix()
+			}
 		}
 		jobs = append(jobs, j)
 	}
@@ -900,9 +953,14 @@ func (a *app) list() {
 
 func (a *app) cancel(id string) error {
 	if _, err := os.Stat(a.paths.StatePath(id)); err != nil {
-		return die("No scheduled send with id: %s", id)
+		return fail("not_found", "No scheduled send with id: %s", id)
 	}
-	a.paths.Remove(a.sys, id)
+	if err := a.paths.Remove(a.sys, id); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fail("not_found", "No scheduled send with id: %s", id)
+		}
+		return die("Could not cancel %s: %v", id, err)
+	}
 	if a.o.json {
 		emit(a.stdout, struct {
 			Cancelled string `json:"cancelled"`
@@ -954,6 +1012,8 @@ func (a *app) statusJSON(id string) {
 		state = json.RawMessage(bytes.TrimSpace(b))
 	} else if err != nil {
 		warning = fmt.Sprintf("No state file for %s (job may have already run).", id)
+	} else {
+		warning = fmt.Sprintf("Invalid JSON in state file for %s.", id)
 	}
 	var timer bytes.Buffer
 	_ = a.sys.Through(&timer, &timer, "status", unit+".timer", "--no-pager")
@@ -980,8 +1040,8 @@ func (a *app) showTargets() error {
 	}
 	a.now = a.clock()
 	var err error
-	if a.rows, err = a.h.Targets(); err != nil {
-		return failure{code: 1}
+	if a.rows, err = a.discoverTargets(); err != nil {
+		return err
 	}
 	if len(a.rows) == 0 {
 		return die("Herdr reported no panes.")
@@ -1016,4 +1076,22 @@ func (a *app) showTargets() error {
 	}
 	target.Render(a.stdout, rows, marks, term.ColorsFor(a.stdout), a.selfPane, a.h.ProcName)
 	return nil
+}
+
+// discoverTargets captures child diagnostics so JSON output is never mixed
+// with a subprocess's plain text and decoding failures remain explainable.
+func (a *app) discoverTargets() ([]target.Row, error) {
+	var diagnostic bytes.Buffer
+	prev := a.h.Stderr
+	a.h.Stderr = &diagnostic
+	defer func() { a.h.Stderr = prev }()
+	rows, err := a.h.Targets()
+	if err != nil {
+		detail := strings.TrimSpace(diagnostic.String())
+		if detail != "" {
+			return nil, die("Could not discover Herdr targets: %v: %s", err, detail)
+		}
+		return nil, die("Could not discover Herdr targets: %v", err)
+	}
+	return rows, nil
 }
