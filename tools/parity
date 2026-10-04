@@ -1,0 +1,268 @@
+#!/bin/zsh
+# Runs the same commands through the zsh schedule-send this was ported from and
+# through the Go binary, against stand-ins for herdr, systemctl and journalctl,
+# and compares stdout, stderr, the exit status, the files an armed job leaves,
+# and every herdr and systemctl call. This is SS-1 P1's acceptance check; the
+# later phases change behaviour on purpose and are expected to diverge.
+#
+#   tools/parity            all cases
+#   tools/parity NAME...    only these
+set -uo pipefail
+root=${0:A:h:h}
+ref_commit=${PARITY_REF:-zsh-baseline}
+work=$(mktemp -d)
+trap 'rm -rf $work' EXIT
+
+git -C $root show "${ref_commit}:schedule-send.zsh" > $work/ref.zsh || exit 1
+chmod +x $work/ref.zsh
+(cd $root && go build -o $work/go-bin ./cmd/schedule-send) || exit 1
+
+# herdr is shadowed too: a fired job falls back to herdr on PATH when its stored
+# binary is gone, and that must never reach a real pane.
+mkdir -p $work/path
+for tool in herdr systemctl journalctl; do
+  ln -s $root/testdata/standin/$tool $work/path/$tool
+done
+fixtures=$root/testdata/fixtures
+run=$work/run
+
+export PATH=$work/path:$PATH
+export HERDR_BIN_OVERRIDE=$root/testdata/standin/herdr
+export HERDR_STANDIN_DIR=$run/herdr
+export SYSTEMCTL_STANDIN_LOG=$run/systemctl.log
+export XDG_STATE_HOME=$run/state XDG_CONFIG_HOME=$run/config
+export TZ=Europe/Warsaw HOME=/home/dev HERDR_PANE_ID=wB:p2
+export HERDR_SCHEDULE_NOW_EPOCH=1791033720   # Sat 2026-10-03 15:22:00 CEST
+unset NO_COLOR
+
+typeset -a only=("$@")
+pass=0 fail=0 known_seen=0
+
+# Differences kept on purpose, first the bugs in the zsh version.
+typeset -A known=(
+  cwd-tilde-two "zsh never expanded a quoted ~ in --cwd (\${~1} inside quotes), so it matched nothing"
+  fire-no-message "zsh died under set -e on a missing message file, leaving the job and its units behind"
+  fire-herdr-unreadable "zsh died under set -e when herdr's pane list could not be read, leaving the job behind"
+)
+# Behaviour SS-1 P2 changed: limits are read for every agent before the picker.
+known+=(
+  ambiguous "the listing marks wB:p1 as limited, with its reset"
+  picker-retry "with --at the order is kept, and wB:p1 is marked as limited; on the terminal the dry run is styled too (P3)"
+  picker-default "without --at the limited wB:p1 ranks first, so Enter takes it, with its own notice; on the terminal the report, prompt and dry run are styled too (P3)"
+  picker-no-color "picker-default without colour, in the same styled layout (P3)"
+  picker-choose "row 2 is now wA:p1, whose own footer shows usage left, so there is no notice, no default, and the run ends at EOF; on the terminal the report and prompt are styled too (P3)"
+  auto-per-account "wA:p1's own footer shows week:11%, a different account, so wB:p1's reset is not borrowed and --auto fails"
+  auto-stale "at 16:16 the 4pm notice reads as over, so it proposes one minute from now rather than tomorrow's 4pm"
+)
+# Behaviour SS-1 P3 changed: output going to a terminal is styled.
+known+=(
+  confirm-typed "on the terminal the report, prompt, answers and dry run are styled"
+  confirm-no-notice "on the terminal the report, prompt, answer and dry run are styled"
+  confirm-eof "on the terminal the report and prompt are styled"
+)
+# Behaviour SS-1 P4 changed: the usage text documents the new flags.
+known+=(
+  help "the usage text documents --json and --targets"
+  unknown-arg "an unknown argument prints that same usage text"
+)
+
+# Everything a run leaves behind, with each implementation's own path written
+# as <self> so the two can be compared. Reads are left out: zsh times a fired
+# job's waits in whole seconds, so how often it polls depends on where in a
+# second it started, and from P2 on every agent's screen is read before the
+# picker. Every action either takes is still compared.
+capture() {
+  local name=$1 out=$2
+  mkdir -p $out
+  for f in stdout stderr exit; do
+    sed -e "s|$work/ref.zsh|<self>|g" -e "s|$work/go-bin|<self>|g" -e 's/\r$//' $run/$f > $out/$f
+  done
+  grep -v -e '^agent read ' -e '^agent get ' $run/herdr/calls.log > $out/herdr-calls 2>/dev/null
+  cp $run/systemctl.log $out/systemctl-calls 2>/dev/null || : > $out/systemctl-calls
+  (cd $run && find state config -printf "%m %y %p\n" 2>/dev/null | sort) > $out/modes
+  (cd $run && find state config -type f 2>/dev/null | sort | while read -r f; do
+    print -r -- "== $f"
+    sed -e "s|$work/ref.zsh|<self>|g" -e "s|$work/go-bin|<self>|g" $f
+  done) > $out/files
+}
+
+# check NAME SETUP ARGS...: SETUP is evaluated in the run directory first, in
+# the same subshell, so it can add files or export variables.
+# onterm NAME INPUT SETUP ARGS...: the same, run on a pseudo-terminal fed INPUT.
+check() { _case plain "$1" "" "$2" "${@:3}"; }
+onterm()   { _case tty "$1" "$2" "$3" "${@:4}"; }
+
+_case() {
+  local how=$1 name=$2 input=$3 setup=$4; shift 4
+  (( ${#only} == 0 )) || (( ${only[(Ie)$name]} )) || return 0
+  local impl bin
+  for impl in ref go; do
+    rm -rf $run && mkdir -p $run/herdr $run/state $run/config
+    cp $fixtures/2026-10-03/* $run/herdr/
+    bin=$work/ref.zsh
+    [[ $impl == go ]] && bin=$work/go-bin
+    if [[ $how == tty ]]; then
+      (cd $run && eval "$setup" || exit
+       printf "$input" | script -qe -E never \
+        -c "${(j: :)${(q)bin}} ${(j: :)${(q)@}}" /dev/null >$run/stdout 2>$run/stderr
+       print -r -- $? > $run/exit)
+    else
+      (cd $run && eval "$setup" || exit
+       $bin "$@" </dev/null >$run/stdout 2>$run/stderr
+       print -r -- $? > $run/exit)
+    fi
+    if [[ ! -f $run/exit ]]; then
+      fail=$(( fail + 1 ))
+      print -r -- "SETUP $name: the setup failed"
+      return
+    fi
+    capture $name $work/out/$name/$impl
+  done
+  if [[ -n ${PARITY_SHOW:-} ]]; then
+    print -r -- "----- $name (exit $(<$work/out/$name/go/exit))"
+    cat -v $work/out/$name/go/stdout $work/out/$name/go/stderr
+  fi
+  if diff -r $work/out/$name/ref $work/out/$name/go > $work/out/$name.diff; then
+    if (( ${+known[$name]} )); then
+      fail=$(( fail + 1 ))
+      print -r -- "SAME  $name, which was expected to differ: ${known[$name]}"
+      return
+    fi
+    pass=$(( pass + 1 ))
+    print -r -- "ok    $name"
+  elif (( ${+known[$name]} )); then
+    known_seen=$(( known_seen + 1 ))
+    print -r -- "known $name: ${known[$name]}"
+  else
+    fail=$(( fail + 1 ))
+    print -r -- "DIFF  $name"
+    sed 's/^/      /' $work/out/$name.diff
+  fi
+}
+
+job=$fixtures/jobs/20261003-160100-wBp1
+add_job='mkdir -p state/herdr-send && cp '$job'.json '$job'.msg state/herdr-send/'
+add_keys_job=$add_job' && jq ".id = \"20261004-090000-wB5\" | .mode = \"keys\" | .keys = \"ctrl+c\"" '$job'.json > state/herdr-send/20261004-090000-wB5.json'
+blocked='jq "(.result.agents[] | select(.pane_id == \"wB:p3\") | .agent_status) = \"blocked\"" herdr/agent-list.json > x && mv x herdr/agent-list.json'
+stale_units='mkdir -p config/systemd/user && touch config/systemd/user/herdr-send-old.timer config/systemd/user/herdr-send-old.service'
+
+# Arguments, validation, and messages.
+check help              ''  --help
+check unknown-arg       ''  --bogus
+check missing-value     ''  --at
+check value-is-a-flag   ''  --at --dry-run
+check bad-pick          ''  --pick foo --at 10:00 --message x
+check bad-if-busy       ''  --if-busy maybe --at 10:00 --message x
+check bad-recover       ''  --recover loud --at 10:00 --message x
+check bad-grace         ''  --submit-grace 0 --at 10:00 --message x
+check at-and-auto       ''  --at 10:00 --auto --message x
+check detect-no-tty     ''  --message x
+check message-and-file  ''  --message x --message-file /etc/hostname --at 10:00
+check message-and-keys  ''  --message x --keys esc --at 10:00
+check missing-file      ''  --message-file /no/such/file --at 10:00
+check nothing-to-send   ''  --at 10:00
+check fire-without-id   ''  __fire
+
+# Selection without a terminal.
+check ambiguous         ''  --at 23:59 --message x --dry-run
+check pick-best         ''  --at 23:59 --message x --dry-run --pick best
+check cwd-tilde-two     ''  --cwd '~/projects/shop-backend' --at 23:59 --message x --dry-run
+check cwd-one           ''  --cwd /home/dev/projects/analytics/ --at 23:59 --message 'hello there' --dry-run
+check kind              ''  --kind codex --at 3pm --message x --dry-run
+check panes-only        ''  --panes-only --at 10:00 --message ls --dry-run
+check no-match          ''  --kind gemini --at 10:00 --message x
+check no-such-pane      ''  --pane wZ:p9 --at 10:00 --message x
+check self-refused      ''  --pane wB:p2 --at 10:00 --message x --dry-run
+check self-allowed      ''  --pane wB:p2 --allow-self --at 10:00 --message x --dry-run
+check blocked-warning   "$blocked" --pane wB:p3 --at 10:00 --message hi --dry-run
+
+# Times.
+check past              ''  --pane wB:p3 --at 'Sep 27th, 2026 12:27 AM' --message x --dry-run
+check iso-keys          ''  --pane wB:p3 --at 2026-10-04T09:00:00 --keys 'ctrl+c enter' --dry-run
+check enter-only        ''  --pane wB:p3 --at 09:00 --enter-only --persistent --dry-run
+check unparseable       ''  --pane wB:p3 --at garbage --message x
+check unknown-zone      ''  --pane wB:p3 --at '4pm (Mars/Base)' --message x
+check zoned             ''  --pane wB:p3 --at '4pm (UTC)' --message x --dry-run
+check bad-now           'export HERDR_SCHEDULE_NOW_EPOCH=soon' --pane wB:p3 --at 10:00 --message x
+check duplicate         'mkdir -p state/herdr-send && echo {} > state/herdr-send/20261003-160000-wBp3.json' --pane wB:p3 --at 16:00 --message x --dry-run
+
+# Times read from usage-limit notices.
+check auto-own-notice   ''  --pane wB:p1 --auto --dry-run
+check auto-per-account  ''  --pane wA:p1 --auto --dry-run
+check auto-no-notice    ''  --pane wB:p3 --auto --dry-run
+check auto-plain-pane   ''  --pane wB:p5 --auto --dry-run
+check auto-keys         ''  --pane wB:p1 --auto --keys esc --dry-run
+check auto-recent-first 'cp herdr/visible-wB-p1.txt herdr/recent-wB-p1.txt' --pane wB:p1 --auto --message 'carry on' --dry-run
+check auto-stale        'export HERDR_SCHEDULE_NOW_EPOCH=1791037000' --pane wB:p1 --auto --dry-run
+
+# Jobs on disk.
+check list-empty        ''  --list
+check list              "$add_keys_job" --list
+check status            "$add_job" --status 20261003-160100-wBp1
+check status-missing    ''  --status nope
+check cancel            "$add_job" --cancel 20261003-160100-wBp1
+check cancel-missing    ''  --cancel nope
+check arm-text          ''  --pane wB:p3 --at 16:30 --message $'two\nlines'
+check arm-keys          ''  --pane wB:p5 --at '2026-10-04 09:00:00' --keys ctrl+c --persistent --quiet --force --if-busy abort --recover focus --submit-grace 9
+check arm-file-sweeps   "$stale_units && printf 'from a file\n\n\n' > prompt.txt" --pane wB:p1 --at 16:30 --message-file prompt.txt
+check arm-detected      ''  --pane wB:p1 --auto
+
+# On a terminal: the picker and the time confirmation.
+onterm picker-default      '\n\n'           '' --dry-run
+onterm picker-choose       '2\n\n'          '' --dry-run
+onterm picker-retry        '9\nx\n3\n'      '' --at 23:59 --message x --dry-run
+onterm confirm-typed       'garbage\n2026-10-03 15:00\n16:30\n\n' '' --pane wB:p1 --dry-run
+onterm confirm-no-notice   '\n17:00\n\n'    '' --pane wB:p3 --dry-run
+onterm confirm-eof         ''               '' --pane wB:p3 --dry-run
+onterm picker-no-color     '\n\n'           'export NO_COLOR=1' --dry-run
+
+# The worker. arm_job [FILTER [MESSAGE]] arms the fixture job in the run
+# directory, edited by the jq FILTER, with MESSAGE (printf %b) as its text and
+# its stored herdr pointed at the stand-in.
+id=20261003-160100-wBp1
+arm_job() {
+  mkdir -p state/herdr-send config/systemd/user
+  jq --arg bin $HERDR_BIN_OVERRIDE ".herdr_bin = \$bin | ${1:-.}" $job.json > state/herdr-send/$id.json
+  if (( $# > 1 )); then printf '%b' "$2" > state/herdr-send/$id.msg
+  else cp $job.msg state/herdr-send/; fi
+  cp $fixtures/jobs/herdr-send-$id.{service,timer} config/systemd/user/
+}
+# The agent answers the resume with the limit notice again.
+limited_again() {
+  arm_job
+  print -rl -- '❯ resume' '' "  ⎿  You've hit your weekly limit · resets 4pm (Europe/Warsaw)" \
+    '     /upgrade to increase your usage limit.' '' > herdr/recent-wB-p1.txt
+}
+# The composer still holds the message after every Enter.
+draft_stuck() {
+  arm_job ".grace = 1 | .recover = \"$1\"" 'carry on with the plan please'
+  local rule=''
+  rule=${(l:40::─:)rule}
+  print -rl -- '● Done.' '' $rule '❯ carry on with the plan please' $rule '  ctx:16%' > herdr/visible-wB-p1.txt
+}
+codex='.pane_id = "wB:p3" | .agent = "codex"'
+
+check fire-no-state       ''  __fire nope
+check fire-resume         'arm_job' __fire $id
+check fire-old-state      'arm_job "del(.recover, .grace) | $codex" "carry on with the plan please\n"' __fire $id
+check fire-keys           'arm_job ".mode = \"keys\" | .keys = \"ctrl+c  enter\""' __fire $id
+check fire-pane-run       'arm_job ".kind = \"pane\" | .pane_id = \"wB:p5\" | .agent = \"-\"" "make test\n\n"' __fire $id
+check fire-force          'arm_job ".pane_id = \"wZ:p9\" | .force = 1 | .mode = \"keys\" | .keys = \"esc\""' __fire $id
+check fire-gone           'arm_job ".pane_id = \"wZ:p9\""' __fire $id
+check fire-gone-quiet     'arm_job ".pane_id = \"wZ:p9\" | .quiet = 1"' __fire $id
+check fire-not-an-agent   'arm_job ".pane_id = \"wB:p5\""' __fire $id
+check fire-other-agent    'arm_job ".agent = \"codex\""' __fire $id
+check fire-moved          'arm_job ".cwd = \"/tmp\""' __fire $id
+check fire-abort-busy     'arm_job ".if_busy = \"abort\"" && echo "working 300" > herdr/state-wB-p1' __fire $id
+check fire-still-working  'arm_job && echo "working 300" > herdr/state-wB-p1' __fire $id
+check fire-refused        'arm_job && echo "{\"error\":{\"code\":\"agent_blocked\",\"message\":\"agent is blocked\"}}" > herdr/prompt-error.json' __fire $id
+check fire-still-limited  'limited_again' __fire $id
+check fire-draft-stuck    'draft_stuck keys' __fire $id
+check fire-draft-focus    'draft_stuck focus' __fire $id
+check fire-draft-none     'draft_stuck none' __fire $id
+check fire-no-message     'arm_job && rm state/herdr-send/$id.msg' __fire $id
+check fire-herdr-unreadable 'arm_job && echo "not json" > herdr/agent-list.json' __fire $id
+
+print -r -- ""
+print -r -- "parity: $pass identical, $known_seen known differences, $fail unexpected"
+(( fail == 0 ))

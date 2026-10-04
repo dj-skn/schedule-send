@@ -11,25 +11,33 @@ Leave out the time and it is read from the agent's usage-limit notice instead,
 so an agent that ran out of usage can be told to `resume` the minute its limit
 resets — see [Resuming After a Usage Limit](#resuming-after-a-usage-limit).
 
-## Install Once
+## Install
+
+Written in Go; building it needs Go 1.27 or newer and nothing else.
 
 ```zsh
-ln -s "$HOME/src/schedule-send/schedule-send.zsh" "$HOME/.local/bin/schedule-send"
+cd ~/src/schedule-send
+tools/install
 hash -r
 ```
 
-Verify:
+That builds `bin/schedule-send` and links it into `~/.local/bin`. Verify:
 
 ```zsh
 command -v schedule-send
 schedule-send --help
 ```
 
-The symlink points at the source file, so edits and pulls take effect
-immediately. Recreate the link only if the script moves.
+Run `tools/install` again after every pull or edit: armed timers run
+`bin/schedule-send`, so they pick up a rebuild immediately, including jobs
+that are already scheduled. Timers armed by the old zsh version run
+`schedule-send.zsh`, which now hands over to the same binary.
 
-Requires `jq`, `systemctl --user`, and `herdr` on `PATH`. Lingering must be
-enabled for reboot survival (`loginctl show-user "$USER" -p Linger`).
+Requires `systemctl --user` and `herdr` on `PATH`. Lingering must be enabled
+for reboot survival (`loginctl show-user "$USER" -p Linger`).
+
+Before committing a change, run `tools/check`: formatting, vet, and the tests,
+which drive herdr and systemctl through stand-ins and never touch a real pane.
 
 ## Basic Usage
 
@@ -45,8 +53,29 @@ it is taken without a picker and named on stderr:
 Only one target matched; selecting codex in wV:p1 (idle, ~/projects/shop-backend).
 ```
 
-stdout stays the plain `key=value` receipt, so this is still usable from
-scripts:
+On a terminal the receipt is styled:
+
+```
+  ✓ scheduled "resume, then commit when done" for claude wB:p1
+    at       Sat 15:50   in 12m
+    cancel   schedule-send --cancel 20261003-155000-wBp1
+```
+
+Piped or redirected, stdout stays `key=value`, which is what a script should
+read:
+
+```
+id=20261003-155000-wBp1
+unit=herdr-send-20261003-155000-wBp1.timer
+target=agent wB:p1 (claude, idle)
+at=2026-10-03 15:50:00
+delay_seconds=720
+payload=resume, then commit when done
+
+cancel with: schedule-send --cancel 20261003-155000-wBp1
+```
+
+A script can rely on that, for instance to send a file:
 
 ```zsh
 schedule-send --at '03:30' --cwd ~/projects/website --message-file prompt.txt
@@ -66,17 +95,22 @@ schedule-send --cwd ~/projects/shop-backend
 ```
 
 ```
-Usage limit in codex w9:p1:
-  try again at Sep 27th, 2026 12:27 AM
-Resets Sun 00:27 (in 37m); sending "resume" 1 min after.
+  ◷ codex w9:p1 hit a usage limit
+    resets   Sun 00:27   in 37m
+    send     "resume"    1 min after
 
-at [2026-09-27 00:28]:
+  at [Sun 00:28]:
 ```
 
 Enter takes the proposed time. Anything typed instead — `00:45`, `12:45 AM`,
-`Sep 27 1am`, `+30 min` — is shown back as a full date and becomes the new
-default, so a correction is confirmed the same way. With no `--message` the
-payload is `resume`; pass one to send something else.
+`Sep 27 1am`, `+30 min` — is shown back with how long away it is, and becomes
+the new default, so a correction is confirmed the same way:
+
+```
+    → Sat 16:30   in 1h 8m
+```
+
+With no `--message` the payload is `resume`; pass one to send something else.
 
 The notice names its reset to the minute and the reset lands somewhere inside
 it (one reading 12:27 AM was for 00:27:52), so the proposal is one minute
@@ -91,21 +125,49 @@ What is recognised:
 
 A notice that names no time (`try again later`, `Usage limit reached`) is
 still shown, and the prompt then has no default. Only the newest notice
-counts, and it is ignored once its time has passed or once a prompt has gone
-through below it. If the target itself shows none, other agents of the same
-kind are checked, since the limit belongs to the account; the report says which
-pane it came from. The pane you run the command in is never read this way.
+counts, and it is ignored once a prompt has gone through below it.
 
 These forms are accepted by `--at` too, so a time copied out of a notice works
 as written.
 
-Claude's short form, `resets 3pm`, carries no date. A notice left on screen
-after its reset, with no prompt sent since, therefore reads as tomorrow's
-3pm; the report's "in 23h" gives it away, but `--auto` would take it.
+Every agent's visible screen is read once, before the picker, and the time
+prompt reuses that read; the pane you run the command in is never read. If the
+target shows no notice of its own, another agent of the same kind lends its
+reset, since the limit belongs to the account, and the report says which pane
+it came from. It does not when the target's own footer shows usage left in that
+window (`week:11% (1h58m)`), which means a different account.
+
+A notice stays on screen after its limit lifts, until the agent is prompted
+again. Once its reset has passed, or the agent's own footer shows usage left,
+the limit is over and the proposal is one minute from now:
+
+```
+  ✓ claude wB:p1's weekly limit is over
+    reset    Sat 16:00   passed
+    send     "resume"    1 min from now
+```
+
+Claude's short form, `resets 3pm`, carries no date. It is taken as the next
+3pm, unless the footer's time to reset (or a session limit's five hours) says
+the reset cannot be that far off; then it was the last 3pm and the limit is
+over. With no footer to go by and the next 3pm more than 12 hours away, the
+report adds a line, since the notice may be yesterday's (under `--auto`, which
+has no prompt, it says to rerun with `--at '+1 min'`):
+
+```
+    note     the notice names no day; if it was shown before Sat 15:00, the limit is already over: type +1 min
+```
+
+With `--at`, a message timed before a known reset of a limit holding the target
+is still scheduled, with a warning on stderr:
+
+```
+Warning: claude in wB:p1 is usage-limited until Sat 16:00; this send at Sat 15:30 comes before the reset.
+```
 
 With no terminal there is nobody to confirm, so leaving out `--at` fails unless
-`--auto` is passed. `--auto` takes the detected time as found, prints the report
-on stderr, and fails if no notice names a time:
+`--auto` is passed. `--auto` takes the proposed time unconfirmed, prints the
+report on stderr, and fails when there is none:
 
 ```zsh
 schedule-send --cwd ~/projects/shop-backend --auto
@@ -131,10 +193,25 @@ panes
 target [1]:
 ```
 
-`○` idle · `✓` done · `●` working · `◐` blocked · `?` unknown · `·` plain pane.
-Colour is dropped when the output is not a terminal, and under `NO_COLOR`.
-Enter accepts the highlighted default, which is the best-ranked target: idle and
-done agents first, then unknown, working, blocked, then plain panes.
+`○` idle · `✓` done · `●` working · `◐` blocked · `?` unknown · `◷` limited ·
+`·` plain pane. Colour is dropped when the output is not a terminal, and under
+`NO_COLOR`. Enter accepts the highlighted default, which is the best-ranked
+target: idle and done agents first, then unknown, working, blocked, then plain
+panes.
+
+An agent held by its own usage limit is drawn as `◷ limited`, with its reset
+after the title. Another agent of the same kind that may share its account
+(see [Resuming After a Usage Limit](#resuming-after-a-usage-limit)) is marked
+`account limited`:
+
+```
+  1  ◷ limited  claude   wB:p1    ~/projects/shop-backend    checkout-webhook-migration  resets 16:00 (weekly)
+  2  ○ idle     claude   wA:p1    ~/projects/analytics       Analytics backend rewrite  account limited
+```
+
+Without `--at` the send waits for a limit to lift, so limited agents come first,
+the soonest reset (or a limit already over) at the top, and `--pick best` takes
+that one. With `--at` the order is unchanged and the marks are only shown.
 
 The pane you are running in is listed but never auto-selected — targeting it
 needs `--allow-self`. Without that guard an agent could schedule a prompt to
@@ -293,9 +370,17 @@ schedule-send --status <id>
 schedule-send --cancel <id>
 ```
 
-`--list` shows id, time, target, timer state, and the payload's first line.
-`--status` prints the stored job, the timer, and the job's journal. `--cancel`
-disarms the timer and removes its unit and state files.
+On a terminal `--list` is one row per job, with how soon it fires. A timer that
+is not active is marked, and its state stands in for how soon:
+
+```
+  ○ Sat 16:01   in 39m    claude wB:p1   "resume"                   20261003-160100-wBp1
+  ✗ Sun 09:00   inactive  pane wB:p5     keys: ctrl+c               20261004-090000-wBp5
+```
+
+Piped, it stays a table of id, time, target, timer state and the payload's
+first line. `--status` prints the stored job, the timer and the job's journal.
+`--cancel` disarms the timer and removes its unit and state files.
 
 Underneath, each job is a `herdr-send-<id>.timer` plus `.service` in
 `~/.config/systemd/user`, so the plain systemd tools work too:
@@ -320,9 +405,50 @@ Pass `--persistent` to have it fire at the next boot instead.
 schedule-send --at '03:30' --cwd ~/projects/website --message hello --dry-run
 ```
 
-Resolves the target and prints the schedule, the unit name, and the unit file
-paths without creating anything. Without `--at` it still reads the notice and
-asks for confirmation, so a dry run shows exactly what would be armed.
+Resolves the target and prints what would be armed, without creating anything.
+On a terminal:
+
+```
+  · dry run: would schedule "hello" for codex wV:p1
+    at       Sun 03:30   in 11h
+    cwd      ~/projects/website
+    if-busy  wait
+    recover  keys
+    grace    4s
+    persist  no
+    id       20261004-033000-wVp1
+    units    ~/.config/systemd/user/herdr-send-20261004-033000-wVp1.{service,timer}
+    runs     schedule-send __fire 20261004-033000-wVp1
+```
+
+Without `--at` it still reads the notice and asks for confirmation, so a dry
+run shows exactly what would be armed. Piped, the same facts come out as
+`key=value` lines.
+
+## JSON
+
+`--json` prints one JSON object on stdout instead of either of the text forms.
+It does not change whether the command asks. Notes and warnings on stderr are
+JSON too, and a failure is `{"error":{"code":"...","message":"..."}}` with the
+same exit status as the text form. The code is `usage`, `not_found`,
+`ambiguous` or `failed`.
+
+```zsh
+schedule-send --pane wB:p1 --at 16:30 --message hi --dry-run --json
+```
+
+```json
+{"dry_run":true,"id":"20261003-163000-wBp1","target":{"kind":"agent","pane":"wB:p1","agent":"claude","status":"idle"},"at":"2026-10-03 16:30:00","delay_seconds":4080,"payload":"hi","limit":{"state":"limited","window":"weekly","reset":1791036000,"note":"resets 16:00 (weekly)"}}
+```
+
+The object also carries the unit name, the working directory, the delivery
+settings, and, for a dry run, the unit paths and the command the timer would
+run. An armed send has `cancel` instead. `limit` is left out when the target
+is not held by one.
+
+`--list`, `--cancel` and `--status` take the flag too. `--targets` lists every
+pane with its limit: the picker listing for a person, or `{"targets":[...]}`
+with `--json`.
 
 ## Safety Test
 
@@ -335,7 +461,7 @@ herdr pane send-keys 'wX:p1' enter
 ## Notes
 
 - Explicit full timestamps such as `2026-06-24 15:50:00` never roll forward. If
-  they are in the past the script exits instead of sending immediately.
+  they are in the past schedule-send exits instead of sending immediately.
 - A job id is the fire time plus the pane, so a second send to the same pane at
   the same time is refused until the first is cancelled. Running the command
   twice on the same usage-limit notice lands on that case.

@@ -1,0 +1,15 @@
+#!/bin/sh
+# The verification gate: formatting, vet, tests, and the zsh shim's syntax.
+set -eu
+cd "$(dirname "$0")/.."
+
+unformatted="$(gofmt -l .)"
+if [ -n "$unformatted" ]; then
+  echo "gofmt would change:" >&2
+  echo "$unformatted" >&2
+  exit 1
+fi
+go vet ./...
+go test -count=1 ./...
+zsh -n schedule-send.zsh
+echo "check: ok"

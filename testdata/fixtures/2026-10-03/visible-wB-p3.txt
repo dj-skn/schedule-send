@@ -1,0 +1,40 @@
+• Explored
+  └ Read sb-42-webhook-retry-notes.md
+    + Show details
+
+• Ran git diff --cached --name-only
+  └ (no output)
+
+• Ran git log -1 --oneline --decorate
+  └ 4c1e9a7 (HEAD -> sb-42, sb-42-p3.1) feat(sb-42): retry failed webhook del…
+    + 1 line (ctrl+t to expand)
+
+• P3.1 is implemented in 4c1e9a7 and fast-forwarded into local sb-42. Not
+  pushed.
+
+  • Added a retry queue for webhook deliveries that fail or run too long.
+
+  • Added exponential backoff with jitter, capped at five attempts per event.
+
+  • Built a deterministic test clock covering 36 delivery schedules.
+
+  • Shared signature checks between the live and replay paths while keeping
+    their logs separate.
+
+  The implementation notes (docs/sb-42-webhook-retry-notes.md) describe
+  what changed, where, and why.
+
+  npm test passed: 1,104 unit tests, production build, and 64 integration
+  tests. Local queue checks also passed.
+
+  Before deployment, apply the queue migration (db/migrations/
+  0042_webhook_retry_queue.sql). Your existing
+  notes in the plan remain untouched.
+
+  Worked for 13m 3s • 00:19
+
+
+» Ask Codex to do anything
+
+  GPT-6.1-Sol ultra · ~/projects/shop-backend · sb-42 · 5h 100% left · weekl…
+  ctrl+c copy · enter copy & follow · esc clear

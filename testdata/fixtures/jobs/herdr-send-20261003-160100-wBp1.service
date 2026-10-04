@@ -1,0 +1,6 @@
+[Unit]
+Description=herdr scheduled send to wB:p1 at 2026-10-03 16:01:00
+
+[Service]
+Type=oneshot
+ExecStart=/home/dev/src/schedule-send/schedule-send.zsh __fire 20261003-160100-wBp1

@@ -1,0 +1,3 @@
+#!/bin/sh
+# A stand-in for journalctl.
+echo "stand-in journal for $*"

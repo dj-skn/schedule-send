@@ -1,0 +1,12 @@
+#!/bin/sh
+# Builds bin/schedule-send and links it into ~/.local/bin. Run it from the main
+# checkout only: armed timers fire the binary by its resolved path, so a link
+# into a worktree would make them depend on that worktree.
+set -eu
+cd "$(dirname "$0")/.."
+root="$(pwd -P)"
+
+go build -trimpath -o bin/schedule-send ./cmd/schedule-send
+mkdir -p "$HOME/.local/bin"
+ln -sfn "$root/bin/schedule-send" "$HOME/.local/bin/schedule-send"
+echo "installed $HOME/.local/bin/schedule-send -> $root/bin/schedule-send"

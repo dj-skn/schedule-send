@@ -1,0 +1,40 @@
+    expect paginate(items, 1, 10) to return the first ten items
+    expect paginate(items, 3, 10) to return an empty list
+
+  Two details worth knowing:
+
+  - Pages are counted from 1, so page 0 is rejected rather than treated as the first page.
+  - The helper never copies the whole list: paginate(items, page, size) slices from (page - 1) * size, so asking for a page past the end costs
+    nothing and returns an empty list. The caller decides whether an empty page is an error or just the end of the data.
+
+  You don't need a database for either test; a plain array of twenty-five numbers is enough.
+
+  What to do now
+
+  1. Add the two cases to paginate.test.ts. Leave paginate.ts alone for now.
+  2. Run npm test.
+  3. Expect the second case to fail, because the helper throws past the last page today. That is the failure we want to see first.
+  4. Paste the test file and the output here and I'll review it. Hold the commit; the tests and the fix go in together.
+
+  One question to think about while you write it: the first case already proves slicing works, so why test a page past the end as well? Take a guess, even
+  if you're unsure.
+
+✻ Brewed for 46s · done Friday 11:05 PM
+
+❯ /color
+  ⎿  Session color set to: yellow
+
+❯ /color yellow
+  ⎿  Session color set to: yellow
+
+❯ /theme
+  ⎿  Theme set to auto
+
+❯ /color
+  ⎿  Session color set to: orange
+                                                                                                                   ~75k uncached · /clear to start fresh
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ~/projects/analytics  api-refactor  Opus 5.5 ◉  ctx:93%  week:11% (1h58m)  cost:$2.07
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent
