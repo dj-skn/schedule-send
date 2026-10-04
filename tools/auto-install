@@ -1,0 +1,19 @@
+#!/bin/sh
+# Git hooks run in every worktree. Only deploy clean master in the main checkout.
+set -eu
+cd "$(dirname "$0")/.."
+root="$(pwd -P)"
+common="$(git rev-parse --path-format=absolute --git-common-dir)"
+branch="$(git symbolic-ref --quiet --short HEAD)" || exit 0
+[ "$root/.git" = "$common" ] && [ "$branch" = master ] || exit 0
+if [ -n "$(git status --porcelain)" ]; then
+  echo 'schedule-send: automatic install skipped; master has uncommitted changes.' >&2
+  exit 0
+fi
+source_id="$(tools/source-id)"
+installed_id=""
+[ ! -f bin/.installed-source ] || installed_id="$(cat bin/.installed-source)"
+[ ! -x bin/schedule-send ] || [ "$source_id" != "$installed_id" ] || exit 0
+if ! tools/install; then
+  echo 'schedule-send: automatic install failed; run tools/install to retry.' >&2
+fi

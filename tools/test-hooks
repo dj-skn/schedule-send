@@ -1,0 +1,117 @@
+#!/bin/sh
+# Exercise real Git hooks in temporary repositories with a mock installer.
+# Never builds, links, or sends anything outside the fixture.
+set -eu
+root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd -P)"
+fixture="$(mktemp -d)"
+trap 'rm -rf "$fixture"' EXIT HUP INT TERM
+mkdir -p "$fixture/tools" "$fixture/.githooks"
+cp "$root/tools/source-id" "$root/tools/auto-install" "$root/tools/setup-hooks" "$fixture/tools/"
+cp "$root/.githooks/"* "$fixture/.githooks/"
+cat > "$fixture/tools/install" <<'MOCK'
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+[ ! -f FAIL ] || { echo 'mock build failed' >&2; exit 1; }
+mkdir -p bin
+printf '#!/bin/sh\nexit 0\n' > bin/schedule-send
+chmod +x bin/schedule-send
+tools/source-id > bin/.installed-source
+printf 'installed\n' >> installations
+MOCK
+chmod +x "$fixture/tools/install"
+printf 'bin/\ninstallations\nFAIL\n' > "$fixture/.gitignore"
+printf 'module hookfixture\n' > "$fixture/go.mod"
+printf '# Hook fixture\n' > "$fixture/README.md"
+git -C "$fixture" init -q -b master
+git -C "$fixture" config user.name 'Hook Test'
+git -C "$fixture" config user.email 'hooks@example.invalid'
+git -C "$fixture" config commit.gpgSign false
+git -C "$fixture" config core.hooksPath /dev/null
+git -C "$fixture" add .
+git -C "$fixture" commit -qm 'chore: initialize hook fixture'
+# setup-hooks protects an existing custom hooks directory.
+if "$fixture/tools/setup-hooks" > "$fixture/setup-output" 2>&1; then
+  echo 'setup overwrote an existing hooks directory' >&2; exit 1
+fi
+rm "$fixture/setup-output"
+git -C "$fixture" config --unset core.hooksPath
+"$fixture/tools/setup-hooks" > /dev/null
+count() {
+  actual="$(wc -l < "$fixture/installations")"
+  [ "$actual" -eq "$1" ] || { echo "installs: expected $1, got $actual" >&2; exit 1; }
+}
+count 1
+# An unchanged source fingerprint and documentation commits do not rebuild.
+# Hooks expect the repository as cwd, just as Git invokes them.
+(cd "$fixture" && .githooks/post-merge) > /dev/null
+count 1
+printf 'Documentation update\n' >> "$fixture/README.md"
+git -C "$fixture" add README.md
+git -C "$fixture" commit -qm 'docs: update fixture'
+count 1
+# Feature commits/checkouts stay isolated. Merging them installs main's code.
+git -C "$fixture" checkout -qb feature
+printf '// feature change\n' >> "$fixture/go.mod"
+git -C "$fixture" add go.mod
+git -C "$fixture" commit -qm 'feat: change fixture inputs'
+count 1
+git -C "$fixture" checkout -q master
+count 1
+git -C "$fixture" merge -q --ff-only feature > /dev/null
+count 2
+# Changing tools/install itself triggers installation after commit.
+printf '\n# installer update\n' >> "$fixture/tools/install"
+git -C "$fixture" add tools/install
+git -C "$fixture" commit -qm 'chore: update mock installer' > /dev/null
+count 3
+# post-rewrite also picks up new committed inputs.
+printf '// rewrite change\n' >> "$fixture/go.mod"
+git -C "$fixture" add go.mod
+git -C "$fixture" -c core.hooksPath=/dev/null commit -qm 'feat: rewrite fixture'
+(cd "$fixture" && .githooks/post-rewrite rebase) > /dev/null
+count 4
+# Dirty sources, including untracked Go inputs, must not be deployed.
+printf '// dirty\n' >> "$fixture/go.mod"
+(cd "$fixture" && .githooks/post-commit) > /dev/null 2>&1
+count 4
+git -C "$fixture" restore go.mod
+mkdir -p "$fixture/cmd"
+printf 'package main\n' > "$fixture/cmd/untracked.go"
+(cd "$fixture" && .githooks/post-checkout) > /dev/null 2>&1
+count 4
+rm "$fixture/cmd/untracked.go"
+# A missing binary rebuilds even when its fingerprint is current.
+rm "$fixture/bin/schedule-send"
+(cd "$fixture" && .githooks/post-checkout) > /dev/null
+count 5
+# Failed installs preserve the prior binary/stamp, report the failure and retry.
+touch "$fixture/FAIL"
+old_stamp="$(cat "$fixture/bin/.installed-source")"
+printf '// failed build\n' >> "$fixture/go.mod"
+git -C "$fixture" add go.mod
+git -C "$fixture" -c core.hooksPath=/dev/null commit -qm 'feat: exercise build failure'
+(cd "$fixture" && .githooks/post-merge) > "$fixture/bin/failure-output" 2>&1
+count 5
+[ "$(cat "$fixture/bin/.installed-source")" = "$old_stamp" ]
+[ -x "$fixture/bin/schedule-send" ]
+if ! grep -q 'automatic install failed' "$fixture/bin/failure-output"; then
+  echo 'missing build failure diagnostic' >&2; exit 1
+fi
+rm "$fixture/FAIL"
+(cd "$fixture" && .githooks/post-merge) > /dev/null
+count 6
+# Detached HEADs and linked worktrees must never activate an installation.
+git -C "$fixture" checkout -q --detach HEAD
+(cd "$fixture" && .githooks/post-commit) > /dev/null
+count 6
+git -C "$fixture" checkout -q master
+worktree="$fixture/bin/worktree"
+git -C "$fixture" worktree add -q -b preview "$worktree"
+(cd "$worktree" && tools/auto-install) > /dev/null
+[ ! -e "$worktree/installations" ]
+if (cd "$worktree" && tools/setup-hooks) > /dev/null 2>&1; then
+  echo 'setup accepted a linked worktree' >&2; exit 1
+fi
+count 6
+echo 'hooks: ok'
