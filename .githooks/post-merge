@@ -1,0 +1,5 @@
+#!/bin/sh
+# Older branches may not contain the installer helper yet.
+root="$(git rev-parse --show-toplevel)" || exit 0
+[ -x "$root/tools/auto-install" ] || exit 0
+exec "$root/tools/auto-install"

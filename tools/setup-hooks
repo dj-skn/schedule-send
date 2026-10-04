@@ -1,0 +1,19 @@
+#!/bin/sh
+# Git configuration is local, so enable the tracked hooks once per repository.
+set -eu
+cd "$(dirname "$0")/.."
+root="$(pwd -P)"
+common="$(git rev-parse --path-format=absolute --git-common-dir)"
+branch="$(git symbolic-ref --quiet --short HEAD)"
+if [ "$root/.git" != "$common" ] || [ "$branch" != master ]; then
+  echo 'Run tools/setup-hooks from the main checkout on master.' >&2
+  exit 1
+fi
+configured="$(git config --local --get core.hooksPath || true)"
+if [ -n "$configured" ] && [ "$configured" != "$root/.githooks" ]; then
+  echo "Existing core.hooksPath is $configured; integrate these hooks there first." >&2
+  exit 1
+fi
+git config --local core.hooksPath "$root/.githooks"
+echo "enabled schedule-send hooks in $root/.githooks"
+tools/auto-install

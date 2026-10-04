@@ -12,4 +12,8 @@ fi
 go vet ./...
 go test -count=1 ./...
 zsh -n schedule-send.zsh
+for script in tools/install tools/setup-hooks tools/source-id tools/auto-install tools/test-hooks .githooks/*; do
+  sh -n "$script"
+done
+tools/test-hooks
 echo "check: ok"

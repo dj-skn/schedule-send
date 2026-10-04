@@ -1,0 +1,7 @@
+#!/bin/sh
+# Hash committed inputs that affect the installed program or its installer.
+set -eu
+cd "$(dirname "$0")/.."
+git ls-tree -r --full-tree HEAD -- cmd internal go.mod go.sum \
+  schedule-send.zsh tools/install tools/source-id tools/auto-install .githooks |
+  git hash-object --stdin

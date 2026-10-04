@@ -11,10 +11,30 @@ if [ "$root/.git" != "$common" ] || [ "$branch" != master ]; then
   exit 1
 fi
 mkdir -p bin
+# Concurrent hooks must not publish a stale build over a newer installation.
+exec 9>"$root/bin/.install.lock"
+if ! flock -n 9; then
+  echo 'Another schedule-send installation is in progress; retry tools/install.' >&2
+  exit 1
+fi
+source_id="$(tools/source-id)"
+clean_before=true
+[ -z "$(git status --porcelain)" ] || clean_before=false
 build_tmp="$(mktemp "$root/bin/.schedule-send.XXXXXX")"
 trap 'rm -f "$build_tmp"' EXIT HUP INT TERM
 go build -trimpath -o "$build_tmp" ./cmd/schedule-send
+if [ "$source_id" != "$(tools/source-id)" ] ||
+   { [ "$clean_before" = true ] && [ -n "$(git status --porcelain)" ]; }; then
+  echo 'Sources changed during the build; retry tools/install.' >&2
+  exit 1
+fi
 mv -f "$build_tmp" "$root/bin/schedule-send"
 mkdir -p "$HOME/.local/bin"
 ln -sfn "$root/bin/schedule-send" "$HOME/.local/bin/schedule-send"
+if [ "$clean_before" = true ] && [ -z "$(git status --porcelain)" ]; then
+  printf '%s\n' "$source_id" > "$root/bin/.installed-source"
+else
+  # A manual build of dirty sources must not masquerade as committed code.
+  rm -f "$root/bin/.installed-source"
+fi
 echo "installed $HOME/.local/bin/schedule-send -> $root/bin/schedule-send"
