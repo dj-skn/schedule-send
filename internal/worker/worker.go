@@ -27,7 +27,7 @@ const (
 // Herdr is the part of herdr the worker drives.
 type Herdr interface {
 	Targets() ([]target.Row, error)
-	Read(pane, source string, lines int) string
+	Read(pane, source string, lines int) (string, error)
 	State(pane string) (status string, seq int64)
 	Prompt(pane, msg string) (string, error)
 	SendKeys(surface, pane string, keys []string, stderr io.Writer) error
@@ -93,10 +93,17 @@ func (w *Worker) Run() int {
 		fmt.Fprintf(w.Err, "The state file for %s cannot be read: %v\n", w.ID, err)
 		return 1
 	}
+	if err := st.Validate(w.ID); err != nil {
+		fmt.Fprintf(w.Err, "Invalid state file for %s: %v\n", w.ID, err)
+		return 1
+	}
 	if w.fire(st) != nil {
 		return 1
 	}
-	w.Paths.Cleanup(w.Sys, w.ID)
+	if err := w.Paths.Cleanup(w.Sys, w.ID); err != nil {
+		fmt.Fprintf(w.Err, "Job %s was sent but cleanup failed: %v\n", w.ID, err)
+		return 1
+	}
 	return 0
 }
 
@@ -108,7 +115,9 @@ func (w *Worker) fail(format string, args ...any) error {
 	if !w.quiet && w.h != nil {
 		w.h.Notify("Scheduled send failed", msg)
 	}
-	w.Paths.Cleanup(w.Sys, w.ID)
+	if err := w.Paths.Cleanup(w.Sys, w.ID); err != nil {
+		fmt.Fprintf(w.Err, "Job %s cleanup failed: %v\n", w.ID, err)
+	}
 	return failed
 }
 
@@ -171,6 +180,12 @@ func (w *Worker) fire(st job.State) error {
 		_ = w.h.Wait(pane, busyWaitMs)
 		if status, _ := w.h.State(pane); status == "working" {
 			return w.fail("Agent in %s was still working after %d minutes; send aborted.", pane, busyWaitMs/60000)
+		}
+	}
+	// The pane may have been replaced or moved during the long busy wait.
+	if st.Force != 1 {
+		if err := w.check(st); err != nil {
+			return err
 		}
 	}
 	return w.deliver(pane, msg)

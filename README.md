@@ -28,9 +28,10 @@ command -v schedule-send
 schedule-send --help
 ```
 
-Run `tools/install` again after every pull or edit: armed timers run
+Run `tools/install` from the main checkout on `master` again after every pull or edit: armed timers run
 `bin/schedule-send`, so they pick up a rebuild immediately, including jobs
-that are already scheduled. Timers armed by the old zsh version run
+that are already scheduled. Installation refuses feature worktrees and replaces
+the binary atomically after a successful build. Timers armed by the old zsh version run
 `schedule-send.zsh`, which now hands over to the same binary.
 
 Requires `systemctl --user` and `herdr` on `PATH`. Lingering must be enabled
@@ -316,6 +317,11 @@ A recovered send is logged as `(Enter retried)` or `(focused, Enter retried)`,
 and a failed one takes the journal, the notification, and a non-zero exit with
 it rather than reporting a success that never happened.
 
+A screen read that fails or no longer identifies the composer cannot prove a
+draft was submitted. If a draft was observed and its submission cannot then be
+verified, the job fails without pressing Enter blindly. Herdr error replies are
+checked even when its process exits successfully.
+
 ### Still usage-limited
 
 An agent that is out of usage accepts a prompt like any other — the composer
@@ -348,7 +354,8 @@ could be verified the way a submitted prompt can.
 For agent targets, `--if-busy` decides what happens if the agent is mid-turn at
 fire time: `wait` (default) waits up to 15 minutes for it to settle, `abort`
 cancels the send. A wait that runs out fails the send rather than typing into
-a turn that is still running.
+a turn that is still running. The target identity and directory are checked
+again after waiting. Herdr, systemd, and date calls also have process deadlines.
 
 ## Fire-Time Validation
 
@@ -380,7 +387,11 @@ is not active is marked, and its state stands in for how soon:
 
 Piped, it stays a table of id, time, target, timer state and the payload's
 first line. `--status` prints the stored job, the timer and the job's journal.
-`--cancel` disarms the timer and removes its unit and state files.
+`--cancel` disarms the timer, stops its service, and removes its unit and state files.
+Cancellation reports failures and retains inspectable job state when the job
+cannot be stopped or its cleanup cannot be completed. Scheduling rolls back
+failed attempts; when a partial activation cannot be safely undone, its error
+says that state was retained for inspection.
 
 Underneath, each job is a `herdr-send-<id>.timer` plus `.service` in
 `~/.config/systemd/user`, so the plain systemd tools work too:
@@ -462,13 +473,19 @@ herdr pane send-keys 'wX:p1' enter
 
 - Explicit full timestamps such as `2026-06-24 15:50:00` never roll forward. If
   they are in the past schedule-send exits instead of sending immediately.
+- New timers store their resolved firing instant as an explicit UTC calendar,
+  while receipts show local time. New job state also records `run_at`; older
+  job files remain supported.
+- Scheduling, cancellation, and cleanup use a per-job lock. Hidden lock files
+  stay in the state directory so competing processes cannot lock different
+  files for the same job.
 - A job id is the fire time plus the pane, so a second send to the same pane at
   the same time is refused until the first is cancelled. Running the command
   twice on the same usage-limit notice lands on that case.
 - The herdr binary path is resolved once at schedule time and stored with the
   job, so the worker does not depend on a login shell or `PATH`.
 - Message text is stored verbatim in `~/.local/state/herdr-send/<id>.msg`; that
-  directory is created mode 700.
+  directory is created mode 700, and new state/message files are mode 600.
 - `HERDR_SCHEDULE_NOW_EPOCH` overrides "now" for testing `--dry-run`, including
   deciding whether a usage-limit notice has already passed.
 

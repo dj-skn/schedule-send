@@ -3,6 +3,7 @@ package worker
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -34,6 +35,7 @@ type fake struct {
 	// submit echoed into the history as "› <message>".
 	codex string
 
+	readErr   error
 	promptOut string
 	promptErr bool
 	keysErr   bool
@@ -51,23 +53,26 @@ type fake struct {
 
 func (f *fake) Targets() ([]target.Row, error) { return f.rows, f.listErr }
 
-func (f *fake) Read(pane, source string, lines int) string {
+func (f *fake) Read(pane, source string, lines int) (string, error) {
+	if f.readErr != nil {
+		return "", f.readErr
+	}
 	if source != "visible" {
-		return f.recent
+		return f.recent, nil
 	}
 	if f.noRule {
-		return f.history + "\n› " + f.draft + "\n\n  gpt-5.5 high · 5h 100% left\n"
+		return f.history + "\n› " + f.draft + "\n\n  gpt-5.5 high · 5h 100% left\n", nil
 	}
 	if f.codex != "" {
 		box := "» Ask Codex to do anything"
 		if f.draft != "" {
 			box = f.codex + " " + f.draft
 		}
-		return f.history + "\n" + box + "\n\n  GPT-6.1-Sol ultra · ~/projects/shop-backend · 5h 100% left\n"
+		return f.history + "\n" + box + "\n\n  GPT-6.1-Sol ultra · ~/projects/shop-backend · 5h 100% left\n", nil
 	}
 	rule := strings.Repeat("─", 60)
 	return f.history + "\n" + rule + "\n❯ " + f.draft + "\n" + rule +
-		"\n  ~/projects/a  main  Opus 5.5\n  ctx:16%  session:28% (03:44)  cost:$13.78\n"
+		"\n  ~/projects/a  main  Opus 5.5\n  ctx:16%  session:28% (03:44)  cost:$13.78\n", nil
 }
 
 func (f *fake) State(pane string) (string, int64) { return f.status, f.seq }
@@ -287,7 +292,7 @@ func (h *harness) wantRemoved() {
 		}
 	}
 	log, _ := os.ReadFile(h.sysLog)
-	want := "--user disable herdr-send-" + jobID + ".timer\n--user daemon-reload\n"
+	want := "--user stop herdr-send-" + jobID + ".timer\n--user disable herdr-send-" + jobID + ".timer\n--user daemon-reload\n"
 	if string(log) != want {
 		h.t.Errorf("systemctl calls = %q, want %q", log, want)
 	}
@@ -455,7 +460,7 @@ func TestPromptRefused(t *testing.T) {
 	for _, c := range []struct{ out, detail string }{
 		{`{"error":{"code":"agent_not_found","message":"no agent in pane wB:p1"}}` + "\n", "no agent in pane wB:p1"},
 		{"connection refused\nretry later\n", "connection refused"},
-		{"", "unknown error"},
+		{"", "exit status 1"},
 	} {
 		h := newHarness(t)
 		h.f.promptErr = true
@@ -630,4 +635,117 @@ func TestStateFileFromAnOlderVersion(t *testing.T) {
 	h.fire()
 	h.wantCode(0)
 	h.wantOut("prompted agent in wB:p1 (Enter retried)\n")
+}
+
+type failingScreen struct {
+	*fake
+	reads int
+	fail  bool
+}
+
+func (f *failingScreen) Read(pane, source string, lines int) (string, error) {
+	if source == "visible" {
+		f.reads++
+		if f.reads >= 3 {
+			if f.fail {
+				return "", errors.New("read failed")
+			}
+			return "", nil
+		}
+	}
+	return f.fake.Read(pane, source, lines)
+}
+func TestUnreadableScreenDoesNotConfirmDraft(t *testing.T) {
+	for _, fail := range []bool{true, false} {
+		t.Run(fmt.Sprint(fail), func(t *testing.T) {
+			h := newHarness(t)
+			h.f.drops = 5
+			h.arm(agentJob(), text("carry on with the plan please"))
+			f := &failingScreen{fake: h.f, fail: fail}
+			w := &Worker{ID: jobID, Paths: h.paths, Out: &h.out, Err: &h.err, Clock: h.clock, Connect: func(string) Herdr { return f }}
+			h.code = w.Run()
+			h.wantFailure("Could not verify the draft in wB:p1 after its screen became unreadable; send aborted.")
+			h.wantCalls("wait wB:p1", "prompt wB:p1 carry on with the plan please")
+			if h.f.draft == "" {
+				t.Fatal("draft was unexpectedly submitted")
+			}
+		})
+	}
+}
+
+type movingAgent struct{ *fake }
+
+func (f *movingAgent) Wait(pane string, timeout int) error {
+	_ = f.fake.Wait(pane, timeout)
+	f.rows[1].Agent = "codex"
+	f.rows[1].Cwd = "/tmp/different-project"
+	return nil
+}
+func TestRevalidatesTargetAfterWait(t *testing.T) {
+	h := newHarness(t)
+	h.arm(agentJob(), text("carry on with the plan please"))
+	f := &movingAgent{fake: h.f}
+	w := &Worker{ID: jobID, Paths: h.paths, Out: &h.out, Err: &h.err, Clock: h.clock, Connect: func(string) Herdr { return f }}
+	h.code = w.Run()
+	h.wantFailure("Pane wB:p1 now runs codex, not claude; send aborted.")
+	h.wantCalls("wait wB:p1")
+}
+
+func TestInvalidStateDoesNotSend(t *testing.T) {
+	h := newHarness(t)
+	st := agentJob()
+	h.arm(st, text("carry on with the plan please"))
+	st.Mode = "invalid"
+	must(t, os.WriteFile(h.paths.StatePath(jobID), job.Encode(st), 0600))
+	h.fire()
+	h.wantCode(1)
+	h.wantCalls()
+	if !strings.Contains(h.err.String(), "Invalid state file") {
+		t.Fatalf("stderr=%s", h.err.String())
+	}
+}
+
+func TestCleanupFailureMakesSuccessfulSendNonzero(t *testing.T) {
+	h := newHarness(t)
+	h.arm(agentJob(), text("carry on with the plan please"))
+	sys := filepath.Join(filepath.Dir(h.sysLog), "bin", "systemctl")
+	// Replace the local symlink, never write through it into the shared stand-in.
+	must(t, os.Remove(sys))
+	must(t, os.WriteFile(sys, []byte("#!/bin/sh\necho unavailable >&2\nexit 1\n"), 0755))
+	h.fire()
+	h.wantCode(1)
+	if !strings.Contains(h.err.String(), "was sent but cleanup failed") {
+		t.Fatalf("stderr=%s", h.err.String())
+	}
+	if _, err := os.Stat(h.paths.StatePath(jobID)); err != nil {
+		t.Fatalf("state was discarded: %v", err)
+	}
+}
+
+type changedComposer struct {
+	*fake
+	reads int
+}
+
+func (f *changedComposer) Read(pane, source string, lines int) (string, error) {
+	if source == "visible" {
+		f.reads++
+		if f.reads >= 3 {
+			return "› transformed draft\n footer", nil
+		}
+	}
+	return f.fake.Read(pane, source, lines)
+}
+func TestChangedComposerDoesNotConfirmDraftDisappearance(t *testing.T) {
+	h := newHarness(t)
+	h.f.drops = 5
+	h.arm(agentJob(), text("carry on with the plan please"))
+	f := &changedComposer{fake: h.f}
+	w := &Worker{ID: jobID, Paths: h.paths, Out: &h.out, Err: &h.err, Clock: h.clock, Connect: func(string) Herdr { return f }}
+	h.code = w.Run()
+	h.wantFailure("Could not verify the draft in wB:p1 after its screen became unreadable; send aborted.")
+	h.wantCalls("wait wB:p1", "prompt wB:p1 carry on with the plan please")
+	if h.f.draft == "" {
+		t.Fatal("draft was unexpectedly submitted")
+	}
 }

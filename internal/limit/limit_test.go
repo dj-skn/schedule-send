@@ -274,3 +274,53 @@ func TestBefore(t *testing.T) {
 		}
 	}
 }
+
+func TestScanTriesOtherHoldersAfterGaugeVeto(t *testing.T) {
+	warsaw(t)
+	draw := func(n, footer string) string { return n + "\n\n❯ \n────────\n" + footer }
+	s := &screens{out: map[string]string{
+		"session": draw("You've hit your session limit · resets 4pm", "session:0% (00:38)"),
+		"weekly":  draw("You've hit your weekly limit · resets 5pm", "week:0% (1h38m)"),
+		"target":  draw("● Done.", "session:80% (00:38) week:0% (1h38m)"),
+	}, reads: map[string]int{}}
+	got := Scan([]Agent{{"session", "claude"}, {"weekly", "claude"}, {"target", "claude"}}, "", at1522, s.read)["target"]
+	if got.State != Account || got.Source != "weekly" || got.Reset != at1600+3600 {
+		t.Fatalf("got %+v, want weekly account limit from the non-vetoed holder", got)
+	}
+}
+
+func TestReadYearBoundaryNotices(t *testing.T) {
+	loc := warsaw(t)
+	at := func(y int, mo time.Month, d, hr int) int64 { return time.Date(y, mo, d, hr, 0, 0, 0, loc).Unix() }
+	cases := []struct {
+		name, reset string
+		now         int64
+		state       State
+		want        int64
+	}{
+		{"upcoming new year", "Jan 1, 3pm", at(2026, 12, 31, 20), Limited, at(2027, 1, 1, 15)},
+		{"stale previous year", "Dec 31, 3pm", at(2027, 1, 1, 12), Over, at(2026, 12, 31, 15)},
+		{"older stale previous year", "Dec 31, 3pm", at(2027, 1, 15, 12), Over, at(2026, 12, 31, 15)},
+		{"stale same year", "Sep 28, 3pm", at(2026, 10, 3, 12), Over, at(2026, 9, 28, 15)},
+		{"explicit past year", "Jan 1, 2026 3pm", at(2026, 12, 31, 20), Over, at(2026, 1, 1, 15)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out := "You've hit your weekly limit · resets " + c.reset + "\n\n❯ \n────────\nweek:0% (19h0m)"
+			st := Read(out, c.now)
+			if st.State != c.state || st.Reset != c.want {
+				t.Fatalf("got %+v, want state=%d reset=%s", st, c.state, when.Format(c.want, when.Calendar))
+			}
+		})
+	}
+}
+
+func TestReadPreviousResetAcrossFallBack(t *testing.T) {
+	loc := warsaw(t)
+	now := time.Date(2026, 10, 25, 23, 30, 0, 0, loc).Unix()
+	want := time.Date(2026, 10, 25, 0, 15, 0, 0, loc).Unix()
+	st := Read("You've hit your session limit · resets 12:15am\n\n❯ \n────────\nsession:80% (01:00)", now)
+	if st.State != Over || st.Reset != want {
+		t.Fatalf("got %+v, want Over with %s", st, when.Format(want, when.Calendar))
+	}
+}

@@ -178,11 +178,18 @@ func Read(out string, now int64) Status {
 	var r, prev int64
 	known := false
 	if n.Time != "" {
-		r, known = when.Resolve(n.Time, now)
+		span := int64(7 * 24 * 3600)
+		if n.Window == "session" {
+			span = sessionSpan + slack
+		}
+		if hasGauge && g.HasReset {
+			span = int64(g.ResetIn/time.Second) + slack
+		}
+		r, known = when.ResolveReset(n.Time, now, span)
 	}
 	timeOnly := known && when.TimeOnly(n.Time)
 	if timeOnly {
-		prev, _ = when.Resolve(n.Time, now-86400)
+		prev, _ = when.Previous(n.Time, now)
 	}
 
 	switch {
@@ -254,7 +261,7 @@ func Scan(agents []Agent, self string, now int64, read func(pane string) string)
 		}
 		st := own[i]
 		if st.State == None {
-			if j := holder(agents, own, a.Kind); j >= 0 && !vetoed(st.Gauges, own[j].Window) {
+			if j := holder(agents, own, a.Kind, st.Gauges); j >= 0 {
 				gs := st.Gauges
 				st = own[j]
 				st.State, st.Gauges = Account, gs
@@ -265,12 +272,13 @@ func Scan(agents []Agent, self string, now int64, read func(pane string) string)
 	return out
 }
 
-// holder is the index of the Limited agent of kind that ranks first, or -1.
+// holder is the first-ranked Limited agent of kind whose notice the target
+// gauges do not veto, or -1.
 // Agents not read, self among them, are None and never qualify.
-func holder(agents []Agent, own []Status, kind string) int {
+func holder(agents []Agent, own []Status, kind string, gs []Gauge) int {
 	best := -1
 	for i, a := range agents {
-		if a.Kind != kind || own[i].State != Limited {
+		if a.Kind != kind || own[i].State != Limited || vetoed(gs, own[i].Window) {
 			continue
 		}
 		if best < 0 || Before(own[i], own[best]) {

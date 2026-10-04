@@ -43,7 +43,11 @@ func IsLimitLine(sq string) bool {
 // up to the blank line or rule that ends it, or a line indented well past it,
 // such as the tip Codex centres underneath.
 func (t Transcript) Text(i int) string {
-	out := t.Lines[i]
+	return screen.Collapse(strings.Join(t.noticeLines(i), " "))
+}
+
+func (t Transcript) noticeLines(i int) []string {
+	parts := []string{t.Lines[i]}
 	indent := leadingSpaces(t.Lines[i])
 	for j := i + 1; j <= i+5 && j < len(t.Lines); j++ {
 		if screen.IsBlank(t.Lines[j]) || screen.IsRule(t.Lines[j]) {
@@ -52,9 +56,9 @@ func (t Transcript) Text(i int) string {
 		if leadingSpaces(t.Lines[j]) >= indent+8 {
 			break
 		}
-		out += " " + t.Lines[j]
+		parts = append(parts, t.Lines[j])
 	}
-	return screen.Collapse(out)
+	return parts
 }
 
 func leadingSpaces(s string) int {
@@ -103,10 +107,33 @@ func Current(t Transcript) (n Notice, ok bool) {
 	}
 	text := t.Text(last)
 	n = Notice{Quote: screen.Truncate(text, 160), Window: window(text)}
-	if m := resetPhrase.FindStringSubmatch(text); m != nil {
+	if m := t.resetMatch(last); m != nil {
 		n.Time, n.Quote = m[2], m[0]
 	}
 	return n, true
+}
+
+// resetMatch considers both word wrapping and hard wrapping within tokens.
+// At most five boundaries are collected, so there are at most 32 joins. The
+// longest matching phrase preserves a timezone split across a line instead of
+// accepting the shorter unzoned prefix. Text keeps its readable spacing.
+func (t Transcript) resetMatch(i int) []string {
+	parts := t.noticeLines(i)
+	var best []string
+	for mask := 0; mask < 1<<(len(parts)-1); mask++ {
+		text := parts[0]
+		for j := 1; j < len(parts); j++ {
+			if mask&(1<<(j-1)) == 0 {
+				text += " "
+			}
+			text += strings.TrimSpace(parts[j])
+		}
+		m := resetPhrase.FindStringSubmatch(screen.Collapse(text))
+		if m != nil && (best == nil || len(m[0]) > len(best[0])) {
+			best = m
+		}
+	}
+	return best
 }
 
 func window(text string) string {

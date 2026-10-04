@@ -793,3 +793,125 @@ func TestJSONTargets(t *testing.T) {
 		t.Errorf("listing:\n%s", h.stdout)
 	}
 }
+
+func TestPickerEOFDoesNotChooseTarget(t *testing.T) {
+	input := ""
+	h := newHarness(t, &input)
+	code := h.a.main([]string{"--at", "16:30", "--message", "hi", "--dry-run", "--json"})
+	if code != 1 || h.stdout.Len() != 0 {
+		t.Fatalf("exit %d stdout %s", code, h.stdout)
+	}
+	if !strings.Contains(h.stderr.String(), "Target selection cancelled") {
+		t.Fatalf("stderr %s", h.stderr)
+	}
+}
+
+func TestValidateAllArgumentsBeforeCancel(t *testing.T) {
+	for _, tail := range [][]string{{"--bogus"}, {"--list"}, {"--dry-run"}} {
+		t.Run(strings.Join(tail, " "), func(t *testing.T) {
+			h := newHarness(t, nil)
+			h.addJobs(t)
+			id := "20261003-160100-wBp1"
+			args := append([]string{"--cancel", id, "--json"}, tail...)
+			if code := h.a.main(args); code == 0 {
+				t.Fatalf("invalid command succeeded")
+			}
+			if _, err := os.Stat(h.a.paths.StatePath(id)); err != nil {
+				t.Fatalf("cancelled before validation: %v", err)
+			}
+			if jsonObject(t, h.stderr.Bytes())["error"].(map[string]any)["code"] != "usage" {
+				t.Fatalf("stderr %s", h.stderr)
+			}
+		})
+	}
+}
+
+func TestListDoesNotRequireHerdr(t *testing.T) {
+	h := newHarness(t, nil)
+	t.Setenv("HERDR_BIN_OVERRIDE", filepath.Join(h.dir, "nonexistent-herdr"))
+	if code := h.a.main([]string{"--list", "--json"}); code != 0 {
+		t.Fatalf("exit %d stderr %s", code, h.stderr)
+	}
+	if len(jsonObject(t, h.stdout.Bytes())["jobs"].([]any)) != 0 {
+		t.Fatalf("stdout %s", h.stdout)
+	}
+}
+
+func TestDiscoveryErrorsHaveJSONDiagnostics(t *testing.T) {
+	for _, operation := range [][]string{{"--targets"}, {"--pane", "wB:p3", "--at", "16:30", "--message", "hi", "--dry-run"}} {
+		t.Run(operation[0], func(t *testing.T) {
+			h := newHarness(t, nil)
+			os.WriteFile(filepath.Join(h.dir, "herdr", "agent-list.json"), []byte("malformed JSON"), 0600)
+			args := append(operation, "--json")
+			if code := h.a.main(args); code != 1 {
+				t.Fatalf("exit %d stderr %s", code, h.stderr)
+			}
+			err := jsonObject(t, h.stderr.Bytes())["error"].(map[string]any)
+			if !strings.Contains(err["message"].(string), "Could not discover Herdr targets") {
+				t.Fatalf("stderr %s", h.stderr)
+			}
+		})
+	}
+}
+
+func TestDiscoveryCapturesChildStderr(t *testing.T) {
+	h := newHarness(t, nil)
+	script := filepath.Join(h.dir, "failing-herdr")
+	os.WriteFile(script, []byte("#!/bin/sh\necho 'lost connection to Herdr' >&2\nexit 1\n"), 0700)
+	t.Setenv("HERDR_BIN_OVERRIDE", script)
+	if code := h.a.main([]string{"--targets", "--json"}); code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	err := jsonObject(t, h.stderr.Bytes())["error"].(map[string]any)
+	if !strings.Contains(err["message"].(string), "lost connection to Herdr") {
+		t.Fatalf("stderr %s", h.stderr)
+	}
+}
+
+func TestListSkipsCorruptStateWithDiagnostic(t *testing.T) {
+	h := newHarness(t, nil)
+	h.addJobs(t)
+	os.WriteFile(h.a.paths.StatePath("bad-job"), []byte("corrupt"), 0600)
+	if code := h.a.main([]string{"--list", "--json"}); code != 0 {
+		t.Fatalf("exit %d stderr %s", code, h.stderr)
+	}
+	if len(jsonObject(t, h.stdout.Bytes())["jobs"].([]any)) != 2 {
+		t.Fatalf("stdout %s", h.stdout)
+	}
+	if !strings.Contains(jsonObject(t, h.stderr.Bytes())["warning"].(string), "bad-job.json") {
+		t.Fatalf("stderr %s", h.stderr)
+	}
+}
+
+func TestListUsesStoredEpoch(t *testing.T) {
+	h := newHarness(t, nil)
+	h.addJobs(t)
+	id := "20261003-160100-wBp1"
+	p := h.a.paths.StatePath(id)
+	b, _ := os.ReadFile(p)
+	v := jsonObject(t, b)
+	v["run_at"] = int64(1791036000)
+	b, _ = json.Marshal(v)
+	os.WriteFile(p, b, 0600)
+	when.Loc = time.UTC
+	if code := h.a.main([]string{"--list", "--json"}); code != 0 {
+		t.Fatalf("exit %d stderr %s", code, h.stderr)
+	}
+	for _, v := range jsonObject(t, h.stdout.Bytes())["jobs"].([]any) {
+		row := v.(map[string]any)
+		if row["id"] == id && row["run_at_epoch"] != float64(1791036000) {
+			t.Fatalf("epoch changed with timezone: %v", row)
+		}
+	}
+}
+
+func TestEpochOverrideOverflowRejected(t *testing.T) {
+	h := newHarness(t, nil)
+	t.Setenv("HERDR_SCHEDULE_NOW_EPOCH", "9999999999999999999999999999999999")
+	if code := h.a.main([]string{"--targets", "--json"}); code != 1 {
+		t.Fatalf("exit %d stderr %s", code, h.stderr)
+	}
+	if !strings.Contains(jsonObject(t, h.stderr.Bytes())["error"].(map[string]any)["message"].(string), "in range") {
+		t.Fatalf("stderr %s", h.stderr)
+	}
+}

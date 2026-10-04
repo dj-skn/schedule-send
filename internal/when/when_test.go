@@ -1,6 +1,8 @@
 package when
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -119,5 +121,69 @@ func TestFormat(t *testing.T) {
 		if got := Format(e, layout); got != want {
 			t.Errorf("Format(%q) = %q, want %q", layout, got, want)
 		}
+	}
+}
+
+func TestResolveResetYearAndHorizon(t *testing.T) {
+	loc := warsaw(t)
+	now := time.Date(2026, 12, 31, 20, 0, 0, 0, loc).Unix()
+	cases := []struct {
+		in      string
+		horizon int64
+		want    time.Time
+	}{
+		{"Jan 1, 3pm", 7 * 86400, time.Date(2027, 1, 1, 15, 0, 0, 0, loc)},
+		{"Jan 1, 3pm", 3600, time.Date(2026, 1, 1, 15, 0, 0, 0, loc)},
+		{"Jan 1, 2026 3pm", 7 * 86400, time.Date(2026, 1, 1, 15, 0, 0, 0, loc)},
+		{"Jan 1, 3pm (UTC)", 7 * 86400, time.Date(2027, 1, 1, 15, 0, 0, 0, time.UTC)},
+	}
+	for _, c := range cases {
+		got, ok := ResolveReset(c.in, now, c.horizon)
+		if !ok || got != c.want.Unix() {
+			t.Errorf("ResolveReset(%q,%d)=%d ok=%v want=%d", c.in, c.horizon, got, ok, c.want.Unix())
+		}
+	}
+	// The omitted year comes from the named zone, even if our local year differs.
+	now = time.Date(2027, 1, 1, 0, 30, 0, 0, loc).Unix()
+	want := time.Date(2026, 12, 31, 23, 0, 0, 0, time.UTC).Unix()
+	if got, ok := ResolveReset("Dec 31, 11pm (UTC)", now, 7*86400); !ok || got != want {
+		t.Errorf("zone's year: got=%d ok=%v want=%d", got, ok, want)
+	}
+}
+
+func TestPreviousUsesCalendarDays(t *testing.T) {
+	loc := warsaw(t)
+	cases := []struct {
+		in        string
+		now, want time.Time
+	}{
+		{"12:15am", time.Date(2026, 10, 25, 23, 30, 0, 0, loc), time.Date(2026, 10, 25, 0, 15, 0, 0, loc)},
+		{"11pm", time.Date(2026, 3, 29, 22, 0, 0, 0, loc), time.Date(2026, 3, 28, 23, 0, 0, 0, loc)},
+		{"11pm (UTC)", time.Date(2026, 10, 25, 0, 30, 0, 0, loc), time.Date(2026, 10, 23, 23, 0, 0, 0, time.UTC)},
+	}
+	for _, c := range cases {
+		if got, ok := Previous(c.in, c.now.Unix()); !ok || got != c.want.Unix() {
+			t.Errorf("Previous(%q)=%d ok=%v want=%d", c.in, got, ok, c.want.Unix())
+		}
+	}
+	if _, ok := Previous("12pm (Mars/Base)", 0); ok {
+		t.Fatal("accepted unknown zone")
+	}
+}
+
+func TestDateSubprocessTimeout(t *testing.T) {
+	tool := filepath.Join(t.TempDir(), "date")
+	if err := os.WriteFile(tool, []byte("#!/bin/sh\nexec sleep 30\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	previous := dateTool
+	dateTool = tool
+	t.Cleanup(func() { dateTool = previous })
+	start := time.Now()
+	if _, ok := Resolve("garbage", 0); ok {
+		t.Fatal("hung date returned a parsed time")
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("date took %s; timeout should bound it", elapsed)
 	}
 }

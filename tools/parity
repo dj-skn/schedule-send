@@ -66,6 +66,123 @@ known+=(
   unknown-arg "an unknown argument prints that same usage text"
 )
 
+# Review fixes intentionally change persistence and lifecycle calls. Unlike the
+# older presentation differences above, these cases are checked strictly:
+# review_equivalent verifies the exact changed fields/actions, then compares
+# every remaining byte. A wrong epoch, missing disarm, extra send, non-private
+# state, or unexpected file is still a failure.
+typeset -A review_known=(
+  cancel "private durable lock; stop timer/service before disabling and deleting"
+  arm-text "private atomic state/message, run_at epoch, UTC timer and durable lock"
+  arm-keys "private atomic state, run_at epoch, UTC timer and durable lock"
+  arm-file-sweeps "private atomic state/message, run_at epoch, UTC timer; lock and stop stale timer before sweeping"
+  arm-detected "private atomic state/message, run_at epoch, UTC timer and durable lock"
+)
+for name in fire-resume fire-old-state fire-keys fire-pane-run fire-force \
+    fire-gone fire-gone-quiet fire-not-an-agent fire-other-agent fire-moved \
+    fire-abort-busy fire-still-working fire-refused fire-still-limited \
+    fire-draft-stuck fire-draft-focus fire-draft-none; do
+  review_known[$name]="private durable lock; explicitly stop timer before cleanup"
+done
+for name in fire-resume fire-old-state fire-refused fire-still-limited \
+    fire-draft-stuck fire-draft-focus fire-draft-none; do
+  review_known[$name]+="; revalidate target identity before recovery"
+done
+
+review_equivalent() {
+  python3 - "$1" "$2" "$3" <<'PY_COMPARE'
+import datetime
+import difflib
+import json
+import pathlib
+import sys
+import zoneinfo
+
+name, ref_dir, go_dir = sys.argv[1:]
+ref = {p.name: p.read_text() for p in pathlib.Path(ref_dir).iterdir()}
+go = {p.name: p.read_text() for p in pathlib.Path(go_dir).iterdir()}
+try:
+    armed = name.startswith("arm-")
+    ids = {"arm-text": "20261003-163000-wBp3", "arm-keys": "20261004-090000-wBp5",
+           "arm-file-sweeps": "20261003-163000-wBp1", "arm-detected": "20261003-160100-wBp1"}
+    job_id = ids.get(name, "20261003-160100-wBp1")
+    locks = {f"state/herdr-send/.{job_id}.lock"}
+    if name == "arm-file-sweeps":
+        locks.add("state/herdr-send/.old.lock")
+    for lock in locks:
+        assert f"600 f {lock}\n" in go["modes"], f"missing/private lock invariant: {lock}"
+        go["modes"] = go["modes"].replace(f"600 f {lock}\n", "", 1)
+    assert "700 d state/herdr-send\n" in go["modes"], "state directory is not private"
+    for key in ("ref", "go"):
+        data = ref if key == "ref" else go
+        rows = []
+        for row in data["modes"].splitlines():
+            mode, kind, path = row.split(" ", 2)
+            if path == "state/herdr-send":
+                mode = "700"
+            if armed and kind == "f":
+                expected = "600" if path.startswith("state/") else "644"
+                if key == "go":
+                    assert mode == expected, f"wrong published file mode: {row}"
+                mode = expected
+            rows.append(f"{mode} {kind} {path}")
+        data["modes"] = "".join(row + "\n" for row in sorted(rows))
+    def sections(text):
+        out = {}
+        for part in text.split("== ")[1:]:
+            path, content = part.split("\n", 1)
+            out[path] = content
+        return out
+    ref_files, go_files = sections(ref["files"]), sections(go["files"])
+    for lock in locks:
+        assert go_files.pop(lock) == "", f"lock unexpectedly contains data: {lock}"
+    if armed:
+        state_path = f"state/herdr-send/{job_id}.json"
+        old_state, new_state = json.loads(ref_files[state_path]), json.loads(go_files[state_path])
+        fire_time = datetime.datetime.fromisoformat(old_state["at"]).replace(tzinfo=zoneinfo.ZoneInfo("Europe/Warsaw"))
+        epoch = int(fire_time.timestamp())
+        assert new_state.pop("run_at") == epoch, "stored epoch does not match displayed local time"
+        ref_files[state_path] = json.dumps(old_state, ensure_ascii=False, indent=2) + "\n"
+        go_files[state_path] = json.dumps(new_state, ensure_ascii=False, indent=2) + "\n"
+        timer_path = f"config/systemd/user/herdr-send-{job_id}.timer"
+        old_calendar = "OnCalendar=" + old_state["at"]
+        utc_calendar = "OnCalendar=" + fire_time.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        assert old_calendar in ref_files[timer_path], "reference calendar differs from its state"
+        assert utc_calendar in go_files[timer_path], "UTC timer does not match stored epoch"
+        go_files[timer_path] = go_files[timer_path].replace(utc_calendar, old_calendar, 1)
+    ref["files"] = json.dumps(ref_files, sort_keys=True)
+    go["files"] = json.dumps(go_files, sort_keys=True)
+    calls = go["systemctl-calls"].splitlines()
+    timer = f"herdr-send-{job_id}.timer"
+    if name == "cancel":
+        service = f"herdr-send-{job_id}.service"
+        assert calls[:3] == [f"--user stop {timer}", f"--user stop {service}", f"--user disable {timer}"], "cancel must disarm before deletion"
+        calls[:3] = [f"--user disable --now {timer}", f"--user stop {service}"]
+    elif name == "arm-file-sweeps":
+        stop = "--user stop herdr-send-old.timer"
+        assert calls.count(stop) == 1, "stale timer must be stopped exactly once"
+        calls.remove(stop)
+    elif name.startswith("fire-"):
+        assert calls.pop(0) == f"--user stop {timer}", "worker cleanup must stop the timer first"
+    go["systemctl-calls"] = "".join(row + "\n" for row in calls)
+    rechecked = {"fire-resume", "fire-old-state", "fire-refused", "fire-still-limited",
+                 "fire-draft-stuck", "fire-draft-focus", "fire-draft-none"}
+    if name in rechecked:
+        calls = go["herdr-calls"].splitlines()
+        assert calls[3:5] == ["agent list", "pane list"], "missing identity revalidation before recovery"
+        del calls[3:5]
+        go["herdr-calls"] = "".join(row + "\n" for row in calls)
+    assert ref.keys() == go.keys(), "unexpected captured artifact"
+    for key in sorted(ref):
+        if ref[key] != go[key]:
+            print("".join(difflib.unified_diff(ref[key].splitlines(True), go[key].splitlines(True), fromfile="ref/"+key, tofile="go/"+key)))
+            raise AssertionError("remaining comparison differs: " + key)
+except (AssertionError, KeyError, ValueError) as exc:
+    print("review difference check failed:", exc)
+    sys.exit(1)
+PY_COMPARE
+}
+
 # Everything a run leaves behind, with each implementation's own path written
 # as <self> so the two can be compared. Reads are left out: zsh times a fired
 # job's waits in whole seconds, so how often it polls depends on where in a
@@ -123,13 +240,22 @@ _case() {
     cat -v $work/out/$name/go/stdout $work/out/$name/go/stderr
   fi
   if diff -r $work/out/$name/ref $work/out/$name/go > $work/out/$name.diff; then
-    if (( ${+known[$name]} )); then
+    if (( ${+known[$name]} || ${+review_known[$name]} )); then
       fail=$(( fail + 1 ))
-      print -r -- "SAME  $name, which was expected to differ: ${known[$name]}"
+      print -r -- "SAME  $name, which was expected to differ: ${known[$name]:-${review_known[$name]}}"
       return
     fi
     pass=$(( pass + 1 ))
     print -r -- "ok    $name"
+  elif (( ${+review_known[$name]} )); then
+    if review_equivalent $name $work/out/$name/ref $work/out/$name/go; then
+      known_seen=$(( known_seen + 1 ))
+      print -r -- "known $name: ${review_known[$name]} (remaining comparison identical)"
+    else
+      fail=$(( fail + 1 ))
+      print -r -- "DIFF  $name: beyond documented review fixes"
+      sed 's/^/      /' $work/out/$name.diff
+    fi
   elif (( ${+known[$name]} )); then
     known_seen=$(( known_seen + 1 ))
     print -r -- "known $name: ${known[$name]}"
