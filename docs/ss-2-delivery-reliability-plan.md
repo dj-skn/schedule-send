@@ -2,14 +2,14 @@
 
 ## Status
 
-Plan recorded on 2026-10-11 at the owner's request, on story branch `ss-2`,
-starting from `master` at `034c9de`. P1 is approved for implementation as of 2026-10-11. No phase is built,
-verified, merged, or installed. P2 through P4 remain unapproved. Nothing is pushed.
+Plan recorded on 2026-10-11 on story branch `ss-2`, starting from `master`
+at `034c9de`. P1 is built and verified on `ss-2-p1`; this update accompanies
+its fast-forward into `ss-2`. P2 through P4 remain planned and unapproved.
+Nothing is installed, merged into master, or pushed.
 
-The owner requested a saved implementation plan following the code analysis.
-That authorizes this document and its story-branch commit, not implementation.
-P1 recovery recommendations are approved; later-phase recommendations remain
-proposed until the owner approves them.
+The owner first authorized recording, then agreed to the P1 walkthrough
+choices and explicitly instructed build on 2026-10-11. That approval covers
+P1 only. Later-phase recommendations remain proposed.
 
 ## Outcome
 
@@ -88,7 +88,7 @@ history; its old status paragraph is not the current master behavior.
 
 | Phase | Outcome | Branch | Status |
 | --- | --- | --- | --- |
-| P1 | Recovery stops when a dialog appears during focusing | `ss-2-p1` | approved; not built |
+| P1 | Recovery stops when a dialog appears during focusing | `ss-2-p1` | built and verified; fast-forwarded into ss-2 with this update |
 | P2 | Stable installed executable and valid systemd ExecStart | `ss-2-p2` | planned; not approved |
 | P3 | Strict numeric state loading with legacy defaults | `ss-2-p3` | planned; not approved |
 | P4 | Bounded, honest status diagnostics | `ss-2-p4` | planned; not approved |
@@ -138,9 +138,39 @@ Not included: redesigning Herdr, making screen/state reads atomic, changing
 initial prompt policy for blocked agents, or automatic rescheduling.
 Estimated size: one small implementation phase, roughly half a day to one day.
 
-### As built
+### As built — 2026-10-11
 
-Not built.
+- `recoverSubmission` retains the existing pre-focus dialog check and adds a
+  final blocked-lifecycle check immediately before every recovery Enter.
+  A focus-time dialog with a visible draft returns the existing dialog failure
+  and restores the previously focused agent without another Enter.
+- Four focus-transition regression cases cover a dialog with a retained draft,
+  an unreadable screen, submission during focus, and unknown lifecycle with
+  fresh draft evidence. Each asserts exact prompt/key/focus calls and previous
+  focus restoration. The dialog case also checks the original draft remains.
+- The corrected regression fixtures were run against the old code: only the
+  dialog case failed, reporting exit 0 and a focused/Enter-retried success
+  where exit 1 was expected. The other three cases passed. An initial trailing
+  space mismatch in the unreadable-screen expectation was corrected first.
+- The implementation adds six production lines. Tests and fix share commit
+  `baf24bb`: committing the intentionally failing regression alone would violate
+  the repository's requirement to pass `tools/check` before every commit.
+- Verification run now: `env GOCACHE=/tmp/herdr-ss-2-go-cache tools/check`
+  exited 0, with all 11 tested Go packages plus formatting, vet, shim/shell
+  syntax, and hook checks passing. The worker suite includes 29 top-level
+  tests, with four new subcases in the new test.
+- The six planned parity cases exited 0: zero identical cases, six documented
+  baseline differences, and zero unexpected differences. No parity expectation
+  changes were needed. This is P1 verification, not a full-story parity run.
+- Check by hand through stand-ins: inspect the transition test's exact command
+  assertions and failure output; inspect normal recovery/focus parity output.
+  No real pane or timer test is required or permitted.
+- The interval between the last lifecycle check and Herdr receiving Enter
+  remains non-atomic. Unknown lifecycle behavior and initial prompt policy are
+  unchanged. No state fields, timer files, or installer behavior changed.
+- Later phases inherit this recovery guard; P2 can proceed independently once
+  its walkthrough and design decisions are approved.
+
 
 ## P2 — Stable executable and systemd command encoding
 
