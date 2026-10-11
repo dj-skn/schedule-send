@@ -3,12 +3,12 @@
 ## Status
 
 Plan recorded on 2026-10-11 on story branch `ss-2`, starting from `master`
-at `034c9de`. P1 is complete in `ss-2`. P2 is built and verified on `ss-2-p2`;
-this update accompanies its fast-forward into `ss-2`. P3 is approved for implementation on 2026-10-11; P4 remains unapproved. Nothing is installed, merged into master, or pushed.
+at `034c9de`. P1 and P2 are complete in `ss-2`. P3 is built and verified on
+`ss-2-p3`; this update accompanies its fast-forward into `ss-2`. P4 remains
+planned and unapproved. Nothing is installed, merged into master, or pushed.
 
-The owner authorized recording, approved and instructed P1 build, then approved
-and instructed P2 build on 2026-10-11. The owner also approved the P3 recommendations and instructed build on
-2026-10-11. Approval covers P1 through P3; P4 remains proposed.
+The owner approved and instructed builds for P1, P2, and P3 on 2026-10-11.
+Those approvals cover P1 through P3 only; P4 recommendations remain proposed.
 
 ## Outcome
 
@@ -88,8 +88,8 @@ history; its old status paragraph is not the current master behavior.
 | Phase | Outcome | Branch | Status |
 | --- | --- | --- | --- |
 | P1 | Recovery stops when a dialog appears during focusing | `ss-2-p1` | complete in ss-2 |
-| P2 | Stable installed executable and valid systemd ExecStart | `ss-2-p2` | built and verified; fast-forwarded into ss-2 with this update |
-| P3 | Strict numeric state loading with legacy defaults | `ss-2-p3` | approved; not built |
+| P2 | Stable installed executable and valid systemd ExecStart | `ss-2-p2` | complete in ss-2 |
+| P3 | Strict numeric state loading with legacy defaults | `ss-2-p3` | built and verified; fast-forwarded into ss-2 with this update |
 | P4 | Bounded, honest status diagnostics | `ss-2-p4` | planned; not approved |
 
 Each phase starts with a fresh source check and an owner walkthrough. Build
@@ -310,9 +310,49 @@ Not included: state schema renames, cleanup of malformed jobs, or changing
 optional string-field compatibility.
 Estimated size: half a day to one day.
 
-### As built
+### As built — 2026-10-11
 
-Not built.
+- Load decodes raw JSON values directly as int64 integers. It rejects decimal
+  and exponent forms, malformed types, overflow/underflow, negatives, and
+  out-of-range controls with the offending field named. No float64 or
+  platform-dependent int conversion is used for run_at.
+- Absent and null fields retain force=0, quiet=0, grace=4, and run_at=0.
+  Optional string defaults and existing field names remain. State.Validate
+  continues checking controls and now also rejects negative firing epochs.
+- The loader regression failed against the old code: malformed values were
+  accepted, run_at=9007199254740993 became 9007199254740992, and the maximum
+  int64 became zero. A corrected worker fixture with grace=-1 also failed
+  against the old loader: it sent the prompt and exited 0 instead of refusing.
+- The first worker reproduction fixture accidentally re-encoded local state
+  without the stored Herdr executable, so it failed at binary discovery rather
+  than proving delivery. It now mutates the actual armed state file. The old
+  loader was temporarily restored only for the focused reproduction and the
+  corrected loader was restored immediately afterward before final checks.
+- Coverage: 56 basic field cases plus six range/exact-epoch cases; 36 worker
+  refusals across agent text, agent keys, and pane text; two list/status
+  inspection cases. Worker refusals assert zero connections, Herdr actions,
+  and systemctl actions, with state bytes and job artifacts retained.
+- List warns and skips malformed numeric state. Status exposes the original
+  stored JSON, including the invalid 4.0 notation, without changing it.
+- One low-level concurrent-write fixture and two management fixtures explicitly
+  encoded grace=0 through zero-valued State structs. They now encode grace=4;
+  the missing-field compatibility tests still test genuinely absent fields.
+  The old default test no longer endorses -1 or 4.5; explicit null still defaults.
+- No production worker or management code changes were needed: existing Load
+  failure handling already stops before connecting and retains state.
+  README records the supported numeric syntax, ranges, and defaults.
+- Verification run now: `env GOCACHE=/tmp/herdr-ss-2-go-cache tools/check`
+  exited 0, with all 12 tested Go packages plus formatting, vet, shim/shell
+  syntax, and isolated hook checks passing. The six planned parity cases
+  exited 0: two identical, four documented differences, zero unexpected.
+  This is targeted P3 parity, not a new full-story parity run.
+- Tests and fix share one implementation commit so no intentionally failing
+  regression is committed, as tools/check must pass before every commit.
+  Owner review can inspect the numeric table tests and the list/status fixture
+  output; no real-pane or real-timer check is required or permitted.
+- P4 inherits strict loading and retained malformed-state inspection. No job
+  schema migration, installation, master merge, or push was performed.
+
 
 ## P4 — Bounded status inspection
 
