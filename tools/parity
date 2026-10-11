@@ -15,7 +15,7 @@ trap 'rm -rf $work' EXIT
 
 git -C $root show "${ref_commit}:schedule-send.zsh" > $work/ref.zsh || exit 1
 chmod +x $work/ref.zsh
-(cd $root && go build -o $work/go-bin ./cmd/schedule-send) || exit 1
+(cd $root && tools/build $work/go-bin $work/go-bin) || exit 1
 
 # herdr is shadowed too: a fired job falls back to herdr on PATH when its stored
 # binary is gone, and that must never reach a real pane.
@@ -137,6 +137,10 @@ try:
     for lock in locks:
         assert go_files.pop(lock) == "", f"lock unexpectedly contains data: {lock}"
     if armed:
+        service_path = f"config/systemd/user/herdr-send-{job_id}.service"
+        command = f'ExecStart=:/usr/bin/env -- "<self>" __fire {job_id}\n'
+        assert command in go_files[service_path], "service must disable expansion and quote its recorded executable via env"
+        go_files[service_path] = go_files[service_path].replace(command, f"ExecStart=<self> __fire {job_id}\n", 1)
         state_path = f"state/herdr-send/{job_id}.json"
         old_state, new_state = json.loads(ref_files[state_path]), json.loads(go_files[state_path])
         fire_time = datetime.datetime.fromisoformat(old_state["at"]).replace(tzinfo=zoneinfo.ZoneInfo("Europe/Warsaw"))

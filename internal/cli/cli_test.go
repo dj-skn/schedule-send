@@ -3,8 +3,10 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -74,9 +76,10 @@ func newHarness(t *testing.T, ttyInput *string) *harness {
 		openTTY: func() (io.ReadWriteCloser, error) {
 			return fakeTTY{strings.NewReader(*ttyInput), h.tty}, nil
 		},
-		paths:    job.Paths{StateDir: filepath.Join(dir, "state"), UnitDir: filepath.Join(dir, "units")},
-		selfPane: "wB:p2",
-		self:     "/opt/schedule-send",
+		paths:         job.Paths{StateDir: filepath.Join(dir, "state"), UnitDir: filepath.Join(dir, "units")},
+		selfPane:      "wB:p2",
+		self:          "/opt/schedule-send",
+		installedPath: func() (string, error) { return "/opt/schedule-send", nil },
 	}
 	return h
 }
@@ -475,7 +478,7 @@ func TestArmWritesStateAndUnits(t *testing.T) {
 		t.Errorf("message %q", msg)
 	}
 	service, _ := os.ReadFile(h.a.paths.UnitPath(id, "service"))
-	if !strings.Contains(string(service), "ExecStart=/opt/schedule-send __fire "+id+"\n") {
+	if !strings.Contains(string(service), `ExecStart=:/usr/bin/env -- "/opt/schedule-send" __fire `+id+"\n") {
 		t.Errorf("service:\n%s", service)
 	}
 	if !strings.HasSuffix(h.stdout.String(), "payload=two\n\ncancel with: schedule-send --cancel "+id+"\n") {
@@ -913,5 +916,140 @@ func TestEpochOverrideOverflowRejected(t *testing.T) {
 	}
 	if !strings.Contains(jsonObject(t, h.stderr.Bytes())["error"].(map[string]any)["message"].(string), "in range") {
 		t.Fatalf("stderr %s", h.stderr)
+	}
+}
+
+func TestUnmanagedSchedulingRefusedBeforePublication(t *testing.T) {
+	h := newHarness(t, nil)
+	h.a.installedPath = func() (string, error) { return "", errors.New("this build has no installation path") }
+	if code := h.a.main([]string{"--pane", "wB:p3", "--at", "16:30", "--message", "hello"}); code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	if !strings.Contains(h.stderr.String(), "Run tools/install from the main checkout on master") {
+		t.Fatalf("stderr: %s", h.stderr)
+	}
+	for _, dir := range []string{h.a.paths.StateDir, h.a.paths.UnitDir} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("created job directory %s: %v", dir, err)
+		}
+	}
+}
+
+func TestInvalidServiceMetadataRefusedBeforePublication(t *testing.T) {
+	h := newHarness(t, nil)
+	h.a.installedPath = func() (string, error) { return "/opt/bad\npath", nil }
+	if code := h.a.main([]string{"--pane", "wB:p3", "--at", "16:30", "--message", "hello"}); code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	if !strings.Contains(h.stderr.String(), "control character") {
+		t.Fatalf("stderr: %s", h.stderr)
+	}
+	for _, dir := range []string{h.a.paths.StateDir, h.a.paths.UnitDir} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("created job directory %s: %v", dir, err)
+		}
+	}
+}
+
+// Exercise the real linked metadata and CLI with isolated Herdr/systemd stand-ins.
+func TestBuiltInstallationAndUnmanagedCommands(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newHarness(t, nil)
+	stateRoot := filepath.Join(h.dir, "state-root")
+	configRoot := filepath.Join(h.dir, "config-root")
+	t.Setenv("XDG_STATE_HOME", stateRoot)
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("HERDR_PANE_ID", "wB:p2")
+	final := filepath.Join(h.dir, `installed space % $ " ' \`)
+	staged := filepath.Join(h.dir, "staged")
+	out, err := exec.Command(filepath.Join(root, "tools/build"), staged, final).CombinedOutput()
+	if err != nil {
+		t.Fatalf("fixture build: %v: %s", err, out)
+	}
+	if err := os.Rename(staged, final); err != nil {
+		t.Fatal(err)
+	}
+	run := func(bin string, args ...string) (string, error) {
+		t.Helper()
+		out, err := exec.Command(bin, args...).CombinedOutput()
+		return string(out), err
+	}
+	schedule := []string{"--pane", "wB:p3", "--at", "16:30", "--message", "hello"}
+	copied := filepath.Join(h.dir, "copied")
+	data, err := os.ReadFile(final)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(copied, data, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, bin := range []string{staged, copied} {
+		if bin == staged {
+			if err := os.Rename(final, staged); err != nil {
+				t.Fatal(err)
+			}
+		}
+		out, err := run(bin, schedule...)
+		if err == nil || !strings.Contains(out, "Cannot arm a job:") {
+			t.Fatalf("unmanaged schedule: %v: %s", err, out)
+		}
+		if bin == staged {
+			if err := os.Rename(staged, final); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, root := range []string{filepath.Join(stateRoot, "herdr-send"), filepath.Join(configRoot, "systemd/user")} {
+			if _, err := os.Stat(root); !os.IsNotExist(err) {
+				t.Fatalf("created directory on refusal: %s: %v", root, err)
+			}
+		}
+		if bin == copied {
+			if out, err := run(bin, "--list", "--json"); err != nil {
+				t.Fatalf("management: %v: %s", err, out)
+			}
+		}
+	}
+	if out, err := run(copied, append(schedule, "--dry-run")...); err != nil {
+		t.Fatalf("copied preview: %v: %s", err, out)
+	}
+	plain := filepath.Join(h.dir, "plain")
+	cmd := exec.Command("go", "build", "-o", plain, "./cmd/schedule-send")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("plain fixture build: %v: %s", err, out)
+	}
+	if out, err := run(plain, schedule...); err == nil || !strings.Contains(out, "no installation path") {
+		t.Fatalf("plain schedule: %v: %s", err, out)
+	}
+	if out, err := run(plain, append(schedule, "--dry-run")...); err != nil {
+		t.Fatalf("plain preview: %v: %s", err, out)
+	}
+	if out, err := run(plain, "--list", "--json"); err != nil {
+		t.Fatalf("plain management: %v: %s", err, out)
+	}
+	if out, err := run(plain, "__fire", "missing"); err == nil || !strings.Contains(out, "No state file") || strings.Contains(out, "installation") {
+		t.Fatalf("legacy fire: %v: %s", err, out)
+	}
+	linked := filepath.Join(h.dir, "linked")
+	if err := os.Symlink(final, linked); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(linked, schedule...); err != nil {
+		t.Fatalf("installed schedule: %v: %s", err, out)
+	}
+	id := "20261003-163000-wBp3"
+	unit, err := os.ReadFile(filepath.Join(configRoot, "systemd/user/herdr-send-"+id+".service"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := job.ServiceUnit("wB:p3", "2026-10-03 16:30:00", final, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(unit) != expected {
+		t.Fatalf("service %q, want %q", unit, expected)
 	}
 }

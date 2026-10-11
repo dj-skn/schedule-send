@@ -16,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -277,14 +278,33 @@ func (p Paths) Publish(s State, msg *string) error {
 }
 
 // ServiceUnit is the oneshot service a job's timer starts.
-func ServiceUnit(pane, calendar, self, id string) string {
+func ServiceUnit(pane, calendar, self, id string) (string, error) {
+	for _, value := range []string{pane, calendar, self, id} {
+		if !utf8.ValidString(value) {
+			return "", errors.New("service metadata must be UTF-8")
+		}
+		for _, r := range value {
+			if unicode.IsControl(r) {
+				return "", errors.New("service metadata contains a control character")
+			}
+		}
+	}
+	if !filepath.IsAbs(self) || !validID.MatchString(id) {
+		return "", errors.New("invalid service executable or job id")
+	}
+	// systemd command syntax is not shell syntax: quote the executable and
+	// escape C-style characters and specifiers. env executes the path as an
+	// argument, since systemd rejects quotes/backslashes in its executable
+	// token even when escaped. The ':' prefix disables environment expansion.
+	executable := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `%`, `%%`).Replace(self)
+	description := strings.ReplaceAll("herdr scheduled send to "+pane+" at "+calendar, "%", "%%")
 	return fmt.Sprintf(`[Unit]
-Description=herdr scheduled send to %s at %s
+Description=%s
 
 [Service]
 Type=oneshot
-ExecStart=%s __fire %s
-`, pane, calendar, self, id)
+ExecStart=:/usr/bin/env -- "%s" __fire %s
+`, description, executable, id), nil
 }
 
 // TimerUnit fires once at calendar, a resolved wall-clock time, so what

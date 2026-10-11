@@ -33,8 +33,8 @@ entrypoint; `schedule-send.zsh` is the compatibility shim for older timers.
 | `tools/install` | Build, atomically publish, and link the binary; main `master` only. |
 | `tools/setup-hooks` | Enable this repository's hooks and install if needed; main `master` only. |
 
-Build/install needs Go 1.27.1+, Git, and `flock`. Checks also need `zsh` and
-`jq`; parity uses Python 3 and `script`. Runtime needs Herdr, GNU `date`, and
+Build/install needs Go 1.27.1+, Git, `flock`, and GNU coreutils (`base64`, `tr`). Checks also need `zsh` and
+`jq`; parity uses Python 3 and `script`. Runtime needs Herdr, GNU `date`, `/usr/bin/env` (GNU coreutils), and
 `systemctl --user`.
 
 ## Compatibility and delivery invariants

@@ -9,8 +9,9 @@ open. The target is checked again before delivery. Linux only.
 
 ## Install and automatic updates
 
-Build requirements: Go **1.27.1 or newer**, Git, and `flock`. Running the app
-requires Herdr, GNU `date`, and `systemctl --user`.
+Build requirements: Go **1.27.1 or newer**, Git, `flock`, and GNU coreutils
+(`base64` and `tr`). Running the app requires Herdr, GNU `date`, `/usr/bin/env` (GNU coreutils), and
+`systemctl --user`.
 
 From the main checkout on `master`, run once:
 
@@ -38,6 +39,14 @@ tools/install
 
 Installation builds `bin/schedule-send`, replaces it atomically, and links
 `~/.local/bin/schedule-send` to it. Only one installation can run at a time.
+Installer builds record the stable main-checkout binary path. Real scheduling
+requires running from that location (including through its symlink). Plain
+`go build`/`go run` builds and moved or copied binaries cannot arm jobs; run
+`tools/install` from main `master` and invoke the installed command. Dry-run,
+management commands, and legacy timer firing remain available in plain builds.
+Generated services invoke `/usr/bin/env --` with the quoted executable path
+and disable systemd environment expansion. Percent specifiers are escaped;
+paths with control characters are rejected before creating job files.
 Already-scheduled jobs use the newly installed binary when they fire. The zsh
 shim remains so timers created before the Go rewrite still work.
 

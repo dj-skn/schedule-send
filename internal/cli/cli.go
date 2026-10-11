@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"schedule-send/internal/herdr"
+	"schedule-send/internal/installpath"
 	"schedule-send/internal/job"
 	"schedule-send/internal/limit"
 	"schedule-send/internal/show"
@@ -73,8 +74,9 @@ type app struct {
 	paths          job.Paths
 	sys            job.Systemctl
 	h              herdr.Client
-	selfPane       string // HERDR_PANE_ID
-	self           string // this executable, which the timer runs
+	selfPane       string                 // HERDR_PANE_ID
+	self           string                 // preview executable, or the validated installed path
+	installedPath  func() (string, error) // private injection for isolated tests
 
 	rows []target.Row
 	tgt  target.Row
@@ -359,6 +361,22 @@ func (a *app) run(args []string) (retErr error) {
 		return die("Nothing to send. Pass --message, --message-file, or --keys.")
 	}
 
+	if !o.dryRun {
+		resolve := a.installedPath
+		if resolve == nil {
+			resolve = installpath.Resolve
+		}
+		installed, err := resolve()
+		if err != nil {
+			return die("Cannot arm a job: %v. Run tools/install from the main checkout on master, then invoke the installed schedule-send.", err)
+		}
+		a.self = installed
+		fi, err := os.Stat("/usr/bin/env")
+		if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm()&0111 == 0 {
+			return die("/usr/bin/env is required to execute scheduled jobs (GNU coreutils).")
+		}
+	}
+
 	if _, err := exec.LookPath("systemctl"); err != nil {
 		return die("systemctl is required.")
 	}
@@ -469,6 +487,11 @@ func (a *app) run(args []string) (retErr error) {
 		return nil
 	}
 
+	serviceText, err := job.ServiceUnit(t.Pane, calendar, a.selfPath(), id)
+	if err != nil {
+		return die("Could not render the service: %v", err)
+	}
+
 	lock, err := a.paths.Lock(id)
 	if err != nil {
 		return die("Could not reserve %s: %v", id, err)
@@ -509,7 +532,7 @@ func (a *app) run(args []string) (retErr error) {
 		return die("Could not create %s: %v", a.paths.UnitDir, err)
 	}
 	service, timer := a.paths.UnitPath(id, "service"), a.paths.UnitPath(id, "timer")
-	if err := job.AtomicWrite(service, []byte(job.ServiceUnit(t.Pane, calendar, a.selfPath(), id)), 0o644); err != nil {
+	if err := job.AtomicWrite(service, []byte(serviceText), 0o644); err != nil {
 		return die("Could not write %s: %v", service, err)
 	}
 	if err := job.AtomicWrite(timer, []byte(job.TimerUnit(id, time.Unix(runAt, 0).UTC().Format(when.Calendar)+" UTC", o.persistent)), 0o644); err != nil {
