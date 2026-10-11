@@ -4,7 +4,7 @@
 
 Plan recorded on 2026-10-11 on story branch `ss-2`, starting from `master`
 at `034c9de`. P1 is built and verified on `ss-2-p1`; this update accompanies
-its fast-forward into `ss-2`. P2 through P4 remain planned and unapproved.
+its fast-forward into `ss-2`. P2 is approved for implementation on 2026-10-11; P3 and P4 remain unapproved.
 Nothing is installed, merged into master, or pushed.
 
 The owner first authorized recording, then agreed to the P1 walkthrough
@@ -89,7 +89,7 @@ history; its old status paragraph is not the current master behavior.
 | Phase | Outcome | Branch | Status |
 | --- | --- | --- | --- |
 | P1 | Recovery stops when a dialog appears during focusing | `ss-2-p1` | built and verified; fast-forwarded into ss-2 with this update |
-| P2 | Stable installed executable and valid systemd ExecStart | `ss-2-p2` | planned; not approved |
+| P2 | Stable installed executable and valid systemd ExecStart | `ss-2-p2` | approved; not built |
 | P3 | Strict numeric state loading with legacy defaults | `ss-2-p3` | planned; not approved |
 | P4 | Bounded, honest status diagnostics | `ss-2-p4` | planned; not approved |
 
@@ -173,6 +173,22 @@ Estimated size: one small implementation phase, roughly half a day to one day.
 
 
 ## P2 — Stable executable and systemd command encoding
+
+### Decisions settled 2026-10-11
+
+The owner agreed to the P2 walkthrough and explicitly instructed build.
+Embed the final absolute executable path during installation, using encoded
+metadata to avoid build argument quoting problems. Require real scheduling to
+run at that resolved path and validate it before publishing any artifacts.
+Unmanaged, copied, moved, and go-run binaries cannot arm jobs. Keep dry-run,
+management, and legacy internal firing usable. Preserve old units and the shim.
+Encode new ExecStart paths with systemd quoting and specifier rules; reject
+unsupported control characters before publication.
+
+A small shared build helper will supply encoded metadata for the installer and
+isolated parity fixtures. It builds only; it does not install or link anything.
+Installer/hook tests continue using mock installers. The helper must be included
+in source hashing and syntax checks so its changes trigger automatic rebuilding.
 
 ### Steps
 
