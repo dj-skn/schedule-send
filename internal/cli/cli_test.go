@@ -53,6 +53,7 @@ func newHarness(t *testing.T, ttyInput *string) *harness {
 	path := filepath.Join(dir, "path")
 	os.MkdirAll(path, 0o755)
 	os.Symlink(filepath.Join(root, "testdata/standin/systemctl"), filepath.Join(path, "systemctl"))
+	os.Symlink(filepath.Join(root, "testdata/standin/journalctl"), filepath.Join(path, "journalctl"))
 
 	t.Setenv("PATH", path+":"+os.Getenv("PATH"))
 	t.Setenv("HERDR_BIN_OVERRIDE", filepath.Join(root, "testdata/standin/herdr"))
@@ -1070,13 +1071,6 @@ func TestMalformedNumericStateRemainsInspectable(t *testing.T) {
 			}
 			args := []string{operation, "--json"}
 			if operation == "--status" {
-				root, err := filepath.Abs("../..")
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := os.Symlink(filepath.Join(root, "testdata/standin/journalctl"), filepath.Join(h.dir, "path/journalctl")); err != nil {
-					t.Fatal(err)
-				}
 				args = []string{operation, id, "--json"}
 			}
 			if code := h.a.main(args); code != 0 {

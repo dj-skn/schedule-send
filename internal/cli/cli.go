@@ -77,6 +77,7 @@ type app struct {
 	selfPane       string                 // HERDR_PANE_ID
 	self           string                 // preview executable, or the validated installed path
 	installedPath  func() (string, error) // private injection for isolated tests
+	statusTimeouts statusTimeouts         // private deadlines for isolated tests
 
 	rows []target.Row
 	tgt  target.Row
@@ -304,8 +305,7 @@ func (a *app) run(args []string) (retErr error) {
 	case "--cancel":
 		return a.cancel(a.o.operationID)
 	case "--status":
-		a.status(a.o.operationID)
-		return nil
+		return a.status(a.o.operationID)
 	case "--help":
 		fmt.Fprint(a.stdout, usage)
 		return nil
@@ -997,59 +997,6 @@ func (a *app) cancel(id string) error {
 	}
 	fmt.Fprintln(a.stdout, "cancelled "+id)
 	return nil
-}
-
-func (a *app) status(id string) {
-	if a.o.json {
-		a.statusJSON(id)
-		return
-	}
-	unit := job.UnitPrefix + "-" + id
-	if b, err := os.ReadFile(a.paths.StatePath(id)); err == nil {
-		var out bytes.Buffer
-		if json.Indent(&out, bytes.TrimSpace(b), "", "  ") == nil {
-			out.WriteByte('\n')
-			a.stdout.Write(out.Bytes())
-		} else {
-			a.stdout.Write(b)
-		}
-	} else {
-		fmt.Fprintf(a.stderr, "No state file for %s (job may have already run).\n", id)
-	}
-	fmt.Fprintln(a.stdout)
-	_ = a.sys.Through(a.stdout, nil, "status", unit+".timer", "--no-pager")
-	fmt.Fprintln(a.stdout)
-	cmd := exec.Command("journalctl", "--user", "-u", unit+".service", "--no-pager", "-n", "40")
-	cmd.Stdout = a.stdout
-	_ = cmd.Run()
-}
-
-// statusJSON is --status --json: the stored job, the timer text and the
-// journal, as one object. A missing state file is a warning inside it, and
-// the command still exits 0, as the plain form does.
-func (a *app) statusJSON(id string) {
-	unit := job.UnitPrefix + "-" + id
-	state := json.RawMessage("null")
-	warning := ""
-	if b, err := os.ReadFile(a.paths.StatePath(id)); err == nil && json.Valid(b) {
-		state = json.RawMessage(bytes.TrimSpace(b))
-	} else if err != nil {
-		warning = fmt.Sprintf("No state file for %s (job may have already run).", id)
-	} else {
-		warning = fmt.Sprintf("Invalid JSON in state file for %s.", id)
-	}
-	var timer bytes.Buffer
-	_ = a.sys.Through(&timer, &timer, "status", unit+".timer", "--no-pager")
-	var journal bytes.Buffer
-	cmd := exec.Command("journalctl", "--user", "-u", unit+".service", "--no-pager", "-n", "40")
-	cmd.Stdout = &journal
-	_ = cmd.Run()
-	emit(a.stdout, struct {
-		State   json.RawMessage `json:"state"`
-		Timer   string          `json:"timer"`
-		Journal string          `json:"journal"`
-		Warning string          `json:"warning,omitempty"`
-	}{state, strings.TrimRight(timer.String(), "\n"), strings.TrimRight(journal.String(), "\n"), warning})
 }
 
 // showTargets lists every pane and, for an agent, the usage limit read from
