@@ -235,6 +235,12 @@ func (w *Worker) recoverSubmission(g gate) outcome {
 			w.recovery = "Enter retried"
 		}
 
+		// Focusing and the final screen read can expose a dialog after the
+		// earlier check. A visible draft is not permission to answer it.
+		if status, _ := w.h.State(g.pane); status == "blocked" {
+			w.restoreFocus(prevFocus, g.pane)
+			return dialog
+		}
 		if w.h.SendKeys("agent", g.pane, []string{"enter"}, nil) != nil {
 			fmt.Fprintf(w.Err, "Could not send Enter to %s.\n", g.pane)
 			continue

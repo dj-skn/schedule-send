@@ -46,6 +46,7 @@ type fake struct {
 	// silent submits leave no trace in the lifecycle.
 	silent   bool
 	onSubmit func(f *fake)
+	onFocus  func(f *fake)
 
 	calls []string
 	notes []string
@@ -135,6 +136,9 @@ func (f *fake) Wait(pane string, timeoutMs int) error {
 func (f *fake) Focus(pane string) error {
 	f.calls = append(f.calls, "focus "+pane)
 	f.focused = pane
+	if f.onFocus != nil {
+		f.onFocus(f)
+	}
 	return nil
 }
 
@@ -347,6 +351,70 @@ func TestFocusRungHandsFocusBack(t *testing.T) {
 		"Retried Enter did not land in wB:p1; focusing the pane and trying again.\n")
 	h.wantCalls("wait wB:p1", "prompt wB:p1 carry on with the plan please",
 		"agent send-keys wB:p1 enter", "focus wB:p1", "agent send-keys wB:p1 enter", "focus wA:p1")
+}
+
+func TestRecoveryFocusTransitions(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		onFocus func(*fake)
+		failure string
+		retry   bool
+	}{
+		{
+			name:    "dialog with draft",
+			onFocus: func(f *fake) { f.status = "blocked" },
+			failure: "Agent in wB:p1 opened a dialog with the text unsent; it is left in the composer.",
+		},
+		{
+			name:    "unreadable screen",
+			onFocus: func(f *fake) { f.readErr = errors.New("screen unavailable") },
+			failure: "Text is still unsent in wB:p1's composer: ",
+		},
+		{
+			name:    "draft submitted during focus",
+			onFocus: func(f *fake) { f.press() },
+		},
+		{
+			name:    "unknown lifecycle with draft",
+			onFocus: func(f *fake) { f.status = "unknown" },
+			retry:   true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.f.drops = 2
+			h.f.focused = "wA:p1"
+			h.f.onFocus = func(f *fake) {
+				if f.focused == "wB:p1" {
+					tc.onFocus(f)
+				}
+			}
+			st := agentJob()
+			st.Recover = "focus"
+			h.arm(st, text("carry on with the plan please"))
+			h.fire()
+			if tc.failure != "" {
+				h.wantFailure(tc.failure)
+			} else {
+				h.wantCode(0)
+			}
+			calls := []string{
+				"wait wB:p1", "prompt wB:p1 carry on with the plan please",
+				"agent send-keys wB:p1 enter", "focus wB:p1",
+			}
+			if tc.retry {
+				calls = append(calls, "agent send-keys wB:p1 enter")
+			}
+			calls = append(calls, "focus wA:p1")
+			h.wantCalls(calls...)
+			if h.f.focused != "wA:p1" {
+				t.Errorf("focused pane = %q, want wA:p1", h.f.focused)
+			}
+			if tc.name == "dialog with draft" && h.f.draft != "carry on with the plan please" {
+				t.Errorf("dialog draft = %q, want original text", h.f.draft)
+			}
+		})
+	}
 }
 
 func TestLadderExhaustedQuotesTheDraft(t *testing.T) {
