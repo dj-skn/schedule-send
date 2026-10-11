@@ -4,12 +4,11 @@
 
 Plan recorded on 2026-10-11 on story branch `ss-2`, starting from `master`
 at `034c9de`. P1 is complete in `ss-2`. P2 is built and verified on `ss-2-p2`;
-this update accompanies its fast-forward into `ss-2`. P3 and P4 remain planned
-and unapproved. Nothing is installed, merged into master, or pushed.
+this update accompanies its fast-forward into `ss-2`. P3 is approved for implementation on 2026-10-11; P4 remains unapproved. Nothing is installed, merged into master, or pushed.
 
 The owner authorized recording, approved and instructed P1 build, then approved
-and instructed P2 build on 2026-10-11. Approval covers those two phases only.
-P3 and P4 recommendations remain proposed.
+and instructed P2 build on 2026-10-11. The owner also approved the P3 recommendations and instructed build on
+2026-10-11. Approval covers P1 through P3; P4 remains proposed.
 
 ## Outcome
 
@@ -90,7 +89,7 @@ history; its old status paragraph is not the current master behavior.
 | --- | --- | --- | --- |
 | P1 | Recovery stops when a dialog appears during focusing | `ss-2-p1` | complete in ss-2 |
 | P2 | Stable installed executable and valid systemd ExecStart | `ss-2-p2` | built and verified; fast-forwarded into ss-2 with this update |
-| P3 | Strict numeric state loading with legacy defaults | `ss-2-p3` | planned; not approved |
+| P3 | Strict numeric state loading with legacy defaults | `ss-2-p3` | approved; not built |
 | P4 | Bounded, honest status diagnostics | `ss-2-p4` | planned; not approved |
 
 Each phase starts with a fresh source check and an owner walkthrough. Build
@@ -274,6 +273,22 @@ Estimated size: one to two days; installer/runtime contract is the main cost.
 
 
 ## P3 — Strict numeric state loading
+
+### Decisions settled 2026-10-11
+
+The owner approved all three walkthrough recommendations and instructed build.
+Absent and null numeric fields retain force=0, quiet=0, grace=4, and run_at=0.
+Accept JSON integer literals only; reject decimal/exponent notation even when
+mathematically integral. Reject invalid types, negatives, overflow, force/quiet
+outside 0–1, and grace outside 1–60 during Load with field-specific errors.
+Decode run_at directly as a nonnegative int64. Keep State.Validate as a second
+guard. Do not delete malformed jobs or change optional string defaults.
+
+Source orientation confirmed an existing test explicitly expecting malformed
+grace values to default, and float64/int coercion for run_at. Worker.Run already
+returns before connecting to Herdr when Load fails, so production worker changes
+should not be needed. Any low-level test fixture that explicitly encodes grace=0
+must be corrected to a valid value rather than weakening the approved range.
 
 ### Steps
 
