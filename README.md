@@ -219,6 +219,14 @@ is missing. `--status` includes stored state, timer status, and recent journal
 entries. Cancellation stops the timer/service and removes the job's files.
 Completed jobs clean up their own units and state.
 
+Status inspection gives timer status and any confirming unit-state query a
+shared 30-second budget, then gives the journal 10 seconds. Command pipe drains
+are limited to one second. Inactive, failed, and missing units are normal
+inspection results when their unit properties confirm the condition; a missing
+state file is normal for a completed job. Collection failures (including missing
+commands, deadlines, transport errors, unreadable state, or invalid state JSON)
+exit 1, name the failing source, and retain partial output.
+
 Jobs missed while the machine is down are skipped by default. Add
 `--persistent` when scheduling to run a missed job at the next boot.
 
@@ -246,6 +254,11 @@ JSON mode emits one result object on stdout and separate note/warning/error
 objects on stderr. Errors use `{"error":{"code":"...","message":"..."}}`,
 with `usage`, `not_found`, `ambiguous`, or `failed` codes. JSON does not disable
 interactive prompts; use explicit selectors and `--at` or `--auto` for scripts.
+Status JSON retains `state`, `timer`, `journal`, and optional `warning`, and adds
+optional `diagnostics` with `source`, `severity`, `code`, and `message`. Command
+diagnostics may include `exit_code`, `stderr`, and partial `output`. Even when
+inspection exits 1, stdout contains exactly one partial status result, with the
+usual error envelope on stderr. Command warnings alone do not cause exit 1.
 The internal worker's journal output remains plain text.
 
 ## Structure and storage

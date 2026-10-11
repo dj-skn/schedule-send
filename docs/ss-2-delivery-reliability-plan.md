@@ -3,8 +3,10 @@
 ## Status
 
 Plan recorded on 2026-10-11 on story branch `ss-2`, starting from `master`
-at `034c9de`. P1 and P2 are complete in `ss-2`. P3 is built and verified on
-`ss-2-p3`; this update accompanies its fast-forward into `ss-2`. P4 is approved for implementation on 2026-10-11. Nothing is installed, merged into master, or pushed.
+at `034c9de`. P1–P3 are complete in `ss-2`. P4 is built and verified on
+`ss-2-p4`; this update accompanies its fast-forward into `ss-2`. All four
+phases are complete after that fast-forward. Nothing is installed, merged
+into master, or pushed.
 
 The owner approved and instructed builds for P1, P2, and P3 on 2026-10-11.
 The owner also agreed to the P4 recommendations and instructed build on
@@ -400,7 +402,49 @@ Estimated size: one day.
 
 ### As built
 
-Not built.
+- Both renderers now share internal/cli/status.go. Timer status and its
+  conditional property query share 30 seconds; journal reads have 10 seconds;
+  each command pipe drain has a one-second limit. The budget is for external
+  commands; ordinary state-file reads remain filesystem operations.
+- Exit 3/4 triggers a LoadState/ActiveState/SubState query. Confirmed inactive,
+  failed, or missing units remain successful observations. Missing state still
+  has the original completed-job warning. A unit may transition between the
+  two reads, so a confirmed active state is also a normal observation.
+- Collection failures return exit 1 after rendering partial results. JSON keeps
+  the original fields and optionally includes source/severity/code/message,
+  command exit code, stderr, and partial output in diagnostics. It emits one
+  stdout object and the existing failed error envelope on stderr. Successful
+  commands with stderr produce warnings without changing the exit code.
+- Invalid JSON and unreadable/nonregular state paths are errors; valid stored
+  JSON remains inspectable even with invalid numeric controls. No strict job
+  loader is used for status inspection. Nonregular paths are refused before
+  reading so a FIFO cannot block inspection.
+- The common harness now shadows journalctl as well as systemctl. New status
+  fixtures restrict PATH to their temporary command directory; missing-command
+  cases cannot fall through to real commands. No timers are armed or panes used.
+- Coverage: 16 scenarios in both text and JSON (32 cases), plus four deadline
+  cases for timer, journal, the shared timer/query budget, and inherited pipes.
+  The shared-budget fixture would succeed if the query received a fresh budget.
+  Deadline fixtures completed in about 82 ms with an 80 ms budget; inherited
+  pipe draining completed in about 23 ms with a 20 ms limit. Partial timer and
+  journal output survives each failure.
+- Steps 1 and 2 are one implementation commit because collection, error
+  propagation, and deadline regressions need to pass together. README documents
+  budgets, normal observations, failures, and additive diagnostics. Existing
+  status parity cases remain identical; no parity exception was added.
+- Fixture-based text and JSON inspection used an isolated CLI build and
+  temporary state/commands. A journal exit 2 retained timer-partial,
+  journal-partial, and raw grace=4.0; text named journal and JSON included its
+  exit code, stderr, partial output, and separate failed stderr envelope.
+  Review outputs are in /tmp/herdr-ss-2-status-review-4qblx8r3 (temporary).
+- Verification: tools/check passed all 12 tested Go packages, formatting,
+  vet, shim/shell syntax, and isolated hook checks. Full tools/parity exited 0:
+  41 identical, 37 documented differences, zero unexpected. These are final
+  full-story checks run now, rather than earlier-phase results. No live
+  systemd or delivery check is needed.
+- All four phases are built. Master merge, push, and installation remain outside
+  this phase's authorization; the story is ready for the owner's merge decision.
+
 
 ## Owner checks and delivery
 
