@@ -3,13 +3,13 @@
 ## Status
 
 Plan recorded on 2026-10-11 on story branch `ss-2`, starting from `master`
-at `034c9de`. P1 is built and verified on `ss-2-p1`; this update accompanies
-its fast-forward into `ss-2`. P2 is approved for implementation on 2026-10-11; P3 and P4 remain unapproved.
-Nothing is installed, merged into master, or pushed.
+at `034c9de`. P1 is complete in `ss-2`. P2 is built and verified on `ss-2-p2`;
+this update accompanies its fast-forward into `ss-2`. P3 and P4 remain planned
+and unapproved. Nothing is installed, merged into master, or pushed.
 
-The owner first authorized recording, then agreed to the P1 walkthrough
-choices and explicitly instructed build on 2026-10-11. That approval covers
-P1 only. Later-phase recommendations remain proposed.
+The owner authorized recording, approved and instructed P1 build, then approved
+and instructed P2 build on 2026-10-11. Approval covers those two phases only.
+P3 and P4 recommendations remain proposed.
 
 ## Outcome
 
@@ -88,8 +88,8 @@ history; its old status paragraph is not the current master behavior.
 
 | Phase | Outcome | Branch | Status |
 | --- | --- | --- | --- |
-| P1 | Recovery stops when a dialog appears during focusing | `ss-2-p1` | built and verified; fast-forwarded into ss-2 with this update |
-| P2 | Stable installed executable and valid systemd ExecStart | `ss-2-p2` | approved; not built |
+| P1 | Recovery stops when a dialog appears during focusing | `ss-2-p1` | complete in ss-2 |
+| P2 | Stable installed executable and valid systemd ExecStart | `ss-2-p2` | built and verified; fast-forwarded into ss-2 with this update |
 | P3 | Strict numeric state loading with legacy defaults | `ss-2-p3` | planned; not approved |
 | P4 | Bounded, honest status diagnostics | `ss-2-p4` | planned; not approved |
 
@@ -215,9 +215,63 @@ Not included: migrating existing timers, installation from worktrees, or adding
 Git as a runtime dependency. Old timers keep their previously recorded paths.
 Estimated size: one to two days; installer/runtime contract is the main cost.
 
-### As built
+### As built — 2026-10-11
 
-Not built.
+- `tools/build OUTPUT INSTALLED_PATH` encodes the final path with GNU base64
+  and passes it as linker metadata. `tools/install` uses the stable final
+  main-checkout `bin/schedule-send` path, not its temporary output filename.
+  Atomic publication, locking, branch restrictions, and the zsh shim remain.
+- `internal/installpath` validates decoded clean absolute UTF-8 paths, rejects
+  control characters, checks executable mode, resolves symlinks, and compares
+  the running executable location with the recorded installation location.
+  Plain builds, copied executables, and moved/missing installations fail before
+  scheduling creates job files. This is location metadata, not a cryptographic
+  installation attestation; tests intentionally build temporary installations.
+- The CLI uses the recorded path for services. Dry-run, management operations,
+  and `__fire` bypass the arming guard. Existing units and state are not migrated.
+  Tests inject the resolver privately; there is no runtime environment override.
+- **Correction to the anticipated command encoding:** offline systemd checks
+  rejected direct executable tokens containing quotes, apostrophes, or
+  backslashes even when quoted/escaped. New units use
+  `ExecStart=:/usr/bin/env -- "<escaped installed path>" __fire <id>` instead.
+  env executes that path as an argument. The colon disables environment
+  expansion, preserving dollar signs; percent specifiers and C-style quoting
+  are escaped. Service metadata controls and invalid UTF-8 fail before locking
+  or publication. `/usr/bin/env` is checked before real scheduling.
+- Build requirements now include GNU coreutils base64/tr; new timer services
+  require `/usr/bin/env`. README and shared repository guidance record this.
+- Build helper changes participate in source hashing and shell syntax checks.
+  Mock hook tests prove changing that helper triggers rebuilding, increasing
+  fixture installation count from six to seven without touching the real install.
+- Tests cover 12 identity table cases plus nonexecutable/moved paths, exact build
+  arguments and four invalid helper paths, six unusual executable encodings,
+  six invalid service metadata cases, and early CLI refusal without artifacts.
+  A compiled fixture exercises staging-to-final publication, moved/copied/plain
+  builds, dry-run and management, unmanaged worker dispatch, symlink invocation,
+  and exact generated service contents using Herdr/systemd stand-ins.
+- Verification run now: `env GOCACHE=/tmp/herdr-ss-2-go-cache tools/check`
+  exited 0; all 12 tested Go packages plus formatting, vet, shim/shell syntax,
+  and isolated hook checks passed. Full `tools/parity` exited 0: 41 identical,
+  37 documented differences, zero unexpected differences. Its strict arm-case
+  comparison asserts the entire new ExecStart line before comparing remaining
+  artifacts; it does not broadly ignore unit differences.
+- Offline `systemd-analyze --user verify` exited 0 on a temporary service made
+  by the actual renderer with spaces, dollar/percent signs, double/single quotes,
+  and a backslash in its executable path. Nothing was loaded or started.
+  Offline verification required sandbox escalation for local socket setup; a
+  sandboxed attempt failed with Operation not permitted, not a unit parse error.
+- During development, an old CLI assertion failed because it expected unquoted
+  ExecStart; it was updated explicitly. A compiled fixture then checked all of
+  XDG_CONFIG_HOME for absence, but Go compilation creates its own configuration
+  there. The assertion now checks the actual job-state and systemd-unit paths.
+  Both failures were understood and corrected before final verification.
+- Implementation commits: `0e7e1e0` (build metadata/tooling) and `d32c733`
+  (arming guard, unit rendering, tests, docs, and strict parity update).
+- Owner review uses the identity/compiled-fixture tests and generated temporary
+  units. Real panes/timers and the actual installer were not exercised. Main
+  master and its installed binary remain unchanged. Installation remains a
+  later master-merge operation; no manual live scheduling check is required.
+
 
 ## P3 — Strict numeric state loading
 
