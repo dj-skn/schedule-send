@@ -1,0 +1,11 @@
+#!/bin/sh
+# Build with the final installation location, without publishing or linking it.
+# tools/install uses its main-checkout path; tests use isolated temporary paths.
+set -eu
+cd "$(dirname "$0")/.."
+[ "$#" -eq 2 ] || { echo 'Usage: tools/build OUTPUT INSTALLED_PATH' >&2; exit 1; }
+case "$2" in /*) ;; *) echo 'Installed path must be absolute.' >&2; exit 1 ;; esac
+clean_path="$(printf '%s' "$2" | LC_ALL=C tr -d '\000-\037\177')"
+[ "$clean_path" = "$2" ] || { echo 'Installed path contains a control character.' >&2; exit 1; }
+encoded="$(printf '%s' "$2" | base64 -w 0)"
+go build -trimpath -ldflags "-X schedule-send/internal/installpath.Encoded=$encoded" -o "$1" ./cmd/schedule-send

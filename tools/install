@@ -22,7 +22,7 @@ clean_before=true
 [ -z "$(git status --porcelain)" ] || clean_before=false
 build_tmp="$(mktemp "$root/bin/.schedule-send.XXXXXX")"
 trap 'rm -f "$build_tmp"' EXIT HUP INT TERM
-go build -trimpath -o "$build_tmp" ./cmd/schedule-send
+tools/build "$build_tmp" "$root/bin/schedule-send"
 if [ "$source_id" != "$(tools/source-id)" ] ||
    { [ "$clean_before" = true ] && [ -n "$(git status --porcelain)" ]; }; then
   echo 'Sources changed during the build; retry tools/install.' >&2
