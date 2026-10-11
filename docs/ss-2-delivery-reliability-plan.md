@@ -4,11 +4,11 @@
 
 Plan recorded on 2026-10-11 on story branch `ss-2`, starting from `master`
 at `034c9de`. P1 and P2 are complete in `ss-2`. P3 is built and verified on
-`ss-2-p3`; this update accompanies its fast-forward into `ss-2`. P4 remains
-planned and unapproved. Nothing is installed, merged into master, or pushed.
+`ss-2-p3`; this update accompanies its fast-forward into `ss-2`. P4 is approved for implementation on 2026-10-11. Nothing is installed, merged into master, or pushed.
 
 The owner approved and instructed builds for P1, P2, and P3 on 2026-10-11.
-Those approvals cover P1 through P3 only; P4 recommendations remain proposed.
+The owner also agreed to the P4 recommendations and instructed build on
+2026-10-11. All four phases now have build approval, scoped to each phase.
 
 ## Outcome
 
@@ -90,7 +90,7 @@ history; its old status paragraph is not the current master behavior.
 | P1 | Recovery stops when a dialog appears during focusing | `ss-2-p1` | complete in ss-2 |
 | P2 | Stable installed executable and valid systemd ExecStart | `ss-2-p2` | complete in ss-2 |
 | P3 | Strict numeric state loading with legacy defaults | `ss-2-p3` | built and verified; fast-forwarded into ss-2 with this update |
-| P4 | Bounded, honest status diagnostics | `ss-2-p4` | planned; not approved |
+| P4 | Bounded, honest status diagnostics | `ss-2-p4` | approved; not built |
 
 Each phase starts with a fresh source check and an owner walkthrough. Build
 only the approved phase on its phase branch. Every implementation step has a
@@ -355,6 +355,27 @@ Estimated size: half a day to one day.
 
 
 ## P4 — Bounded status inspection
+
+### Decisions settled 2026-10-11
+
+The owner agreed to all four walkthrough recommendations and instructed build.
+Use a shared 30-second budget for timer status plus any structured unit-state
+query, followed by a separate 10-second journal deadline and bounded pipe drains.
+Inactive, failed, and missing units are successful inspection when confirmed
+by their returned unit state; missing state files are normal for completed jobs.
+Missing commands, deadlines, transport failures, unreadable state, and invalid
+JSON cause exit 1 while retaining partial results. Malformed numeric state is
+still inspectable when its JSON is valid. Preserve state/timer/journal/warning
+JSON fields and add optional structured diagnostics. Emit exactly one stdout
+result even when collection fails, plus the existing stderr error envelope.
+
+Source orientation confirmed journalctl is unbounded and command errors are
+ignored in both modes. The installed systemctl manual maps status exit 3 to
+inactive and 4 to no unit but warns that exit codes alone are imperfect. Query
+LoadState/ActiveState/SubState when a nonzero status could represent a normal
+unit condition. Other commands and successful status output need no extra read.
+A status-specific collector file avoids duplicating collection without a broad
+CLI refactor. All status tests must shadow journalctl as well as systemctl.
 
 ### Steps
 
