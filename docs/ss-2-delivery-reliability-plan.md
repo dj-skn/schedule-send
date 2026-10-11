@@ -3,12 +3,13 @@
 ## Status
 
 Plan recorded on 2026-10-11 at the owner's request, on story branch `ss-2`,
-starting from `master` at `034c9de`. No implementation phase is approved,
-built, verified, merged, or installed. Nothing is pushed.
+starting from `master` at `034c9de`. P1 is approved for implementation as of 2026-10-11. No phase is built,
+verified, merged, or installed. P2 through P4 remain unapproved. Nothing is pushed.
 
 The owner requested a saved implementation plan following the code analysis.
 That authorizes this document and its story-branch commit, not implementation.
-Recommendations below remain proposed until the owner approves them.
+P1 recovery recommendations are approved; later-phase recommendations remain
+proposed until the owner approves them.
 
 ## Outcome
 
@@ -87,7 +88,7 @@ history; its old status paragraph is not the current master behavior.
 
 | Phase | Outcome | Branch | Status |
 | --- | --- | --- | --- |
-| P1 | Recovery stops when a dialog appears during focusing | `ss-2-p1` | planned; not approved |
+| P1 | Recovery stops when a dialog appears during focusing | `ss-2-p1` | approved; not built |
 | P2 | Stable installed executable and valid systemd ExecStart | `ss-2-p2` | planned; not approved |
 | P3 | Strict numeric state loading with legacy defaults | `ss-2-p3` | planned; not approved |
 | P4 | Bounded, honest status diagnostics | `ss-2-p4` | planned; not approved |
@@ -101,6 +102,19 @@ separate owner instructions. Installation is only from clean main master;
 repository hooks may install program changes after an authorized master merge.
 
 ## P1 — Recovery stops at dialogs
+
+### Decisions settled 2026-10-11
+
+The owner agreed to the walkthrough decisions and explicitly instructed build.
+Keep this phase limited to recovery, leaving initial prompt policy unchanged.
+Preserve unknown lifecycle behavior: fresh draft evidence may authorize recovery
+unless the lifecycle reports blocked. Require the dialog check after the final
+screen read and before every recovery Enter, including the focus rung.
+
+The source recheck confirmed the existing pre-focus blocked check and its missing
+post-focus counterpart. Existing tests cover already-blocked agents and normal
+focus restoration, but do not simulate a dialog opening during focus. Add a
+controlled focus callback to exercise those transitions.
 
 ### Steps
 
