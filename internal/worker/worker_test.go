@@ -2,6 +2,7 @@ package worker
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -815,5 +816,63 @@ func TestChangedComposerDoesNotConfirmDraftDisappearance(t *testing.T) {
 	h.wantCalls("wait wB:p1", "prompt wB:p1 carry on with the plan please")
 	if h.f.draft == "" {
 		t.Fatal("draft was unexpectedly submitted")
+	}
+}
+
+func TestMalformedNumericStateNeverConnects(t *testing.T) {
+	for _, kind := range []string{"agent text", "agent keys", "pane text"} {
+		for _, tc := range []struct{ field, value string }{
+			{"force", `"1"`}, {"force", "2"},
+			{"quiet", "true"}, {"quiet", "-1"},
+			{"grace", "-1"}, {"grace", "4.5"}, {"grace", "4.0"}, {"grace", "4e0"}, {"grace", "0"}, {"grace", "61"},
+			{"run_at", "-1"}, {"run_at", "9223372036854775808"},
+		} {
+			t.Run(kind+"/"+tc.field+"="+tc.value, func(t *testing.T) {
+				h := newHarness(t)
+				state := agentJob()
+				switch kind {
+				case "agent keys":
+					state.Mode = "keys"
+					state.Keys = "enter"
+				case "pane text":
+					state.Kind = "pane"
+					state.PaneID = "wB:p5"
+					state.Agent = "-"
+				}
+				h.arm(state, text("carry on with the plan please"))
+				stored, err := os.ReadFile(h.paths.StatePath(jobID))
+				must(t, err)
+				var raw map[string]json.RawMessage
+				must(t, json.Unmarshal(stored, &raw))
+				raw[tc.field] = json.RawMessage(tc.value)
+				data, err := json.Marshal(raw)
+				must(t, err)
+				must(t, os.WriteFile(h.paths.StatePath(jobID), data, 0600))
+				connections := 0
+				w := &Worker{ID: jobID, Paths: h.paths, Out: &h.out, Err: &h.err, Clock: h.clock, Connect: func(string) Herdr { connections++; return h.f }}
+				h.code = w.Run()
+				h.wantCode(1)
+				h.wantCalls()
+				if connections != 0 {
+					t.Fatalf("connected to Herdr %d times", connections)
+				}
+				if !strings.Contains(h.err.String(), "job field "+tc.field) {
+					t.Fatalf("stderr: %s", h.err.String())
+				}
+				stored, err = os.ReadFile(h.paths.StatePath(jobID))
+				must(t, err)
+				if string(stored) != string(data) {
+					t.Fatal("malformed state was changed or removed")
+				}
+				for _, path := range []string{h.paths.MessagePath(jobID), h.paths.UnitPath(jobID, "timer"), h.paths.UnitPath(jobID, "service")} {
+					if _, err := os.Stat(path); err != nil {
+						t.Fatalf("job artifact removed: %s: %v", path, err)
+					}
+				}
+				if calls, err := os.ReadFile(h.sysLog); err == nil && len(calls) != 0 {
+					t.Fatalf("systemctl calls on invalid state: %s", calls)
+				}
+			})
+		}
 	}
 }

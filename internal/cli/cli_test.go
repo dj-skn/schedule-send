@@ -572,8 +572,8 @@ func (h *harness) addJobs(t *testing.T) {
 		s   job.State
 		msg *string
 	}{
-		{job.State{ID: "20261003-160100-wBp1", Kind: "agent", PaneID: "wB:p1", Agent: "claude", At: "2026-10-03 16:01:00", Mode: "text"}, &msg},
-		{job.State{ID: "20261004-090000-wBp5", Kind: "pane", PaneID: "wB:p5", Agent: "-", At: "2026-10-04 09:00:00", Mode: "keys", Keys: "ctrl+c"}, nil},
+		{job.State{ID: "20261003-160100-wBp1", Kind: "agent", PaneID: "wB:p1", Agent: "claude", At: "2026-10-03 16:01:00", Mode: "text", Grace: 4}, &msg},
+		{job.State{ID: "20261004-090000-wBp5", Kind: "pane", PaneID: "wB:p5", Agent: "-", At: "2026-10-04 09:00:00", Mode: "keys", Keys: "ctrl+c", Grace: 4}, nil},
 	} {
 		if err := h.a.paths.Write(j.s, j.msg); err != nil {
 			t.Fatal(err)
@@ -1051,5 +1051,69 @@ func TestBuiltInstallationAndUnmanagedCommands(t *testing.T) {
 	}
 	if string(unit) != expected {
 		t.Fatalf("service %q, want %q", unit, expected)
+	}
+}
+
+func TestMalformedNumericStateRemainsInspectable(t *testing.T) {
+	for _, operation := range []string{"--list", "--status"} {
+		t.Run(operation, func(t *testing.T) {
+			h := newHarness(t, nil)
+			h.addJobs(t)
+			id := "20261003-160100-wBp1"
+			data, err := os.ReadFile(h.a.paths.StatePath(id))
+			if err != nil {
+				t.Fatal(err)
+			}
+			data = bytes.Replace(data, []byte(`"grace": 4`), []byte(`"grace": 4.0`), 1)
+			if err := os.WriteFile(h.a.paths.StatePath(id), data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{operation, "--json"}
+			if operation == "--status" {
+				root, err := filepath.Abs("../..")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(root, "testdata/standin/journalctl"), filepath.Join(h.dir, "path/journalctl")); err != nil {
+					t.Fatal(err)
+				}
+				args = []string{operation, id, "--json"}
+			}
+			if code := h.a.main(args); code != 0 {
+				t.Fatalf("exit %d: %s", code, h.stderr)
+			}
+			if operation == "--list" {
+				jobs := jsonObject(t, h.stdout.Bytes())["jobs"].([]any)
+				if len(jobs) != 1 {
+					t.Fatalf("jobs: %s", h.stdout)
+				}
+				if jobs[0].(map[string]any)["id"] == id {
+					t.Fatal("listed malformed job")
+				}
+				warning := jsonObject(t, h.stderr.Bytes())["warning"].(string)
+				if !strings.Contains(warning, "job field grace") {
+					t.Fatalf("warning: %s", warning)
+				}
+			} else {
+				var result map[string]json.RawMessage
+				if err := json.Unmarshal(h.stdout.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				var state map[string]json.RawMessage
+				if err := json.Unmarshal(result["state"], &state); err != nil {
+					t.Fatal(err)
+				}
+				if string(state["grace"]) != "4.0" {
+					t.Fatalf("state lost invalid numeric syntax: %s", result["state"])
+				}
+			}
+			stored, err := os.ReadFile(h.a.paths.StatePath(id))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(stored, data) {
+				t.Fatal("inspection changed malformed state")
+			}
+		})
 	}
 }

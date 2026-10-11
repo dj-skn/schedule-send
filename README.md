@@ -265,7 +265,12 @@ State and messages live in `~/.local/state/herdr-send` (directory mode 700;
 new files mode 600). Units live in `~/.config/systemd/user`. `XDG_STATE_HOME`
 and `XDG_CONFIG_HOME` override those roots. State records the target identity,
 resolved Herdr executable, and, for new jobs, the firing epoch (`run_at`).
-Older job files remain supported.
+Older job files remain supported. Missing or null numeric fields retain legacy
+defaults: `force=0`, `quiet=0`, `grace=4`, and `run_at=0`. Supplied values must
+be JSON integer literals: force/quiet are 0–1, grace is 1–60, and run_at is a
+nonnegative 64-bit integer. Invalid numeric state stops delivery and retains
+the job for inspection; `--list` warns and skips it, while `--status` shows
+the stored document.
 
 A pane/time pair identifies a job; duplicate scheduling is refused. Scheduling,
 cancellation, and cleanup share a per-job lock. Hidden lock files deliberately

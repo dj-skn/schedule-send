@@ -41,7 +41,7 @@ func TestLoadDefaultsForOlderFiles(t *testing.T) {
 	if s.Recover != "keys" || s.Grace != 4 || s.Force != 1 || s.Quiet != 1 || s.Keys != "esc" {
 		t.Errorf("loaded %+v", s)
 	}
-	for _, grace := range []string{`-1`, `4.5`, `null`} {
+	for _, grace := range []string{`null`} {
 		os.WriteFile(path, []byte(`{"grace":`+grace+`}`), 0o644)
 		if s, _ := Load(path); s.Grace != 4 {
 			t.Errorf("grace %s loaded as %d, want the default", grace, s.Grace)

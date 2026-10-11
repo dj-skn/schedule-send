@@ -72,31 +72,51 @@ type State struct {
 	RunAt    int64  `json:"run_at,omitempty"`
 }
 
-// Load reads a state file. recover and grace default to "keys" and 4, so a
-// timer armed before they existed still fires.
+// Load reads a state file, retaining defaults for absent/null optional fields.
+// Numeric fields use JSON integer literals and are range-checked before use.
 func Load(path string) (State, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return State{}, err
 	}
-	var raw map[string]any
+	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return State{}, err
 	}
-	for _, key := range []string{"id", "kind", "pane_id", "agent", "cwd", "at", "mode", "keys", "if_busy", "recover", "herdr_bin", "unit"} {
-		if v := raw[key]; v != nil {
-			if _, ok := v.(string); !ok {
-				return State{}, fmt.Errorf("job field %s must be a string", key)
+	s := State{Grace: 4}
+	for _, field := range []struct {
+		name string
+		dest *string
+	}{
+		{"id", &s.ID}, {"kind", &s.Kind}, {"pane_id", &s.PaneID},
+		{"agent", &s.Agent}, {"cwd", &s.Cwd}, {"at", &s.At},
+		{"mode", &s.Mode}, {"keys", &s.Keys}, {"if_busy", &s.IfBusy},
+		{"recover", &s.Recover}, {"herdr_bin", &s.HerdrBin}, {"unit", &s.Unit},
+	} {
+		if value := raw[field.name]; len(value) != 0 {
+			if err := json.Unmarshal(value, field.dest); err != nil {
+				return State{}, fmt.Errorf("job field %s must be a string", field.name)
 			}
 		}
 	}
-	s := State{
-		ID: str(raw["id"]), Kind: str(raw["kind"]), PaneID: str(raw["pane_id"]),
-		Agent: str(raw["agent"]), Cwd: str(raw["cwd"]), At: str(raw["at"]),
-		Mode: str(raw["mode"]), Keys: str(raw["keys"]), IfBusy: str(raw["if_busy"]),
-		Force: whole(raw["force"], 0), Quiet: whole(raw["quiet"], 0),
-		Recover: str(raw["recover"]), Grace: whole(raw["grace"], 4),
-		HerdrBin: str(raw["herdr_bin"]), Unit: str(raw["unit"]), RunAt: int64(whole(raw["run_at"], 0)),
+	for _, field := range []struct {
+		name          string
+		dest          *int
+		def, min, max int64
+	}{
+		{"force", &s.Force, 0, 0, 1},
+		{"quiet", &s.Quiet, 0, 0, 1},
+		{"grace", &s.Grace, 4, 1, 60},
+	} {
+		value, err := integer(raw[field.name], field.name, field.def, field.min, field.max)
+		if err != nil {
+			return State{}, err
+		}
+		*field.dest = int(value)
+	}
+	s.RunAt, err = integer(raw["run_at"], "run_at", 0, 0, 1<<63-1)
+	if err != nil {
+		return State{}, err
 	}
 	if s.IfBusy == "" {
 		s.IfBusy = "wait"
@@ -107,24 +127,20 @@ func Load(path string) (State, error) {
 	return s, nil
 }
 
-func str(v any) string {
-	switch t := v.(type) {
-	case string:
-		return t
-	case nil:
-		return ""
-	default:
-		b, _ := json.Marshal(t)
-		return string(b)
+func integer(raw json.RawMessage, name string, def, min, max int64) (int64, error) {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return def, nil
 	}
-}
-
-func whole(v any, def int) int {
-	f, ok := v.(float64)
-	if !ok || f < 0 || f != float64(int(f)) {
-		return def
+	var value int64
+	// Decoding directly into int64 rejects decimals/exponents and overflow,
+	// and avoids both float64 precision loss and platform-dependent int sizes.
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return 0, fmt.Errorf("job field %s must be a JSON integer representable as int64", name)
 	}
-	return int(f)
+	if value < min || value > max {
+		return 0, fmt.Errorf("job field %s must be between %d and %d", name, min, max)
+	}
+	return value, nil
 }
 
 // Encode renders a state file as jq printed it: two-space indent, keys in
@@ -168,6 +184,9 @@ func (s State) Validate(id string) error {
 	}
 	if s.Grace < 1 || s.Grace > 60 || s.Force < 0 || s.Force > 1 || s.Quiet < 0 || s.Quiet > 1 {
 		return errors.New("invalid job controls")
+	}
+	if s.RunAt < 0 {
+		return errors.New("invalid firing epoch")
 	}
 	return nil
 }

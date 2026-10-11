@@ -18,7 +18,11 @@ func TestConcurrentWriteReservesOneCompleteJob(t *testing.T) {
 	var wg sync.WaitGroup
 	for _, msg := range []string{"first", "second"} {
 		wg.Add(1)
-		go func(msg string) { defer wg.Done(); <-start; results <- p.Write(State{ID: "same", Keys: msg}, &msg) }(msg)
+		go func(msg string) {
+			defer wg.Done()
+			<-start
+			results <- p.Write(State{ID: "same", Keys: msg, Grace: 4}, &msg)
+		}(msg)
 	}
 	close(start)
 	wg.Wait()
@@ -119,7 +123,7 @@ func TestValidatePreventsMalformedJobsFromFallingThrough(t *testing.T) {
 	if err := s.Validate("valid"); err != nil {
 		t.Fatal(err)
 	}
-	for _, mutate := range []func(*State){func(s *State) { s.Kind = "" }, func(s *State) { s.Mode = "garbage" }, func(s *State) { s.PaneID = "" }, func(s *State) { s.ID = "other" }, func(s *State) { s.Grace = 0 }} {
+	for _, mutate := range []func(*State){func(s *State) { s.Kind = "" }, func(s *State) { s.Mode = "garbage" }, func(s *State) { s.PaneID = "" }, func(s *State) { s.ID = "other" }, func(s *State) { s.Grace = 0 }, func(s *State) { s.Force = 2 }, func(s *State) { s.Quiet = 2 }, func(s *State) { s.RunAt = -1 }} {
 		bad := s
 		mutate(&bad)
 		if err := bad.Validate("valid"); err == nil {
