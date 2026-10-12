@@ -4,14 +4,17 @@
 or terminal pane. It can also read a Codex or Claude usage-limit notice and
 schedule `resume` just after the limit resets.
 
-Jobs use systemd user timers, so the launching shell does not need to stay
-open. The target is checked again before delivery. Linux only.
+Jobs use systemd user timers on Linux and launchd agents on macOS, so the
+launching shell does not need to stay open. The target is checked again before
+delivery.
 
 ## Install and automatic updates
 
 Build requirements: Go **1.27.1 or newer**, Git, `flock`, and GNU coreutils
-(`base64` and `tr`). Running the app requires Herdr, GNU `date`, `/usr/bin/env` (GNU coreutils), and
-`systemctl --user`.
+(`base64` and `tr`). Running the app on Linux requires Herdr, GNU `date`,
+`/usr/bin/env` (GNU coreutils), and `systemctl --user`. On macOS it requires
+Herdr, `launchctl`, and GNU `date` as `gdate`, which Homebrew's `coreutils`
+provides.
 
 From the main checkout on `main`, run once:
 
@@ -248,6 +251,18 @@ systemctl --user list-timers 'herdr-send-*'
 journalctl --user -u 'herdr-send-<id>.service'
 ```
 
+On macOS a job is a launchd agent, `~/Library/LaunchAgents/herdr-send-<id>.plist`,
+loaded in your login session, and its output goes to a log beside its state,
+which `--status` shows. launchd starts a calendar job a few seconds into its
+minute and the job then waits for its exact second. A job whose time passed
+while the Mac was asleep is sent on wake; one whose time passed while it was
+off or logged out is skipped unless scheduled with `--persistent`; and a job
+more than 7 days late is never sent.
+
+```zsh
+launchctl print gui/$(id -u)/herdr-send-<id>
+```
+
 ## Output for scripts
 
 Terminal output is styled; `NO_COLOR` disables color. Redirected scheduling
@@ -280,15 +295,16 @@ The internal worker's journal output remains plain text.
 | `internal/cli` | Arguments, picker, scheduling, and management commands. |
 | `internal/target`, `limit`, `notice`, `when` | Target matching, usage-limit detection, and time parsing. |
 | `internal/herdr`, `screen` | Herdr calls and terminal-screen interpretation. |
-| `internal/job` | State files, locking, timers, and cleanup. |
+| `internal/job` | State files, locking, and cleanup, with each system's timers in its own file (`systemd_linux.go`, `launchd_darwin.go`). |
 | `internal/installpath` | The recorded installation path and the path rules `tools/build` shares. |
 | `internal/worker` | Delivery and submission verification. |
 | `internal/show`, `term` | Text/JSON output and terminal handling. |
 | `.githooks`, `tools` | Automatic installation, builds, and verification. |
 
 State and messages live in `~/.local/state/herdr-send` (directory mode 700;
-new files mode 600). Units live in `~/.config/systemd/user`. `XDG_STATE_HOME`
-and `XDG_CONFIG_HOME` override those roots. State records the target identity,
+new files mode 600). Units live in `~/.config/systemd/user` on Linux and
+`~/Library/LaunchAgents` on macOS. `XDG_STATE_HOME` and, on Linux,
+`XDG_CONFIG_HOME` override those roots. State records the target identity,
 resolved Herdr executable, and, for new jobs, the firing epoch (`run_at`).
 Older job files remain supported. Missing or null numeric fields retain legacy
 defaults: `force=0`, `quiet=0`, `grace=4`, and `run_at=0`. Supplied values must
