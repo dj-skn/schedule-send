@@ -3,8 +3,9 @@
 ## Status
 
 Plan recorded on 2026-10-12 on story branch `ss-3`, starting from `main`. P1
-and P2 are complete in `ss-3`; this update accompanies P2's fast-forward from
-`ss-3-p2`. P3 to P8 are not started. Nothing is merged into `main`,
+and P2 are complete in `ss-3`. P3 is built on `ss-3-p3` and verified on Linux
+and on a macOS runner; it is not merged, because it closes only after the run
+on the owner's Mac. P4 to P8 are not started. Nothing is merged into `main`,
 installed, published, or pushed.
 
 The owner settled the story's decisions on 2026-10-12 and asked for this plan.
@@ -107,7 +108,7 @@ Stated in the walkthrough; the owner did not object.
 | --- | --- | --- | --- |
 | P1 | A tree that is safe to publish, under its final name | `ss-3-p1` | complete in ss-3 |
 | P2 | Timer operations behind one seam, behaviour unchanged | `ss-3-p2` | complete in ss-3 |
-| P3 | A launchd backend for macOS | `ss-3-p3` | approved 2026-10-12, in progress |
+| P3 | A launchd backend for macOS | `ss-3-p3` | built; awaiting the owner's Mac run |
 | P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | not started |
 | P5 | The Herdr plugin | `ss-3-p5` | not started |
 | P6 | CI and release automation | `ss-3-p6` | not started |
@@ -462,6 +463,79 @@ Mac.
 The phase closes only after step 6. Not included: the Homebrew formula (P4),
 the permanent CI workflow (P6), and trying a real pane, which stays the
 owner's to do by hand.
+
+#### As built — 2026-10-12, steps 1 to 5
+
+- `internal/job/launchd_darwin.go` is the macOS scheduler: one agent per job
+  in `~/Library/LaunchAgents`, loaded into the user's `gui` session. A
+  platform now provides thirteen functions; the two added in this phase are
+  `Name`, which a receipt shows, and `Await`, which a started worker asks.
+  `Inspect` also takes the job's paths, since the macOS log is a file.
+- A finished job removes its agent, message, and state, then boots itself
+  out as its last act. Cancelling and rolling back unload first and keep the
+  state when unloading fails. Sweeping unloads agents left without state and
+  drops logs a week after their jobs are gone.
+- A job due within two minutes has no calendar and starts when loaded. A
+  persistent job has both, so a login after its time starts it. The agent
+  carries the scheduling shell's `PATH` and XDG roots and says how it was
+  armed.
+- `internal/job/due.go` holds the timing rule, portable and tested on both
+  systems: wait in steps of at most 30 seconds, stand down more than two
+  hours early, never deliver more than 7 days late, and drop a non-persistent
+  job that was started at load more than five minutes late. A dropped job is
+  reported, notified through Herdr, and removed. On Linux the worker is told
+  to deliver without the clock being read.
+- Portable groundwork: per-system files for the terminal request and the
+  date command; `tools/build` no longer needs GNU `base64`; `internal/show`
+  prints the name it is given; the tests that drive the `systemctl` stand-in
+  are marked Linux-only, and the job package's systemd tests have their own
+  file.
+- `tools/check` vets for Linux and macOS. `tools/launchd-smoke` arms real
+  agents aimed at the stand-in Herdr. `testdata/standin/launchctl` remembers
+  what was loaded, so it answers 3 and 113 as launchd does.
+- The README and `AGENTS.md` describe both systems. The rule against arming
+  real timers now names the smoke test as its one exception.
+
+Measured:
+
+- Linux: `tools/check` exit 0; 397 tests and subtests in 12 packages, 14 more
+  than before; parity 41 identical, 37 known differences, 0 unexpected.
+- macOS 26.6.2 on an ARM64 runner: `go vet` clean; tests pass in the 10
+  packages that have tests there. `internal/cli` and `internal/worker` have
+  none on macOS, by the decision to mark them Linux-only.
+- Real launchd on that runner, through `tools/launchd-smoke`: the job
+  started at load and the calendar job were each delivered exactly once, 0
+  seconds after their time; the third was listed as active, inspected, and
+  cancelled; no state, message, agent file, or loaded job was left; and
+  `--status` of a finished job showed its log.
+
+Found while building:
+
+- **The terminal check was right and its test was not.** A probe on the
+  runner showed a real terminal answers the request on macOS, while a pty's
+  master end, which the test opened, does not. The test now opens the slave.
+- **Two path tests assumed `/home` is a directory.** On macOS it is a
+  symlink. Those cases are skipped there and a new test builds its own
+  directory and symlink.
+- **The smoke test's first run reported success while failing.** It read a
+  receipt field that does not exist, and its exit trap hid the error. Both
+  are fixed; the passing run above is the corrected script.
+
+Differs from the walkthrough: the smoke test arms three jobs, not one, to
+cover both ways a job is started and cancellation. The display name is a
+function, and there is a thirteenth, `Await`.
+
+Known limits on macOS, not addressed: a job at a local time that occurs twice
+when clocks go back is started at the first and waits for its instant only if
+that is within two hours; and a non-persistent job missed while the Mac was
+off is loaded again at the next login and listed as `active`, although it
+will not fire until the seven-day limit drops it a year later. Keeping
+non-persistent agents beside the job's state would remove the second, and by
+the probe would also avoid the background-item record; that is the
+alternative in decision 3, for the owner to weigh with step 6.
+
+Still to confirm: step 6, on the owner's Mac, including whether macOS shows a
+notice for each agent file.
 
 ### P4 — Versions and installers
 
