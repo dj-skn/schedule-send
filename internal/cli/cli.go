@@ -368,7 +368,7 @@ func (a *app) run(args []string) (retErr error) {
 		}
 		installed, err := resolve()
 		if err != nil {
-			return die("Cannot arm a job: %v. Run tools/install from the main checkout on master, then invoke the installed schedule-send.", err)
+			return die("Cannot arm a job: %v. Run tools/install from the main checkout, then invoke the installed schedule-send.", err)
 		}
 		a.self = installed
 		fi, err := os.Stat("/usr/bin/env")

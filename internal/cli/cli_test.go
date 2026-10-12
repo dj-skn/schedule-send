@@ -926,7 +926,7 @@ func TestUnmanagedSchedulingRefusedBeforePublication(t *testing.T) {
 	if code := h.a.main([]string{"--pane", "wB:p3", "--at", "16:30", "--message", "hello"}); code != 1 {
 		t.Fatalf("exit %d, want 1", code)
 	}
-	if !strings.Contains(h.stderr.String(), "Run tools/install from the main checkout on master") {
+	if !strings.Contains(h.stderr.String(), "Run tools/install from the main checkout, then") {
 		t.Fatalf("stderr: %s", h.stderr)
 	}
 	for _, dir := range []string{h.a.paths.StateDir, h.a.paths.UnitDir} {

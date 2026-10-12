@@ -12,7 +12,7 @@ fi
 go vet ./...
 go test -count=1 ./...
 zsh -n schedule-send.zsh
-for script in tools/build tools/install tools/setup-hooks tools/source-id tools/auto-install tools/test-hooks .githooks/*; do
+for script in tools/build tools/install tools/main-checkout tools/setup-hooks tools/source-id tools/auto-install tools/test-hooks .githooks/*; do
   sh -n "$script"
 done
 tools/test-hooks

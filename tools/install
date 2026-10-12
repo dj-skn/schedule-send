@@ -1,15 +1,11 @@
 #!/bin/sh
-# Build and activate only from the main checkout: timer paths must survive
-# removal of feature worktrees. Publish the binary atomically after a full build.
+# Build and activate only from the main checkout (tools/main-checkout): timer
+# paths must survive removal of feature worktrees. Publish the binary
+# atomically after a full build.
 set -eu
 cd "$(dirname "$0")/.."
 root="$(pwd -P)"
-common="$(git rev-parse --path-format=absolute --git-common-dir)"
-branch="$(git symbolic-ref --quiet --short HEAD)"
-if [ "$root/.git" != "$common" ] || [ "$branch" != main ]; then
-  echo 'Run tools/install from the main checkout on main.' >&2
-  exit 1
-fi
+tools/main-checkout tools/install || exit 1
 mkdir -p bin
 # Concurrent hooks must not publish a stale build over a newer installation.
 exec 9>"$root/bin/.install.lock"

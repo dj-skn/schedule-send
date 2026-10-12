@@ -26,7 +26,9 @@ schedule-send --help
 when needed. After a commit, merge/pull, checkout, or history rewrite, the
 hooks rebuild changed program or installer inputs on a **clean main checkout
 on `main`**. Documentation-only updates do not rebuild. Feature branches,
-linked worktrees, detached HEADs, and dirty checkouts are skipped.
+linked worktrees, detached HEADs, and dirty checkouts are skipped. A main
+checkout still on `master` is skipped with a hint to run
+`git branch -m master main`.
 
 The hook compares committed input hashes with the installed build. Changes to
 `tools/install` itself trigger a rebuild. A failed build reports a retry
@@ -42,7 +44,7 @@ Installation builds `bin/schedule-send`, replaces it atomically, and links
 Installer builds record the stable main-checkout binary path. Real scheduling
 requires running from that location (including through its symlink). Plain
 `go build`/`go run` builds and moved or copied binaries cannot arm jobs; run
-`tools/install` from main `main` and invoke the installed command. Dry-run,
+`tools/install` from the main checkout on `main` and invoke the installed command. Dry-run,
 management commands, and legacy timer firing remain available in plain builds.
 Generated services invoke `/usr/bin/env --` with the quoted executable path
 and disable systemd environment expansion. Percent specifiers are escaped;

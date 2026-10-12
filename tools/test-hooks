@@ -6,7 +6,8 @@ root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd -P)"
 fixture="$(mktemp -d)"
 trap 'rm -rf "$fixture"' EXIT HUP INT TERM
 mkdir -p "$fixture/tools" "$fixture/.githooks"
-cp "$root/tools/source-id" "$root/tools/auto-install" "$root/tools/setup-hooks" "$fixture/tools/"
+cp "$root/tools/source-id" "$root/tools/auto-install" "$root/tools/setup-hooks" \
+  "$root/tools/main-checkout" "$fixture/tools/"
 cp "$root/.githooks/"* "$fixture/.githooks/"
 cat > "$fixture/tools/install" <<'MOCK'
 #!/bin/sh
@@ -112,6 +113,22 @@ git -C "$fixture" checkout -q --detach HEAD
 (cd "$fixture" && .githooks/post-commit) > /dev/null
 count 7
 git -C "$fixture" checkout -q main
+# A main checkout left on master says how to rename it instead of going quiet.
+git -C "$fixture" branch -m main master
+printf '// master change\n' >> "$fixture/go.mod"
+git -C "$fixture" add go.mod
+git -C "$fixture" -c core.hooksPath=/dev/null commit -qm 'feat: change inputs on master'
+(cd "$fixture" && .githooks/post-merge) > "$fixture/bin/master-output" 2>&1
+count 7
+if ! grep -q 'git branch -m master main' "$fixture/bin/master-output"; then
+  echo 'missing master rename hint' >&2; exit 1
+fi
+if (cd "$fixture" && tools/setup-hooks) > /dev/null 2>&1; then
+  echo 'setup accepted a checkout on master' >&2; exit 1
+fi
+git -C "$fixture" branch -m master main
+(cd "$fixture" && .githooks/post-merge) > /dev/null
+count 8
 worktree="$fixture/bin/worktree"
 git -C "$fixture" worktree add -q -b preview "$worktree"
 (cd "$worktree" && tools/auto-install) > /dev/null
@@ -119,5 +136,5 @@ git -C "$fixture" worktree add -q -b preview "$worktree"
 if (cd "$worktree" && tools/setup-hooks) > /dev/null 2>&1; then
   echo 'setup accepted a linked worktree' >&2; exit 1
 fi
-count 7
+count 8
 echo 'hooks: ok'

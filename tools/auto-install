@@ -1,13 +1,11 @@
 #!/bin/sh
-# Git hooks run in every worktree. Only deploy clean main in the main checkout.
+# Git hooks run in every worktree. Only deploy a clean main checkout on the
+# deploy branch; tools/main-checkout explains a checkout left on master.
 set -eu
 cd "$(dirname "$0")/.."
-root="$(pwd -P)"
-common="$(git rev-parse --path-format=absolute --git-common-dir)"
-branch="$(git symbolic-ref --quiet --short HEAD)" || exit 0
-[ "$root/.git" = "$common" ] && [ "$branch" = main ] || exit 0
+tools/main-checkout || exit 0
 if [ -n "$(git status --porcelain)" ]; then
-  echo 'schedule-send: automatic install skipped; main has uncommitted changes.' >&2
+  echo 'schedule-send: automatic install skipped; the main checkout has uncommitted changes.' >&2
   exit 0
 fi
 source_id="$(tools/source-id)"

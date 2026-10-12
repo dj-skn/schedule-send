@@ -16,10 +16,12 @@ entrypoint; `schedule-send.zsh` is the compatibility shim for older timers.
 - Use the user's commit prefixes: `feat:`, `fix:`, `docs:`, `refactor:`,
   and `chore:`. Use `chore:` for merge commits and tooling changes.
 - `tools/install` and `tools/setup-hooks` must run only from the main checkout
-  on `main`; both enforce this. Never point the installed binary at a worktree.
+  on `main`; both enforce this through `tools/main-checkout`, the one place
+  that names the deploy branch. Never point the installed binary at a worktree.
 - Tracked Git hooks automatically install changed program/installer inputs on
-  clean main `main` after commits, merges/pulls, checkouts, and rewrites.
-  They skip other branches, linked worktrees, dirty trees, and unchanged inputs.
+  a clean main checkout on `main` after commits, merges/pulls, checkouts, and
+  rewrites. They skip other branches, linked worktrees, dirty trees, and
+  unchanged inputs; a main checkout left on `master` gets a rename hint.
   File saves do not run hooks. Explicit manual installation remains available.
 - `tools/setup-hooks` enables hooks once per repository and installs if needed.
   Preserve existing custom hook configuration; setup refuses to replace it.
@@ -30,8 +32,8 @@ entrypoint; `schedule-send.zsh` is the compatibility shim for older timers.
 | --- | --- |
 | `tools/check` | Formatting, vet, Go tests, zsh shim syntax, shell syntax, and isolated hook tests. |
 | `tools/parity [CASE...]` | Compare behavior against the `zsh-baseline` tag with documented differences checked. |
-| `tools/install` | Build, atomically publish, and link the binary; main `main` only. |
-| `tools/setup-hooks` | Enable this repository's hooks and install if needed; main `main` only. |
+| `tools/install` | Build, atomically publish, and link the binary; main checkout on `main` only. |
+| `tools/setup-hooks` | Enable this repository's hooks and install if needed; main checkout on `main` only. |
 
 Build/install needs Go 1.27.1+, Git, `flock`, and GNU coreutils (`base64`, `tr`). Checks also need `zsh` and
 `jq`; parity uses Python 3 and `script`. Runtime needs Herdr, GNU `date`, `/usr/bin/env` (GNU coreutils), and

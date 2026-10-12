@@ -3,5 +3,6 @@
 set -eu
 cd "$(dirname "$0")/.."
 git ls-tree -r --full-tree HEAD -- cmd internal go.mod go.sum \
-  schedule-send.zsh tools/build tools/install tools/source-id tools/auto-install .githooks |
+  schedule-send.zsh tools/build tools/install tools/main-checkout tools/source-id \
+  tools/auto-install .githooks |
   git hash-object --stdin
