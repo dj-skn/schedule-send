@@ -41,7 +41,7 @@ type Scheduled struct {
 	Recover    string
 	Grace      string // --submit-grace as typed, which is how it is printed
 	UnitFiles  string // "<dir>/<unit>.{service,timer}"
-	WouldRun   string // the command the timer runs
+	WouldRun   string // the program and arguments the timer runs; empty when this build cannot arm
 }
 
 // Plain writes s as key=value lines: every field for a dry run, and for an
@@ -101,8 +101,11 @@ func (s Scheduled) Styled(w io.Writer, c term.Colors, now int64) {
 			p.row("grace", plain(s.Grace+"s"), ""),
 			p.row("persist", plain(persist), ""),
 			p.row("id", plain(s.ID), ""),
-			p.row("units", plain(s.UnitFiles), ""),
-			p.row("runs", plain(s.WouldRun), ""))
+			p.row("units", plain(s.UnitFiles), ""))
+		// A build that cannot arm jobs has no command to show.
+		if s.WouldRun != "" {
+			lines = append(lines, p.row("runs", plain(s.WouldRun), ""))
+		}
 	} else {
 		lines = append(lines,
 			headline(p.green("✓"), "scheduled "+sends), at,

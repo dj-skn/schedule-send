@@ -79,7 +79,6 @@ func newHarness(t *testing.T, ttyInput *string) *harness {
 		},
 		paths:         job.Paths{StateDir: filepath.Join(dir, "state"), UnitDir: filepath.Join(dir, "units")},
 		selfPane:      "wB:p2",
-		self:          "/opt/schedule-send",
 		installedPath: func() (string, error) { return "/opt/schedule-send", nil },
 	}
 	return h
@@ -932,6 +931,31 @@ func TestUnmanagedSchedulingRefusedBeforePublication(t *testing.T) {
 	for _, dir := range []string{h.a.paths.StateDir, h.a.paths.UnitDir} {
 		if _, err := os.Stat(dir); !os.IsNotExist(err) {
 			t.Fatalf("created job directory %s: %v", dir, err)
+		}
+	}
+}
+
+// A dry run previews the installed executable, not whichever build ran it, and
+// says so when that build could not arm the job it previews.
+func TestDryRunFromUnmanagedBuild(t *testing.T) {
+	for _, jsonMode := range []bool{false, true} {
+		h := newHarness(t, nil)
+		h.a.installedPath = func() (string, error) { return "", errors.New("this build has no installation path") }
+		args := []string{"--pane", "wB:p3", "--at", "16:30", "--message", "hello", "--dry-run"}
+		if jsonMode {
+			args = append(args, "--json")
+		}
+		if code := h.a.main(args); code != 0 {
+			t.Fatalf("exit %d: %s", code, h.stderr)
+		}
+		if !strings.Contains(h.stderr.String(), "Warning: this build cannot arm jobs (this build has no installation path), so a real run would be refused. Run tools/install") {
+			t.Errorf("stderr: %s", h.stderr)
+		}
+		if strings.Contains(h.stdout.String(), "__fire") {
+			t.Errorf("previewed a command that would not be armed: %s", h.stdout)
+		}
+		if !jsonMode && !strings.Contains(h.stdout.String(), "would_run=\n") {
+			t.Errorf("stdout: %s", h.stdout)
 		}
 	}
 }

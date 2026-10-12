@@ -47,6 +47,9 @@ func fail(kind, format string, a ...any) error {
 // limit is what a detected time is for.
 const resumeMessage = "resume"
 
+// installHint is how to get a build that can arm jobs.
+const installHint = "Run tools/install from the main checkout, then invoke the installed schedule-send."
+
 // A notice names its reset to the minute, and the reset lands somewhere inside
 // that minute — a notice reading 12:27 AM was for a reset at 00:27:52 — so the
 // first moment certainly past it is one minute on.
@@ -75,7 +78,6 @@ type app struct {
 	sys            job.Systemctl
 	h              herdr.Client
 	selfPane       string                 // HERDR_PANE_ID
-	self           string                 // preview executable, or the validated installed path
 	installedPath  func() (string, error) // private injection for isolated tests
 	statusTimeouts statusTimeouts         // private deadlines for isolated tests
 
@@ -361,16 +363,17 @@ func (a *app) run(args []string) (retErr error) {
 		return die("Nothing to send. Pass --message, --message-file, or --keys.")
 	}
 
+	// A dry run previews the same executable arming would record, and says
+	// when this build could not arm at all.
+	resolve := a.installedPath
+	if resolve == nil {
+		resolve = installpath.Resolve
+	}
+	installed, installErr := resolve()
 	if !o.dryRun {
-		resolve := a.installedPath
-		if resolve == nil {
-			resolve = installpath.Resolve
+		if installErr != nil {
+			return die("Cannot arm a job: %v. %s", installErr, installHint)
 		}
-		installed, err := resolve()
-		if err != nil {
-			return die("Cannot arm a job: %v. Run tools/install from the main checkout, then invoke the installed schedule-send.", err)
-		}
-		a.self = installed
 		fi, err := os.Stat("/usr/bin/env")
 		if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm()&0111 == 0 {
 			return die("/usr/bin/env is required to execute scheduled jobs (GNU coreutils).")
@@ -479,15 +482,22 @@ func (a *app) run(args []string) (retErr error) {
 		Mode: mode, Payload: payload, Message: o.message, Keys: o.keys,
 		Persistent: o.persistent, IfBusy: o.ifBusy, Recover: o.recover, Grace: o.grace,
 		UnitFiles: a.paths.UnitDir + "/" + unit + ".{service,timer}",
-		WouldRun:  a.selfPath() + " __fire " + id,
+	}
+	// The program and arguments the timer runs; the unit wraps them in
+	// /usr/bin/env with systemd escaping.
+	if installErr == nil {
+		sched.WouldRun = installed + " __fire " + id
 	}
 
 	if o.dryRun {
+		if installErr != nil {
+			a.warn(fmt.Sprintf("Warning: this build cannot arm jobs (%v), so a real run would be refused. %s", installErr, installHint))
+		}
 		a.receipt(sched, now)
 		return nil
 	}
 
-	serviceText, err := job.ServiceUnit(t.Pane, calendar, a.selfPath(), id)
+	serviceText, err := job.ServiceUnit(t.Pane, calendar, installed, id)
 	if err != nil {
 		return die("Could not render the service: %v", err)
 	}
@@ -606,22 +616,6 @@ func (a *app) locateHerdr() error {
 	}
 	a.h.Bin = bin
 	return nil
-}
-
-// selfPath is this executable with symlinks resolved, which is what an armed
-// timer runs.
-func (a *app) selfPath() string {
-	if a.self != "" {
-		return a.self
-	}
-	p, err := os.Executable()
-	if err == nil {
-		if r, err := filepath.EvalSymlinks(p); err == nil {
-			p = r
-		}
-	}
-	a.self = p
-	return p
 }
 
 func alnum(s string) string {

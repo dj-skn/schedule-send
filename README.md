@@ -45,7 +45,9 @@ Installer builds record the stable main-checkout binary path. Real scheduling
 requires running from that location (including through its symlink). Plain
 `go build`/`go run` builds and moved or copied binaries cannot arm jobs; run
 `tools/install` from the main checkout on `main` and invoke the installed command. Dry-run,
-management commands, and legacy timer firing remain available in plain builds.
+management commands, and legacy timer firing remain available in plain builds;
+a dry run shows the installed executable in `would_run`, and in a build that
+cannot arm it warns and leaves `would_run` empty.
 Generated services invoke `/usr/bin/env --` with the quoted executable path.
 Percent specifiers and dollar signs are escaped (`%%`, `$$`), which works on
 systemd releases older than the `:` prefix. The installed path must be clean,
