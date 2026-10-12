@@ -9,8 +9,8 @@ entrypoint; `schedule-send.zsh` is the compatibility shim for older timers.
 
 ## Workflow
 
-- Keep the main checkout `/home/dev/src/schedule-send` on `main`. Develop and
-  build feature changes in worktrees under `/home/dev/src/schedule-send.worktrees`.
+- Keep the main checkout on `main`. Develop and build feature changes in
+  linked worktrees, kept in a `<checkout>.worktrees` directory beside it.
 - Run `tools/check` before committing. For delivery or scheduling changes,
   run the relevant `tools/parity` cases or the full suite as appropriate.
 - Use the user's commit prefixes: `feat:`, `fix:`, `docs:`, `refactor:`,
@@ -31,7 +31,7 @@ entrypoint; `schedule-send.zsh` is the compatibility shim for older timers.
 | Command | Purpose |
 | --- | --- |
 | `tools/check` | Formatting, vet, Go tests, zsh shim syntax, shell syntax, and isolated hook tests. |
-| `tools/parity [CASE...]` | Compare behavior against the `zsh-baseline` tag with documented differences checked. |
+| `tools/parity [CASE...]` | Compare behavior against the zsh baseline in `testdata/baseline` with documented differences checked. |
 | `tools/install` | Build, atomically publish, and link the binary; main checkout on `main` only. |
 | `tools/setup-hooks` | Enable this repository's hooks and install if needed; main checkout on `main` only. |
 
@@ -55,7 +55,8 @@ Build/install needs Go 1.27.1+, Git, `flock`, and GNU coreutils (`base64`, `tr`)
   honest cancellation errors. Keep hidden lock files to retain inode identity.
 - Store new timer instants in explicit UTC while keeping human output local.
   Keep JSON diagnostics structured and older optional state defaults intact.
-- Keep `zsh-baseline` reachable for parity; avoid hardcoded historical hashes.
+- Keep `testdata/baseline/schedule-send.zsh`, the zsh script the program was
+  ported from, unchanged for parity.
 
 ## Stories
 

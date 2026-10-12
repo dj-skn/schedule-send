@@ -16,7 +16,7 @@ Build requirements: Go **1.27.1 or newer**, Git, `flock`, and GNU coreutils
 From the main checkout on `main`, run once:
 
 ```zsh
-cd ~/src/schedule-send
+cd path/to/schedule-send
 tools/setup-hooks
 hash -r
 schedule-send --help
@@ -308,14 +308,14 @@ Use a feature worktree and check changes before committing:
 
 ```zsh
 tools/check                  # formatting, vet, Go tests, shim and hook checks
-tools/parity                 # compare with the tagged zsh baseline
+tools/parity                 # compare with the zsh baseline
 ```
 
 Checks use temporary files and stand-in Herdr/systemd commands, never real
 panes or timers. Hook tests use temporary Git repositories and a mock installer.
 Checks need `zsh` and `jq`; parity additionally needs Python 3 and `script`.
-`zsh-baseline` is the stable Git tag used by parity, so keep it when copying
-or fetching the repository. See [AGENTS.md](AGENTS.md) for contributor rules.
+Parity compares against the zsh script the program was ported from, kept in
+`testdata/baseline`. See [AGENTS.md](AGENTS.md) for contributor rules.
 
 `HERDR_SCHEDULE_NOW_EPOCH` overrides the scheduling clock for tests, including
 notice timing. Use it with stand-ins or `--dry-run`, not real scheduling.
