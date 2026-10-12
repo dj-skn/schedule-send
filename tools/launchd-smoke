@@ -22,13 +22,17 @@ bin="$work/schedule-send"
 failures=0
 
 cleanup() {
+  status=$?
+  trap - EXIT
   while read -r id; do
     launchctl bootout "$domain/herdr-send-$id" 2> /dev/null || true
     rm -f "$agents/herdr-send-$id.plist"
   done < "$work/ids"
   rm -rf "$work"
+  exit "$status"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 check() { # description, then a command that must succeed
   what="$1"; shift
@@ -61,9 +65,9 @@ arm() { # pane, when -> prints "id run_at"
   "$bin" --pane "$1" --at "$2" --message resume --json 2> "$work/arm.err" > "$work/arm.json" || {
     echo "Could not schedule for $1 at $2:" >&2; cat "$work/arm.err" "$work/arm.json" >&2; exit 1
   }
-  id="$(jq -r .id "$work/arm.json")"
+  id="$(jq -er .id "$work/arm.json")"
   echo "$id" >> "$work/ids"
-  echo "$id $(jq -r .run_at "$work/arm.json")"
+  echo "$id $(jq -er .run_at_epoch "$work/arm.json")"
 }
 
 delivered() { # pane, run_at: exactly one prompt, no earlier than its time and within 30 s of it
