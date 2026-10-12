@@ -106,7 +106,7 @@ Stated in the walkthrough; the owner did not object.
 | Phase | Outcome | Branch | Status |
 | --- | --- | --- | --- |
 | P1 | A tree that is safe to publish, under its final name | `ss-3-p1` | complete in ss-3 |
-| P2 | Timer operations behind one seam, behaviour unchanged | `ss-3-p2` | not started |
+| P2 | Timer operations behind one seam, behaviour unchanged | `ss-3-p2` | approved 2026-10-12, in progress |
 | P3 | A launchd backend for macOS | `ss-3-p3` | not started |
 | P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | not started |
 | P5 | The Herdr plugin | `ss-3-p5` | not started |
@@ -258,11 +258,69 @@ first screen. P3 has to update the guidance where it says Linux.
 
 ### P2 — Timer seam
 
-Move unit rendering, arming, disarming, state, status, and sweeping behind one
-small interface, with the existing systemd code as its Linux implementation in
-a Linux-only file. No behaviour changes.
+A move, not a rewrite. Everything that knows about systemd goes into one
+Linux-only file, and the rest of the program asks it six things. No output,
+message, or file on disk changes.
 
-→ verify: `tools/check` and parity give the same counts as after P1.
+#### Code check — 2026-10-12
+
+- Six operations cover every use of systemd outside the job package: whether
+  jobs can run here, what arming would create, arming, whether a job is still
+  armed (`--list`), inspection (`--status`), and removal (cancel, rollback,
+  cleanup after firing, and sweeping orphans). The 16 call sites reduce to
+  these.
+- About 400 lines move and about 60 are new, estimated from reading: 260 in
+  `internal/job`, 110 in status inspection, 25 in arming.
+- Tests reach systemd through stand-in `systemctl` and `journalctl` commands
+  on the path, not through Go code. The names they call directly are few:
+  the unit renderers, the unit paths, and the lifecycle methods. If those
+  names stay, no test file has to change.
+- Error text moves with the code and must stay identical, because parity
+  compares error output byte for byte.
+- A Linux build passes whether or not systemd detail leaks outside the Linux
+  file, so it cannot show the seam is complete. A stub for another platform
+  can.
+- Some systemd wording is output rather than code: receipts print
+  `unit=<name>.timer` and `unit_files=`, and status JSON names its sources
+  `timer`, `unit_state`, and `journal`.
+
+#### Decisions settled 2026-10-12
+
+The owner agreed to the P2 walkthrough and instructed build.
+
+1. **No interface.** Each platform has its own file with the same method
+   names, and the build picks one. Nothing chooses at run time.
+2. **Where it lives.** A Linux-only file in `internal/job`, because removal
+   and rollback interleave with the job's lock and state files.
+3. **Linux names stay.** The names the tests call keep existing, so no test
+   file changes and the existing suite is the proof.
+
+Assumptions the owner did not object to: output wording stays, and P3 decides
+what macOS prints; the state key `unit` and the unit-folder setting keep their
+names; the `/usr/bin/env` check moves behind the seam with its message
+unchanged.
+
+#### Steps
+
+1. Split `internal/job` into a portable file (state, lock, files, command
+   runner) and a Linux file (units, `systemctl`, lifecycle), with no logic
+   change.
+   → verify: `tools/check` passes; no test file changed.
+2. Add the neutral scheduler type with "can run", "describe", and "arm", and
+   switch scheduling to them.
+   → verify: `tools/check`, including the arming and rollback tests; full
+   parity.
+3. Move "is it armed" and status inspection behind the seam.
+   → verify: the status tests pass; full parity.
+4. In a scratch copy, add a stub scheduler for macOS and cross-build the
+   program.
+   → verify: it builds. Nothing from the scratch copy is committed.
+5. Run the full gate and record As built.
+   → verify: 383 tests; parity 41 identical, 37 known, 0 unexpected; the diff
+   touches no test file.
+
+Not included: any macOS code, the per-platform terminal constant, making the
+tests run on a Mac, and the output wording. All of those are P3.
 
 ### P3 — macOS backend
 
