@@ -534,8 +534,17 @@ non-persistent agents beside the job's state would remove the second, and by
 the probe would also avoid the background-item record; that is the
 alternative in decision 3, for the owner to weigh with step 6.
 
-Still to confirm: step 6, on the owner's Mac, including whether macOS shows a
-notice for each agent file.
+#### Step 6 — 2026-10-13
+
+The owner ran `tools/launchd-smoke` on their Mac. It ended `launchd-smoke: ok`
+with every check passing: the job started at load was delivered once, 2
+seconds after its time; the calendar job once, 0 seconds after its time; the
+third was listed, inspected, and cancelled; nothing was left on disk or
+loaded.
+
+macOS showed two or three background-item notices for the three agent files.
+That is the condition in decision 3, so the alternative goes back to the owner
+before the phase is merged. The phase stays open.
 
 ### P4 — Versions and installers
 
