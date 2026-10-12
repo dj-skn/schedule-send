@@ -292,9 +292,10 @@ resolved Herdr executable, and, for new jobs, the firing epoch (`run_at`).
 Older job files remain supported. Missing or null numeric fields retain legacy
 defaults: `force=0`, `quiet=0`, `grace=4`, and `run_at=0`. Supplied values must
 be JSON integer literals: force/quiet are 0–1, grace is 1–60, and run_at is a
-nonnegative 64-bit integer. Invalid numeric state stops delivery and retains
-the job for inspection; `--list` warns and skips it, while `--status` shows
-the stored document.
+nonnegative 64-bit integer. Invalid state stops delivery, raises a Herdr
+notification unless the job loaded as quiet, and retains the job for
+inspection. `--list` warns and lists it with state `invalid` (JSON adds an
+`error` field), while `--status` shows the stored document.
 
 A pane/time pair identifies a job; duplicate scheduling is refused. Scheduling,
 cancellation, and cleanup share a per-job lock. Hidden lock files deliberately

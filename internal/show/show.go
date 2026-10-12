@@ -239,7 +239,8 @@ type Job struct {
 	At                string // the fire time as stored, when.Calendar in when.Loc
 	RunAt             int64  // At as an epoch; 0 when it does not parse
 	Kind, Agent, Pane string // the target
-	State             string // the timer's systemctl is-active state, or "gone"
+	State             string // the timer's systemctl is-active state, "gone", or "invalid"
+	Error             string // why an "invalid" job's state could not be used
 	Payload           string // the message's preview, or "keys: " and the keys
 	Message           string // the whole message; empty for keys
 	Keys              string // empty for text
@@ -441,7 +442,7 @@ func ListJSON(w io.Writer, jobs []Job) {
 	for _, j := range jobs {
 		rows = append(rows, jobJSON{
 			ID: j.ID, At: j.At, RunAt: j.RunAt, Kind: j.Kind,
-			Agent: j.Agent, Pane: j.Pane, State: j.State, Payload: j.Payload,
+			Agent: j.Agent, Pane: j.Pane, State: j.State, Payload: j.Payload, Error: j.Error,
 		})
 	}
 	writeJSON(w, struct {
@@ -458,6 +459,7 @@ type jobJSON struct {
 	Pane    string `json:"pane"`
 	State   string `json:"state"`
 	Payload string `json:"payload"`
+	Error   string `json:"error,omitempty"`
 }
 
 // Target is one pane as --targets --json prints it.

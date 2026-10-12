@@ -90,12 +90,10 @@ func (w *Worker) Run() int {
 	}
 	st, err := job.Load(statePath)
 	if err != nil {
-		fmt.Fprintf(w.Err, "The state file for %s cannot be read: %v\n", w.ID, err)
-		return 1
+		return w.refuse(st, "The state file for %s cannot be read: %v", w.ID, err)
 	}
 	if err := st.Validate(w.ID); err != nil {
-		fmt.Fprintf(w.Err, "Invalid state file for %s: %v\n", w.ID, err)
-		return 1
+		return w.refuse(st, "Invalid state file for %s: %v", w.ID, err)
 	}
 	if w.fire(st) != nil {
 		return 1
@@ -105,6 +103,27 @@ func (w *Worker) Run() int {
 		return 1
 	}
 	return 0
+}
+
+// refuse reports a job whose state cannot be trusted and keeps its files for
+// inspection. Its timer has elapsed and will not fire again, so a Herdr
+// notification is the only notice the user gets. Herdr is used for nothing
+// else: none of this state is delivered. A quiet flag that itself failed to
+// load reads as not quiet.
+func (w *Worker) refuse(st job.State, format string, args ...any) int {
+	msg := fmt.Sprintf(format, args...)
+	fmt.Fprintln(w.Err, msg)
+	if st.Quiet == 1 {
+		return 1
+	}
+	bin := st.HerdrBin
+	if !executable(bin) {
+		bin, _ = exec.LookPath("herdr")
+	}
+	if executable(bin) {
+		w.Connect(bin).Notify("Scheduled send failed", fmt.Sprintf("%s. The job is kept; inspect it with schedule-send --status %s.", msg, w.ID))
+	}
+	return 1
 }
 
 // fail reports msg to the journal and as a Herdr notification, removes the

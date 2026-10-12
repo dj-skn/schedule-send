@@ -926,21 +926,22 @@ func (a *app) confirmAt(def int64, fromNow bool, report show.Report) (int64, err
 func (a *app) list() {
 	var jobs []show.Job
 	for _, f := range a.paths.StateFiles() {
+		id := strings.TrimSuffix(filepath.Base(f), ".json")
 		s, err := job.Load(f)
 		if err != nil {
 			a.warn(fmt.Sprintf("Could not read job state %s: %v", f, err))
-			continue
-		}
-		id := strings.TrimSuffix(filepath.Base(f), ".json")
-		if s.ID != id {
+		} else if s.ID != id {
+			err = errors.New("id does not match its filename")
 			a.warn(fmt.Sprintf("Invalid job state %s: id does not match its filename.", f))
-			continue
 		}
-		state := a.sys.Output("is-active", job.UnitPrefix+"-"+s.ID+".timer")
-		if state == "" {
-			state = "gone"
+		j := show.Job{ID: id, At: s.At, Kind: s.Kind, Agent: s.Agent, Pane: s.PaneID, Payload: job.Preview(f)}
+		if err != nil {
+			// Listed rather than skipped: its timer will refuse it, and it
+			// stays until cancelled.
+			j.State, j.Error = "invalid", err.Error()
+		} else if j.State = a.sys.Output("is-active", job.UnitPrefix+"-"+id+".timer"); j.State == "" {
+			j.State = "gone"
 		}
-		j := show.Job{ID: s.ID, At: s.At, Kind: s.Kind, Agent: s.Agent, Pane: s.PaneID, State: state, Payload: job.Preview(f)}
 		if s.Mode == "keys" {
 			j.Payload, j.Keys = "keys: "+s.Keys, s.Keys
 		} else if b, err := os.ReadFile(strings.TrimSuffix(f, ".json") + ".msg"); err == nil {

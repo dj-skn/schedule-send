@@ -871,15 +871,28 @@ func TestDiscoveryCapturesChildStderr(t *testing.T) {
 	}
 }
 
-func TestListSkipsCorruptStateWithDiagnostic(t *testing.T) {
+func TestListShowsCorruptStateWithDiagnostic(t *testing.T) {
 	h := newHarness(t, nil)
 	h.addJobs(t)
 	os.WriteFile(h.a.paths.StatePath("bad-job"), []byte("corrupt"), 0600)
 	if code := h.a.main([]string{"--list", "--json"}); code != 0 {
 		t.Fatalf("exit %d stderr %s", code, h.stderr)
 	}
-	if len(jsonObject(t, h.stdout.Bytes())["jobs"].([]any)) != 2 {
+	jobs := jsonObject(t, h.stdout.Bytes())["jobs"].([]any)
+	if len(jobs) != 3 {
 		t.Fatalf("stdout %s", h.stdout)
+	}
+	found := false
+	for _, v := range jobs {
+		row := v.(map[string]any)
+		if row["id"] == "bad-job" {
+			found = row["state"] == "invalid" && row["error"] != nil
+		} else if _, ok := row["error"]; ok {
+			t.Errorf("valid job has an error: %v", row)
+		}
+	}
+	if !found {
+		t.Fatalf("corrupt job not listed as invalid: %s", h.stdout)
 	}
 	if !strings.Contains(jsonObject(t, h.stderr.Bytes())["warning"].(string), "bad-job.json") {
 		t.Fatalf("stderr %s", h.stderr)
@@ -1102,11 +1115,17 @@ func TestMalformedNumericStateRemainsInspectable(t *testing.T) {
 			}
 			if operation == "--list" {
 				jobs := jsonObject(t, h.stdout.Bytes())["jobs"].([]any)
-				if len(jobs) != 1 {
+				if len(jobs) != 2 {
 					t.Fatalf("jobs: %s", h.stdout)
 				}
-				if jobs[0].(map[string]any)["id"] == id {
-					t.Fatal("listed malformed job")
+				for _, v := range jobs {
+					row := v.(map[string]any)
+					if row["id"] != id {
+						continue
+					}
+					if row["state"] != "invalid" || !strings.Contains(row["error"].(string), "job field grace") || row["pane"] != "wB:p1" {
+						t.Fatalf("malformed job row: %v", row)
+					}
 				}
 				warning := jsonObject(t, h.stderr.Bytes())["warning"].(string)
 				if !strings.Contains(warning, "job field grace") {

@@ -74,8 +74,25 @@ type State struct {
 	RunAt    int64  `json:"run_at,omitempty"`
 }
 
+// numericFields are the integer controls, their legacy defaults, and their
+// bounds. Load and Validate both read this one table.
+var numericFields = []struct {
+	name          string
+	def, min, max int64
+	get           func(State) int64
+	set           func(*State, int64)
+}{
+	{"force", 0, 0, 1, func(s State) int64 { return int64(s.Force) }, func(s *State, v int64) { s.Force = int(v) }},
+	{"quiet", 0, 0, 1, func(s State) int64 { return int64(s.Quiet) }, func(s *State, v int64) { s.Quiet = int(v) }},
+	{"grace", 4, 1, 60, func(s State) int64 { return int64(s.Grace) }, func(s *State, v int64) { s.Grace = int(v) }},
+	{"run_at", 0, 0, 1<<63 - 1, func(s State) int64 { return s.RunAt }, func(s *State, v int64) { s.RunAt = v }},
+}
+
 // Load reads a state file, retaining defaults for absent/null optional fields.
 // Numeric fields use JSON integer literals and are range-checked before use.
+// On a field error Load still returns every field it could decode, with
+// defaults for the rest, so a refused job can be reported and listed; such a
+// state must never be delivered.
 func Load(path string) (State, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -85,7 +102,8 @@ func Load(path string) (State, error) {
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return State{}, err
 	}
-	s := State{Grace: 4}
+	var s State
+	var first error
 	for _, field := range []struct {
 		name string
 		dest *string
@@ -96,29 +114,20 @@ func Load(path string) (State, error) {
 		{"recover", &s.Recover}, {"herdr_bin", &s.HerdrBin}, {"unit", &s.Unit},
 	} {
 		if value := raw[field.name]; len(value) != 0 {
-			if err := json.Unmarshal(value, field.dest); err != nil {
-				return State{}, fmt.Errorf("job field %s must be a string", field.name)
+			if err := json.Unmarshal(value, field.dest); err != nil && first == nil {
+				first = fmt.Errorf("job field %s must be a string", field.name)
 			}
 		}
 	}
-	for _, field := range []struct {
-		name          string
-		dest          *int
-		def, min, max int64
-	}{
-		{"force", &s.Force, 0, 0, 1},
-		{"quiet", &s.Quiet, 0, 0, 1},
-		{"grace", &s.Grace, 4, 1, 60},
-	} {
+	for _, field := range numericFields {
 		value, err := integer(raw[field.name], field.name, field.def, field.min, field.max)
 		if err != nil {
-			return State{}, err
+			if first == nil {
+				first = err
+			}
+			value = field.def
 		}
-		*field.dest = int(value)
-	}
-	s.RunAt, err = integer(raw["run_at"], "run_at", 0, 0, 1<<63-1)
-	if err != nil {
-		return State{}, err
+		field.set(&s, value)
 	}
 	if s.IfBusy == "" {
 		s.IfBusy = "wait"
@@ -126,7 +135,7 @@ func Load(path string) (State, error) {
 	if s.Recover == "" {
 		s.Recover = "keys"
 	}
-	return s, nil
+	return s, first
 }
 
 func integer(raw json.RawMessage, name string, def, min, max int64) (int64, error) {
@@ -184,11 +193,10 @@ func (s State) Validate(id string) error {
 	if s.Recover != "keys" && s.Recover != "focus" && s.Recover != "none" {
 		return errors.New("invalid recovery policy")
 	}
-	if s.Grace < 1 || s.Grace > 60 || s.Force < 0 || s.Force > 1 || s.Quiet < 0 || s.Quiet > 1 {
-		return errors.New("invalid job controls")
-	}
-	if s.RunAt < 0 {
-		return errors.New("invalid firing epoch")
+	for _, field := range numericFields {
+		if v := field.get(s); v < field.min || v > field.max {
+			return fmt.Errorf("job field %s must be between %d and %d", field.name, field.min, field.max)
+		}
 	}
 	return nil
 }

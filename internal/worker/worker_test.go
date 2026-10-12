@@ -792,6 +792,7 @@ func TestRevalidatesTargetAfterWait(t *testing.T) {
 func TestInvalidStateDoesNotSend(t *testing.T) {
 	h := newHarness(t)
 	st := agentJob()
+	st.HerdrBin = h.herdr
 	h.arm(st, text("carry on with the plan please"))
 	st.Mode = "invalid"
 	must(t, os.WriteFile(h.paths.StatePath(jobID), job.Encode(st), 0600))
@@ -800,6 +801,12 @@ func TestInvalidStateDoesNotSend(t *testing.T) {
 	h.wantCalls()
 	if !strings.Contains(h.err.String(), "Invalid state file") {
 		t.Fatalf("stderr=%s", h.err.String())
+	}
+	if len(h.f.notes) != 1 || !strings.HasPrefix(h.f.notes[0], "Scheduled send failed: Invalid state file for "+jobID+": invalid job mode.") {
+		t.Fatalf("notifications %q", h.f.notes)
+	}
+	if _, err := os.Stat(h.paths.StatePath(jobID)); err != nil {
+		t.Fatalf("invalid state was removed: %v", err)
 	}
 }
 
@@ -848,17 +855,25 @@ func TestChangedComposerDoesNotConfirmDraftDisappearance(t *testing.T) {
 	}
 }
 
-func TestMalformedNumericStateNeverConnects(t *testing.T) {
-	for _, kind := range []string{"agent text", "agent keys", "pane text"} {
+// Malformed state is never delivered and stays on disk, but the user hears
+// about it: the elapsed timer will not fire again.
+func TestMalformedNumericStateIsReportedNotDelivered(t *testing.T) {
+	for _, kind := range []string{"agent text", "agent keys", "pane text", "quiet agent text"} {
 		for _, tc := range []struct{ field, value string }{
 			{"force", `"1"`}, {"force", "2"},
 			{"quiet", "true"}, {"quiet", "-1"},
 			{"grace", "-1"}, {"grace", "4.5"}, {"grace", "4.0"}, {"grace", "4e0"}, {"grace", "0"}, {"grace", "61"},
 			{"run_at", "-1"}, {"run_at", "9223372036854775808"},
 		} {
+			if kind == "quiet agent text" && tc.field == "quiet" {
+				continue
+			}
 			t.Run(kind+"/"+tc.field+"="+tc.value, func(t *testing.T) {
 				h := newHarness(t)
 				state := agentJob()
+				if kind == "quiet agent text" {
+					state.Quiet = 1
+				}
 				switch kind {
 				case "agent keys":
 					state.Mode = "keys"
@@ -882,11 +897,20 @@ func TestMalformedNumericStateNeverConnects(t *testing.T) {
 				h.code = w.Run()
 				h.wantCode(1)
 				h.wantCalls()
-				if connections != 0 {
-					t.Fatalf("connected to Herdr %d times", connections)
-				}
 				if !strings.Contains(h.err.String(), "job field "+tc.field) {
 					t.Fatalf("stderr: %s", h.err.String())
+				}
+				// A quiet flag that loaded is honoured; a malformed one is not.
+				if kind == "quiet agent text" {
+					if connections != 0 || len(h.f.notes) != 0 {
+						t.Fatalf("quiet job notified: %d connections, %q", connections, h.f.notes)
+					}
+				} else {
+					want := "Scheduled send failed: The state file for " + jobID + " cannot be read: job field " + tc.field
+					if connections != 1 || len(h.f.notes) != 1 || !strings.HasPrefix(h.f.notes[0], want) ||
+						!strings.HasSuffix(h.f.notes[0], "The job is kept; inspect it with schedule-send --status "+jobID+".") {
+						t.Fatalf("notifications %q after %d connections", h.f.notes, connections)
+					}
 				}
 				stored, err = os.ReadFile(h.paths.StatePath(jobID))
 				must(t, err)

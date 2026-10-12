@@ -2,6 +2,7 @@ package job
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,5 +97,45 @@ func TestLoadNumericRangesAndExactEpochs(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A refused job is still reported and listed, so Load keeps what it decoded.
+func TestLoadKeepsDecodableFieldsOnError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	raw := `{"id":"j1","agent":7,"pane_id":"wB:p1","herdr_bin":"/opt/herdr","quiet":1,"grace":4.0}`
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "job field agent") {
+		t.Fatalf("Load error %v; want the first malformed field", err)
+	}
+	if s.ID != "j1" || s.PaneID != "wB:p1" || s.HerdrBin != "/opt/herdr" || s.Quiet != 1 || s.Grace != 4 || s.Recover != "keys" {
+		t.Fatalf("Load kept %+v", s)
+	}
+}
+
+// Validate's second guard reads the same bounds as Load.
+func TestValidateUsesLoadBounds(t *testing.T) {
+	valid := State{ID: "j1", Kind: "pane", PaneID: "wB:p5", Cwd: "/tmp", Mode: "text", IfBusy: "wait", Recover: "keys", Grace: 4}
+	if err := valid.Validate("j1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range numericFields {
+		var outside []int64
+		if field.min > math.MinInt64 {
+			outside = append(outside, field.min-1)
+		}
+		if field.max < math.MaxInt64 {
+			outside = append(outside, field.max+1)
+		}
+		for _, value := range outside {
+			s := valid
+			field.set(&s, value)
+			if err := s.Validate("j1"); err == nil || !strings.Contains(err.Error(), "job field "+field.name) {
+				t.Errorf("%s=%d: Validate = %v", field.name, value, err)
+			}
+		}
 	}
 }
