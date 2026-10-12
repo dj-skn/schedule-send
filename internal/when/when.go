@@ -2,7 +2,7 @@
 // into an epoch, and formats epochs and delays for display.
 //
 // Parsing is left to GNU date(1): it is what accepts "+30 min" and
-// "Sep 27 1am" at the confirmation prompt, and the tool is Linux-only anyway.
+// "Sep 27 1am" at the confirmation prompt. macOS has it as gdate.
 // This package decides what date(1) is handed.
 package when
 
@@ -58,7 +58,7 @@ var (
 	clock24  = regexp.MustCompile(`^[0-9]{1,2}:[0-9]{2}(:[0-9]{2})?$`)
 	clock12  = regexp.MustCompile(`^[0-9]{1,2}(:[0-9]{2}(:[0-9]{2})?)? ?[AaPp][Mm]$`)
 	yearless = regexp.MustCompile(`^([A-Z][a-z]{2} [0-9]{1,2}) ([0-9]{1,2}(:[0-9]{2})? ?[AaPp][Mm])$`)
-	dateTool = "date"
+	dateTool = DateTool
 )
 
 // Resolve turns a send time into an epoch. ok is false when date(1) cannot

@@ -37,7 +37,7 @@ var markers = term.Colors{Reset: "</>", Dim: "<dim>", Yellow: "<y>", Green: "<g>
 // arm-keys and enter-only.
 var (
 	resume = Scheduled{
-		ID: "20261003-160100-wBp1", Unit: "herdr-send-20261003-160100-wBp1",
+		ID: "20261003-160100-wBp1", Unit: "herdr-send-20261003-160100-wBp1.timer",
 		Kind: "agent", Pane: "wB:p1", Agent: "claude", Status: "idle", Cwd: "/home/dev/projects/shop-backend",
 		At: "2026-10-03 16:01:00", RunAt: 1791036060, Delay: 2340,
 		Mode: "text", Payload: "resume", Message: "resume",
@@ -46,7 +46,7 @@ var (
 		WouldRun:  "/opt/schedule-send __fire 20261003-160100-wBp1",
 	}
 	twoLines = Scheduled{
-		ID: "20261003-163000-wBp3", Unit: "herdr-send-20261003-163000-wBp3",
+		ID: "20261003-163000-wBp3", Unit: "herdr-send-20261003-163000-wBp3.timer",
 		Kind: "agent", Pane: "wB:p3", Agent: "codex", Status: "idle", Cwd: "/home/dev/projects/shop-backend",
 		At: "2026-10-03 16:30:00", RunAt: 1791037800, Delay: 4080,
 		Mode: "text", Payload: "two", Message: "two\nlines",
@@ -55,7 +55,7 @@ var (
 		WouldRun:  "/opt/schedule-send __fire 20261003-163000-wBp3",
 	}
 	paneKeys = Scheduled{
-		ID: "20261004-090000-wBp5", Unit: "herdr-send-20261004-090000-wBp5",
+		ID: "20261004-090000-wBp5", Unit: "herdr-send-20261004-090000-wBp5.timer",
 		Kind: "pane", Pane: "wB:p5", Agent: "-", Status: "-", Cwd: "/home/dev/projects/shop-backend",
 		At: "2026-10-04 09:00:00", RunAt: 1791097200, Delay: 63480,
 		Mode: "keys", Payload: "keys: ctrl+c", Keys: "ctrl+c",
@@ -64,7 +64,7 @@ var (
 		WouldRun:  "/opt/schedule-send __fire 20261004-090000-wBp5",
 	}
 	enterOnly = Scheduled{
-		DryRun: true, ID: "20261004-090000-wBp3", Unit: "herdr-send-20261004-090000-wBp3",
+		DryRun: true, ID: "20261004-090000-wBp3", Unit: "herdr-send-20261004-090000-wBp3.timer",
 		Kind: "agent", Pane: "wB:p3", Agent: "codex", Status: "idle", Cwd: "/home/dev/projects/shop-backend",
 		At: "2026-10-04 09:00:00", RunAt: 1791097200, Delay: 63480,
 		Mode: "keys", Payload: "keys: enter", Keys: "enter",

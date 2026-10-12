@@ -13,7 +13,7 @@ import (
 // character-device check would also accept /dev/null.
 func IsTerminal(fd uintptr) bool {
 	var t syscall.Termios
-	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, syscall.TCGETS, uintptr(unsafe.Pointer(&t)))
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, ioctlGetTermios, uintptr(unsafe.Pointer(&t)))
 	return errno == 0
 }
 

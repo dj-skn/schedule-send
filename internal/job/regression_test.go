@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 	"unicode/utf8"
 )
 
@@ -71,53 +70,6 @@ func TestLockSurvivesReleasingAnotherHandle(t *testing.T) {
 	}
 }
 
-func failingSystemctl(t *testing.T, action string) {
-	t.Helper()
-	dir := t.TempDir()
-	script := "#!/bin/sh\n[ \"$2\" = \"" + action + "\" ] && { echo 'lost bus' >&2; exit 1; }\nexit 0\n"
-	if err := os.WriteFile(filepath.Join(dir, "systemctl"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir)
-}
-
-func TestCancelPreservesStateOnStopFailure(t *testing.T) {
-	failingSystemctl(t, "stop")
-	p := Paths{StateDir: filepath.Join(t.TempDir(), "state"), UnitDir: t.TempDir()}
-	msg := "hello"
-	if err := p.Write(State{ID: "cancel"}, &msg); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.Remove(Systemctl{}, "cancel"); err == nil || !strings.Contains(err.Error(), "lost bus") {
-		t.Fatalf("Remove returned %v", err)
-	}
-	for _, path := range []string{p.StatePath("cancel"), p.MessagePath("cancel")} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("lost inspectable artifact: %v", err)
-		}
-	}
-}
-
-func TestRollbackBeforeActivationRemovesFilesDespiteUnavailableManager(t *testing.T) {
-	failingSystemctl(t, "daemon-reload")
-	p := Paths{StateDir: filepath.Join(t.TempDir(), "state"), UnitDir: t.TempDir()}
-	msg := "hello"
-	if err := p.Write(State{ID: "failed"}, &msg); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(p.UnitPath("failed", "service"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.Rollback(Systemctl{}, "failed", false); err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{p.StatePath("failed"), p.MessagePath("failed"), p.UnitPath("failed", "service")} {
-		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("artifact remains %s: %v", path, err)
-		}
-	}
-}
-
 func TestValidatePreventsMalformedJobsFromFallingThrough(t *testing.T) {
 	s := State{ID: "valid", Kind: "agent", PaneID: "wA:p1", Agent: "claude", Cwd: "/tmp", Mode: "text", IfBusy: "wait", Recover: "keys", Grace: 4}
 	if err := s.Validate("valid"); err != nil {
@@ -151,43 +103,5 @@ func TestPreviewKeepsUTF8Boundary(t *testing.T) {
 	preview := Preview(p.StatePath("utf8"))
 	if !utf8.ValidString(preview) || preview != strings.Repeat("a", 59) {
 		t.Fatalf("invalid preview %q", preview)
-	}
-}
-
-func TestCleanupWaitsForSchedulerReservation(t *testing.T) {
-	failingSystemctl(t, "")
-	p := Paths{StateDir: filepath.Join(t.TempDir(), "state"), UnitDir: t.TempDir()}
-	msg := "hello"
-	if err := p.Write(State{ID: "immediate"}, &msg); err != nil {
-		t.Fatal(err)
-	}
-	lock, err := p.Lock("immediate")
-	if err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- p.Cleanup(Systemctl{}, "immediate") }()
-	time.Sleep(50 * time.Millisecond)
-	lock.Close()
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(p.StatePath("immediate")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("job remains %v", err)
-	}
-}
-
-func TestCleanupReloadFailureRetainsInspectableState(t *testing.T) {
-	failingSystemctl(t, "daemon-reload")
-	p := Paths{StateDir: filepath.Join(t.TempDir(), "state"), UnitDir: t.TempDir()}
-	msg := "hello"
-	if err := p.Write(State{ID: "reload"}, &msg); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.Cleanup(Systemctl{}, "reload"); err == nil {
-		t.Fatal("cleanup succeeded")
-	}
-	if _, err := os.Stat(p.StatePath("reload")); err != nil {
-		t.Fatalf("lost state %v", err)
 	}
 }

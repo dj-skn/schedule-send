@@ -8,5 +8,6 @@ case "$1" in /*) output=$1 ;; *) output=$PWD/$1 ;; esac
 cd "$(dirname "$0")/.."
 # The installed path is checked with the same rules arming uses.
 go run ./internal/installpath/check "$2"
-encoded="$(printf '%s' "$2" | base64 -w 0)"
+# BSD base64 has no -w; both wrap only long input, so strip the newlines.
+encoded="$(printf '%s' "$2" | base64 | tr -d '\n')"
 go build -trimpath -ldflags "-X github.com/dj-skn/schedule-send/internal/installpath.Encoded=$encoded" -o "$output" ./cmd/schedule-send

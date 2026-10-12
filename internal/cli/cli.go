@@ -462,7 +462,7 @@ func (a *app) run(args []string) (retErr error) {
 		mode, payload = "keys", "keys: "+o.keys
 	}
 	sched := show.Scheduled{
-		DryRun: o.dryRun, ID: id, Unit: unit,
+		DryRun: o.dryRun, ID: id, Unit: a.sys.Name(id),
 		Kind: t.Kind, Pane: t.Pane, Agent: t.Agent, Status: t.Status, Cwd: t.Cwd,
 		At: calendar, RunAt: runAt, Delay: delay,
 		Mode: mode, Payload: payload, Message: o.message, Keys: o.keys,

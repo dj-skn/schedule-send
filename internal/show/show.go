@@ -22,7 +22,7 @@ import (
 type Scheduled struct {
 	DryRun bool
 	ID     string
-	Unit   string // the timer's and service's name, without the suffix
+	Unit   string // the timer's name as the platform's scheduler shows it
 
 	// The target, as target.Row has it.
 	Kind, Pane, Agent, Status, Cwd string
@@ -61,7 +61,7 @@ func (s Scheduled) Plain(w io.Writer) {
 		fmt.Fprintf(w, "mode=%s\n", s.Mode)
 		fmt.Fprintf(w, "payload=%s\n", s.Payload)
 		fmt.Fprintf(w, "id=%s\n", s.ID)
-		fmt.Fprintf(w, "unit=%s.timer\n", s.Unit)
+		fmt.Fprintf(w, "unit=%s\n", s.Unit)
 		fmt.Fprintf(w, "persistent=%d\n", persistent)
 		fmt.Fprintf(w, "if_busy=%s\n", s.IfBusy)
 		fmt.Fprintf(w, "recover=%s\n", s.Recover)
@@ -71,7 +71,7 @@ func (s Scheduled) Plain(w io.Writer) {
 		return
 	}
 	fmt.Fprintf(w, "id=%s\n", s.ID)
-	fmt.Fprintf(w, "unit=%s.timer\n", s.Unit)
+	fmt.Fprintf(w, "unit=%s\n", s.Unit)
 	fmt.Fprintf(w, "target=%s\n", tgt)
 	fmt.Fprintf(w, "at=%s\n", s.At)
 	fmt.Fprintf(w, "delay_seconds=%d\n", s.Delay)
@@ -387,12 +387,8 @@ func (p palette) sent(message, keys string) span {
 // JSON writes s as one object. st is the target's usage limit; a None state is
 // left out. note is the picker's short description of it.
 func (s Scheduled) JSON(w io.Writer, st limit.Status, note string) {
-	unit := s.Unit
-	if !strings.HasSuffix(unit, ".timer") {
-		unit += ".timer"
-	}
 	out := scheduledJSON{
-		DryRun: s.DryRun, ID: s.ID, Unit: unit,
+		DryRun: s.DryRun, ID: s.ID, Unit: s.Unit,
 		At: s.At, RunAt: s.RunAt, Delay: s.Delay,
 		Mode: s.Mode, Payload: s.Payload, Persistent: s.Persistent,
 		IfBusy: s.IfBusy, Recover: s.Recover, Grace: s.Grace,
