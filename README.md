@@ -228,8 +228,10 @@ Completed jobs clean up their own units and state.
 Status inspection gives timer status and any confirming unit-state query a
 shared 30-second budget, then gives the journal 10 seconds. Command pipe drains
 are limited to one second. Inactive, failed, and missing units are normal
-inspection results when their unit properties confirm the condition; a missing
-state file is normal for a completed job. Collection failures (including missing
+inspection results when their unit properties confirm the condition, including
+a unit whose file was removed; stderr from such a status read, like systemd's
+"changed on disk" note, is a warning. A missing state file is normal for a
+completed job. Collection failures (including missing
 commands, deadlines, transport errors, unreadable state, or invalid state JSON)
 exit 1, name the failing source, and retain partial output.
 

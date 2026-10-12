@@ -353,12 +353,52 @@ WantedBy=timers.target
 // is-active responses; mutating callers receive the diagnostics as errors.
 type Systemctl struct{}
 
+// command is how every systemd tool runs: under ctx, in the C locale so
+// diagnostics can be matched, and waiting at most drain for pipes a child
+// process still holds after the command exits.
+func command(ctx context.Context, drain time.Duration, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = drain
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	return cmd
+}
+
 func systemctlCommand(args ...string) (*exec.Cmd, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	cmd := exec.CommandContext(ctx, "systemctl", append([]string{"--user"}, args...)...)
-	cmd.WaitDelay = time.Second
-	cmd.Env = append(os.Environ(), "LC_ALL=C")
-	return cmd, cancel
+	return command(ctx, time.Second, "systemctl", append([]string{"--user"}, args...)...), cancel
+}
+
+// Result is one command's separate output streams and how it ended. ExitCode
+// is nil when the command never ran or was killed.
+type Result struct {
+	Stdout, Stderr string
+	Err            error
+	ExitCode       *int
+}
+
+// Run runs a systemd tool such as journalctl under ctx, keeping stdout and
+// stderr apart. A context deadline is reported as the error even when the
+// killed command exited in some other way.
+func Run(ctx context.Context, drain time.Duration, name string, args ...string) Result {
+	cmd := command(ctx, drain, name, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	r := Result{Stdout: stdout.String(), Stderr: stderr.String(), Err: err}
+	if cmd.ProcessState != nil && cmd.ProcessState.ExitCode() >= 0 {
+		code := cmd.ProcessState.ExitCode()
+		r.ExitCode = &code
+	}
+	return r
+}
+
+// Capture runs systemctl --user under the caller's deadline, for inspection
+// that needs the exit status and stderr separately.
+func (Systemctl) Capture(ctx context.Context, drain time.Duration, args ...string) Result {
+	return Run(ctx, drain, "systemctl", append([]string{"--user"}, args...)...)
 }
 func (Systemctl) Quiet(args ...string) error {
 	cmd, cancel := systemctlCommand(args...)

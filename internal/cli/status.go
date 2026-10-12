@@ -37,12 +37,6 @@ type statusResult struct {
 	journalOutput string
 }
 
-type statusCommand struct {
-	stdout, stderr string
-	err            error
-	exitCode       *int
-}
-
 // Both modes use the same bounded collector. A failed unit is an observation;
 // a failed collection returns an error after the partial result is rendered.
 func (a *app) status(id string) error {
@@ -115,89 +109,72 @@ func (a *app) collectStatus(id string) statusResult {
 	}
 	unit := job.UnitPrefix + "-" + id + ".timer"
 	timerCtx, cancel := context.WithTimeout(context.Background(), limits.timer)
-	timer := runStatusCommand(timerCtx, limits.drain, "systemctl", "--user", "status", unit, "--no-pager")
-	r.timerOutput = timer.stdout
-	r.Timer = strings.TrimRight(timer.stdout+timer.stderr, "\n")
-	if timer.err != nil {
+	timer := a.sys.Capture(timerCtx, limits.drain, "status", unit, "--no-pager")
+	r.timerOutput = timer.Stdout
+	r.Timer = strings.TrimRight(timer.Stdout+timer.Stderr, "\n")
+	if timer.Err != nil {
 		normal := false
-		if timer.exitCode != nil && (*timer.exitCode == 3 || *timer.exitCode == 4) && timerCtx.Err() == nil && !errors.Is(timer.err, exec.ErrWaitDelay) {
-			show := runStatusCommand(timerCtx, limits.drain, "systemctl", "--user", "show", unit, "--property=LoadState,ActiveState,SubState", "--no-pager")
+		if timer.ExitCode != nil && (*timer.ExitCode == 3 || *timer.ExitCode == 4) && timerCtx.Err() == nil && !errors.Is(timer.Err, exec.ErrWaitDelay) {
+			show := a.sys.Capture(timerCtx, limits.drain, "show", unit, "--property=LoadState,ActiveState,SubState", "--no-pager")
 			normal = normalUnitStatus(timer, show, unit)
-			if show.err != nil && !normal {
+			if show.Err != nil && !normal {
 				r.Diagnostics = append(r.Diagnostics, commandDiagnostic("unit_state", show))
 			} else if !normal {
-				r.Diagnostics = append(r.Diagnostics, statusDiagnostic{Source: "unit_state", Severity: "error", Code: "invalid_response", Message: "Could not confirm the unit state from systemctl show.", Stderr: show.stderr, Output: show.stdout})
-			} else if show.stderr != "" {
+				r.Diagnostics = append(r.Diagnostics, statusDiagnostic{Source: "unit_state", Severity: "error", Code: "invalid_response", Message: "Could not confirm the unit state from systemctl show.", Stderr: show.Stderr, Output: show.Stdout})
+			} else if show.Stderr != "" {
 				r.Diagnostics = append(r.Diagnostics, commandWarning("unit_state", show))
 			}
 		}
 		if !normal {
 			r.Diagnostics = append(r.Diagnostics, commandDiagnostic("timer", timer))
-		} else if timer.stderr != "" {
+		} else if timer.Stderr != "" {
 			r.Diagnostics = append(r.Diagnostics, commandWarning("timer", timer))
 		}
-	} else if timer.stderr != "" {
+	} else if timer.Stderr != "" {
 		r.Diagnostics = append(r.Diagnostics, commandWarning("timer", timer))
 	}
 	cancel()
 	journalCtx, cancel := context.WithTimeout(context.Background(), limits.journal)
-	journal := runStatusCommand(journalCtx, limits.drain, "journalctl", "--user", "-u", job.UnitPrefix+"-"+id+".service", "--no-pager", "-n", "40")
+	journal := job.Run(journalCtx, limits.drain, "journalctl", "--user", "-u", job.UnitPrefix+"-"+id+".service", "--no-pager", "-n", "40")
 	cancel()
-	r.journalOutput = journal.stdout
-	r.Journal = strings.TrimRight(journal.stdout, "\n")
-	if journal.err != nil {
+	r.journalOutput = journal.Stdout
+	r.Journal = strings.TrimRight(journal.Stdout, "\n")
+	if journal.Err != nil {
 		r.Diagnostics = append(r.Diagnostics, commandDiagnostic("journal", journal))
-	} else if journal.stderr != "" {
+	} else if journal.Stderr != "" {
 		r.Diagnostics = append(r.Diagnostics, commandWarning("journal", journal))
 	}
 	return r
 }
 
-func runStatusCommand(ctx context.Context, drain time.Duration, name string, args ...string) statusCommand {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.WaitDelay = drain
-	cmd.Env = append(os.Environ(), "LC_ALL=C")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	if ctx.Err() != nil {
-		err = ctx.Err()
-	}
-	result := statusCommand{stdout: stdout.String(), stderr: stderr.String(), err: err}
-	if cmd.ProcessState != nil && cmd.ProcessState.ExitCode() >= 0 {
-		code := cmd.ProcessState.ExitCode()
-		result.exitCode = &code
-	}
-	return result
-}
-
-func commandDiagnostic(source string, result statusCommand) statusDiagnostic {
+func commandDiagnostic(source string, result job.Result) statusDiagnostic {
 	code := "command_failed"
 	switch {
-	case errors.Is(result.err, context.DeadlineExceeded):
+	case errors.Is(result.Err, context.DeadlineExceeded):
 		code = "timeout"
-	case errors.Is(result.err, exec.ErrWaitDelay):
+	case errors.Is(result.Err, exec.ErrWaitDelay):
 		code = "pipe_timeout"
-	case errors.Is(result.err, exec.ErrNotFound), errors.Is(result.err, os.ErrNotExist):
+	case errors.Is(result.Err, exec.ErrNotFound), errors.Is(result.Err, os.ErrNotExist):
 		code = "not_found"
 	}
-	message := result.err.Error()
-	if stderr := strings.TrimSpace(result.stderr); stderr != "" {
+	message := result.Err.Error()
+	if stderr := strings.TrimSpace(result.Stderr); stderr != "" {
 		message += ": " + stderr
 	}
-	return statusDiagnostic{Source: source, Severity: "error", Code: code, Message: message, ExitCode: result.exitCode, Stderr: result.stderr, Output: result.stdout}
+	return statusDiagnostic{Source: source, Severity: "error", Code: code, Message: message, ExitCode: result.ExitCode, Stderr: result.Stderr, Output: result.Stdout}
 }
 
-func commandWarning(source string, result statusCommand) statusDiagnostic {
-	return statusDiagnostic{Source: source, Severity: "warning", Code: "command_stderr", Message: strings.TrimSpace(result.stderr), ExitCode: result.exitCode, Stderr: result.stderr}
+func commandWarning(source string, result job.Result) statusDiagnostic {
+	return statusDiagnostic{Source: source, Severity: "warning", Code: "command_stderr", Message: strings.TrimSpace(result.Stderr), ExitCode: result.ExitCode, Stderr: result.Stderr}
 }
 
 // Status 3/4 can be a normal unit condition. Confirm properties separately;
-// transport failures, malformed replies, and unexpected stderr remain errors.
-func normalUnitStatus(status, show statusCommand, unit string) bool {
+// transport failures and malformed replies remain errors. Exit 3 means
+// systemctl reached the manager and printed the unit, so its stderr (such as
+// "changed on disk") is a warning once show confirms the state.
+func normalUnitStatus(status, show job.Result, unit string) bool {
 	properties := map[string]string{}
-	for _, line := range strings.Split(show.stdout, "\n") {
+	for _, line := range strings.Split(show.Stdout, "\n") {
 		if key, value, ok := strings.Cut(line, "="); ok {
 			properties[key] = value
 		}
@@ -206,24 +183,23 @@ func normalUnitStatus(status, show statusCommand, unit string) bool {
 	if load == "" || active == "" || sub == "" {
 		return false
 	}
-	if show.err != nil {
+	if show.Err != nil {
 		var exit *exec.ExitError
-		if !errors.As(show.err, &exit) || exit.ExitCode() != 4 || load != "not-found" {
+		if !errors.As(show.Err, &exit) || exit.ExitCode() != 4 || load != "not-found" {
 			return false
 		}
 	}
-	if *status.exitCode == 4 {
+	if *status.ExitCode == 4 {
 		if load != "not-found" {
 			return false
 		}
-		stderr := strings.TrimSpace(status.stderr)
+		stderr := strings.TrimSpace(status.Stderr)
 		return stderr == "" || stderr == "Unit "+unit+" could not be found."
 	}
-	if status.stderr != "" {
-		return false
-	}
+	// A failed or still-active unit whose file is gone loads as not-found
+	// and is printed with exit 3 rather than 4.
 	switch load {
-	case "loaded", "masked", "error", "bad-setting":
+	case "loaded", "not-found", "masked", "error", "bad-setting":
 	default:
 		return false
 	}
