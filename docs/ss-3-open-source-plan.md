@@ -107,7 +107,7 @@ Stated in the walkthrough; the owner did not object.
 | --- | --- | --- | --- |
 | P1 | A tree that is safe to publish, under its final name | `ss-3-p1` | complete in ss-3 |
 | P2 | Timer operations behind one seam, behaviour unchanged | `ss-3-p2` | complete in ss-3 |
-| P3 | A launchd backend for macOS | `ss-3-p3` | not started |
+| P3 | A launchd backend for macOS | `ss-3-p3` | approved 2026-10-12, in progress |
 | P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | not started |
 | P5 | The Herdr plugin | `ss-3-p5` | not started |
 | P6 | CI and release automation | `ss-3-p6` | not started |
@@ -369,23 +369,74 @@ writes its own messages rather than translating these.
 
 ### P3 — macOS backend
 
-Add the launchd implementation in a macOS-only file, the per-platform terminal
-constant, `gdate`, and a per-job log file that `--status` reads in place of the
-journal. Points to settle in the walkthrough, none of them testable from Linux:
+A launchd file that provides the same functions as the systemd one, plus the
+small portable changes a Mac build needs. None of it can be run on the Linux
+development machine, so how it is tested is part of the design.
 
-- launchd's calendar trigger has no seconds and no year. The worker would wait
-  for the stored firing time and the job must remove itself after one run.
-- A launchd job is timer and service in one, so the worker cannot disable its
-  own trigger the way a systemd service disables its timer.
-- launchd runs a missed calendar job on wake. The worker would decide between
-  running and skipping from the stored firing time and `--persistent`.
-- Job files under `~/Library/LaunchAgents` survive a restart but may raise a
-  background-item notice per job; files elsewhere last only for the login
-  session.
-- launchd starts jobs with a minimal `PATH`, so tool paths must be absolute.
+#### Code check — 2026-10-12
 
-→ verify: Go tests against a launchd stand-in; a macOS cross-build added to the
-gate; one real launchd job aimed at the stand-in Herdr on the owner's Mac.
+- Four launchd behaviours could not be confirmed from documentation: whether
+  a job can unload itself, whether macOS shows a notice for each job file, how
+  late a calendar job starts, and what environment a job gets.
+- launchd's calendar trigger has no seconds and no year. The worker has to
+  wait out the seconds, a job due within the current minute needs a direct
+  start, and a skipped job would fire a year later unless guarded.
+- Six test files compile only on Linux: all the tests for scheduling,
+  delivery, and the job lifecycle. Tests in nine other packages are portable.
+- A cross-build shows that Mac-only code compiles and nothing more.
+- `tools/build` passes a GNU-only flag to `base64`, so the project cannot be
+  built on a Mac with its own script.
+- Receipts add `.timer` to the unit name in three places in `internal/show`.
+- The worker never parses a time, so GNU `date` is needed only while
+  scheduling, where the user's shell provides it.
+
+#### Decisions settled 2026-10-12
+
+The owner agreed to the P3 walkthrough and instructed build.
+
+1. **Test on GitHub's macOS runners while building.** The phase branch is
+   pushed to the private repository with a small macOS workflow, which runs
+   the Mac tests and a real launchd job. This is the owner's word to push
+   that branch; it uses Actions minutes.
+2. **Missed jobs.** The Linux rule: asleep at the time means sent on wake;
+   switched off or logged out means skipped unless `--persistent`. In
+   addition, a job more than 7 days late is never sent.
+3. **Job files.** `~/Library/LaunchAgents`, the only place that survives a
+   restart. If the run on the owner's Mac shows a notice for every job, the
+   alternative comes back to the owner before the phase is merged.
+
+Assumptions the owner did not object to: output keeps the keys `unit` and
+`unit_files`, whose values on a Mac name the launchd job and its file; the
+systemd test files are marked Linux-only and the launchd file gets its own
+tests against a stand-in `launchctl`; `--list` says `active` or `gone` on both
+systems; each job logs to a file beside its state and `--status` shows its
+last 40 lines; README and `AGENTS.md` change only where they say Linux only.
+
+#### Steps
+
+1. Portable groundwork: the terminal constant, `gdate` on macOS, a portable
+   `tools/build`, the display name, and Linux-only marks.
+   → verify: `tools/check` passes; parity gives 41 identical, 37 known, 0
+   unexpected.
+2. A probe workflow on a macOS runner answers the four unknowns.
+   → verify: the answers are recorded here before any design depends on them.
+3. The launchd file: render, arm, armed, inspect, remove, rollback, cleanup,
+   sweep.
+   → verify: its tests pass on the runner; a macOS cross-vet joins
+   `tools/check`.
+4. Worker timing: wait out the seconds and apply the missed-job rule.
+   → verify: tests on both systems; parity unchanged.
+5. A real launchd job aimed at the stand-in Herdr, on the runner.
+   → verify: it fires within the minute, delivers once, and leaves nothing
+   behind.
+6. The same script on the owner's Mac.
+   → verify: the owner sees it pass and reports whether a notice appeared.
+7. Full gate and As built.
+   → verify: counts quoted for both systems.
+
+The phase closes only after step 6. Not included: the Homebrew formula (P4),
+the permanent CI workflow (P6), and trying a real pane, which stays the
+owner's to do by hand.
 
 ### P4 — Versions and installers
 
