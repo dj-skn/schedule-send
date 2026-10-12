@@ -3,8 +3,8 @@
 ## Status
 
 Plan recorded on 2026-10-12 on story branch `ss-3`, starting from `main`. P1
-is built and verified on `ss-3-p1`; this update accompanies its fast-forward
-into `ss-3`. P2 to P8 are not started. Nothing is merged into `main`,
+and P2 are complete in `ss-3`; this update accompanies P2's fast-forward from
+`ss-3-p2`. P3 to P8 are not started. Nothing is merged into `main`,
 installed, published, or pushed.
 
 The owner settled the story's decisions on 2026-10-12 and asked for this plan.
@@ -106,7 +106,7 @@ Stated in the walkthrough; the owner did not object.
 | Phase | Outcome | Branch | Status |
 | --- | --- | --- | --- |
 | P1 | A tree that is safe to publish, under its final name | `ss-3-p1` | complete in ss-3 |
-| P2 | Timer operations behind one seam, behaviour unchanged | `ss-3-p2` | approved 2026-10-12, in progress |
+| P2 | Timer operations behind one seam, behaviour unchanged | `ss-3-p2` | complete in ss-3 |
 | P3 | A launchd backend for macOS | `ss-3-p3` | not started |
 | P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | not started |
 | P5 | The Herdr plugin | `ss-3-p5` | not started |
@@ -321,6 +321,51 @@ unchanged.
 
 Not included: any macOS code, the per-platform terminal constant, making the
 tests run on a Mac, and the output wording. All of those are P3.
+
+#### As built — 2026-10-12
+
+- `internal/job/job.go` holds what every platform needs: state files, the
+  lock, atomic writes, the command runner, and the shapes `--status` reports
+  (`Diagnostic`, `Inspection`). `internal/job/systemd_linux.go` holds
+  everything that names systemd.
+- The split itself was a pure move. Compared line by line, the only
+  differences were five comments, the import blocks, and the default unit
+  directory, which the portable file now asks the platform file for.
+- A platform supplies a `Scheduler` and a `Trigger` type and eleven
+  functions: `Available`, `Files`, `Render`, `Arm`, `Armed`, `Inspect`, the
+  four lifecycle methods `Remove`, `Rollback`, `Cleanup`, `Sweep`, and
+  `defaultUnitDir`. On Linux `Scheduler` is another name for the existing
+  `Systemctl`, so every name the tests call still exists.
+- The CLI and the worker hold a `job.Scheduler`. `internal/cli` no longer
+  runs a command or names a unit: its `os/exec` import is gone, and status
+  inspection shrank from 212 lines to 91.
+- Messages are produced in the Linux file with their wording unchanged. `Arm`
+  reports whether enabling was attempted, as the inline code did, and the
+  service is still rendered before the job is reserved.
+
+Measured on the final tree:
+
+- `tools/check`: exit 0; all 12 tested packages passed, 383 tests and subtests.
+- `tools/parity`: 41 identical, 37 known differences, 0 unexpected, after
+  steps 2 and 3.
+- The phase's diff touches no test file.
+- Seam check, in a scratch copy that was not committed: with a stub of those
+  eleven functions and P3's two-file terminal constant, the program
+  cross-builds for macOS on ARM64. Without the stub, the first thing missing
+  is `defaultUnitDir`.
+
+Differs from the walkthrough: it described six operations. Counted as
+functions a platform must provide there are eleven, because removal is four
+functions and arming is two.
+
+Still systemd-worded outside the Linux file, by decision: the receipt and
+status wording in `internal/show`, the state key `unit`, the `UnitDir` field,
+and the test files, which run only against the `systemctl` stand-in.
+
+For P3: the launchd file implements the same eleven functions. The tests need
+a launchd stand-in or a Linux-only marking before they can be vetted for
+macOS. `Available`, `Arm`, and `Inspect` return user-facing wording, so P3
+writes its own messages rather than translating these.
 
 ### P3 — macOS backend
 
