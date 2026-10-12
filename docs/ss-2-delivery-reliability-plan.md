@@ -6,7 +6,7 @@ Plan recorded on 2026-10-11 on story branch `ss-2`, starting from `master`
 at `034c9de`. P1–P3 are complete in `ss-2`. P4 is built and verified on
 `ss-2-p4`; this update accompanies its fast-forward into `ss-2`. All four
 phases are complete after that fast-forward. Nothing is installed, merged
-into master, or pushed.
+into master, or pushed. Fixes from the PR #1 review are recorded at the end.
 
 The owner approved and instructed builds for P1, P2, and P3 on 2026-10-11.
 The owner also agreed to the P4 recommendations and instructed build on
@@ -467,3 +467,49 @@ use main. Installer, hook setup, automatic installation guards, and isolated
 hook fixtures are updated on ss-2; README and AGENTS.md use main. Earlier
 master references above describe the historical phase builds. The phase table
 now reflects the completed story. No story merge or installation is included.
+
+## Review fixes — 2026-10-12
+
+The owner asked for every finding from the PR #1 review to be fixed, with
+main as the project's branch. Built on top of ss-2 in six commits:
+
+- **Deploy branch.** `tools/main-checkout` is now the only place that names
+  main; install, hook setup and automatic installation call it. A main
+  checkout still on master gets a `git branch -m master main` hint instead of
+  silently skipping. The Go refusal message no longer names a branch.
+- **ExecStart.** `installpath.Check` is the one rule set for recorded paths and
+  now rejects `=`, which GNU env reads as an assignment even after `--`
+  (reproduced with env 9.4). `tools/build` runs it through a small command and
+  resolves OUTPUT relative to the caller. ServiceUnit escapes `$` as `$$`
+  instead of using the `:` prefix, which needs systemd 249. The recorded path
+  must be a regular file, not a symlink.
+- **Recovery Enter.** A failed `agent get` now returns `herdr.Unreadable`
+  rather than "unknown", and the dialog check stops the ladder on it. A
+  reported "unknown" status still retries. The keys rung checks once.
+- **Status.** Exit-3 stderr is a warning once show confirms the unit state,
+  and a not-found failed unit is accepted. Status runs commands through
+  `job.Run` and `Systemctl.Capture`.
+- **Dry run.** would_run names the installed executable; a build that cannot
+  arm warns and leaves it empty. It names the program and arguments rather
+  than the env wrapper, so dry-run parity with the zsh baseline is unchanged.
+- **Malformed state.** One table holds the numeric bounds for Load and
+  Validate. Load returns the fields it decoded with its error. The worker
+  notifies through Herdr (honouring a quiet flag that loaded) and keeps the
+  files; `--list` shows the job as `invalid` with an additive JSON `error`.
+
+Two earlier P3/P4 outcomes change on the owner's instruction: refused state
+now raises a notification (P3 had zero Herdr connections) and is listed as
+invalid (P3 skipped it), and exit-3 stderr is a warning (P4 treated it as a
+transport failure). Rejecting decimal notation and never deleting or
+delivering malformed jobs are unchanged.
+
+Verification: `tools/check` exit 0, with all 12 tested Go packages, vet,
+formatting, shim/shell syntax and hook checks. Full `tools/parity` exit 0: 41
+identical, 37 documented, 0 unexpected, matching the ss-2 head run the same
+way. The `zsh-baseline` tag is not on GitHub, so parity ran against the last
+full zsh script ("feat: schedule a resume from the agent's usage-limit
+notice") with `LANG=C.UTF-8`; under the C locale zsh truncates multibyte
+excerpts by bytes and three fire-draft cases differ on the ss-2 head too.
+`systemd-analyze verify` (systemd 255) accepts the new ExecStart; `$$`
+unescaping at fire time and pre-249 systemd were not exercised, since the
+container has no systemd manager. Nothing is installed or merged into main.

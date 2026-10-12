@@ -48,8 +48,9 @@ Build/install needs Go 1.27.1+, Git, `flock`, and GNU coreutils (`base64`, `tr`)
   remove existing keys. Validate required fields before delivering.
 - Recheck target identity and working directory before sending, including
   after busy waits. Treat Herdr JSON error replies as failures even with exit 0.
-- A screen-read failure is not proof of submission. Retry Enter only with
-  fresh draft evidence; never resend text or answer a dialog as recovery.
+- A screen-read failure is not proof of submission, and a failed lifecycle
+  read is not proof that no dialog is open. Retry Enter only with fresh draft
+  evidence; never resend text or answer a dialog as recovery.
 - Preserve exclusive job reservation, atomic file publication, rollback, and
   honest cancellation errors. Keep hidden lock files to retain inode identity.
 - Store new timer instants in explicit UTC while keeping human output local.
