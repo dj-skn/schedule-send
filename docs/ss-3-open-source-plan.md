@@ -2,8 +2,10 @@
 
 ## Status
 
-Plan recorded on 2026-10-12 on story branch `ss-3`, starting from `main`. No
-phase is built. Nothing is merged, installed, published, or pushed.
+Plan recorded on 2026-10-12 on story branch `ss-3`, starting from `main`. P1
+is built and verified on `ss-3-p1`; this update accompanies its fast-forward
+into `ss-3`. P2 to P8 are not started. Nothing is merged into `main`,
+installed, published, or pushed.
 
 The owner settled the story's decisions on 2026-10-12 and asked for this plan.
 That is not a build instruction: every phase still gets its own source check,
@@ -103,7 +105,7 @@ Stated in the walkthrough; the owner did not object.
 
 | Phase | Outcome | Branch | Status |
 | --- | --- | --- | --- |
-| P1 | A tree that is safe to publish, under its final name | `ss-3-p1` | approved 2026-10-12, in progress |
+| P1 | A tree that is safe to publish, under its final name | `ss-3-p1` | complete in ss-3 |
 | P2 | Timer operations behind one seam, behaviour unchanged | `ss-3-p2` | not started |
 | P3 | A launchd backend for macOS | `ss-3-p3` | not started |
 | P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | not started |
@@ -195,6 +197,65 @@ rewrites it.
 Not included: the README rewrite (P7), `--version` (P4), the git history and
 anything on GitHub (P8).
 
+#### As built — 2026-10-12
+
+- The four screens are invented conversation around the lines the detectors
+  read, which are unchanged: the limit notices, the usage figures, the prompt
+  boxes, and the rules. Each file keeps its line count. The two listings and
+  the job fixture carry invented session and terminal identifiers, the same in
+  both listings for the same pane.
+- Ten private names map to stand-ins of the same length across seven Go test
+  files and `tools/parity`, so no column-aligned expectation moved. The home
+  directory in tests is `/home/dev`. The map and the list of private terms are
+  kept outside the repository.
+- The usage text and the zsh baseline name a neutral project in their two
+  example lines. Those two lines are the only difference between
+  `testdata/baseline/schedule-send.zsh` and the script at the `zsh-baseline`
+  tag. `tools/parity` reads the file; `PARITY_REF` still selects a revision.
+- The module is `github.com/dj-skn/schedule-send`, in 43 import lines, the
+  linker flag in `tools/build`, and the test that pins that flag.
+- `AGENTS.md` and the README name no personal path and describe the baseline
+  as a file. The SS-1 and SS-2 plans are removed from the tree.
+- `LICENSE` (MIT), `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, and
+  `CODE_OF_CONDUCT.md` exist. The contributing note leaves releasing out
+  until P6 builds that process.
+
+Measured on the final tree:
+
+- `tools/check`: exit 0; all 12 tested packages passed, 383 tests and subtests,
+  the same number as on `main`.
+- `tools/parity`: 41 identical, 37 known differences, 0 unexpected, from the
+  file and, at step 3, from the tag as well.
+- Private terms: 68 terms, including the owner's private repository names;
+  zero hits in the tracked tree, this document included.
+- Secrets: 11 patterns with zero real hits (one match is a variable named
+  `gaugeToken`), and gitleaks in a container found no leaks in 448 KB of
+  tracked files. The only address in the tree is the hook tests'
+  `hooks@example.invalid`.
+
+Found while building:
+
+- **A test depended on the developer's machine.** The installation build test
+  runs `tools/build` after the harness points `HOME` at a fixed fake path, and
+  Go looked for its build cache there. It had passed only because the fake
+  path was the developer's real home directory. The test now pins Go's caches
+  first. It was confirmed to pass under an unrelated `HOME`. This would have
+  failed in CI.
+- **The security note depends on a repository setting.** `SECURITY.md` and the
+  code of conduct link to GitHub's private vulnerability reporting, which is
+  off by default. P8 must turn it on.
+- A session title and a folder name that refer to this project itself were
+  left in the fixtures; they are not private.
+
+Still to confirm by hand: the three links to `github.com/dj-skn/schedule-send`
+cannot resolve until P8 creates the repository.
+
+For later phases: CI (P6) needs neither a particular home directory nor the
+`zsh-baseline` tag. P4 and later add their user-visible changes under
+Unreleased in the changelog. P6 adds a Releasing section to the contributing
+note. P7 still has to move the main-checkout install out of the README's
+first screen. P3 has to update the guidance where it says Linux.
+
 ### P2 — Timer seam
 
 Move unit rendering, arming, disarming, state, status, and sweeping behind one
@@ -275,8 +336,9 @@ Mac with Docker.
 Each outward step waits for the owner's word: merge `ss-3` into `main`; create
 the private `dj-skn/schedule-send`; push one commit built from that tree;
 switch the local checkout to it; set the description, homepage, and topics
-(`herdr` and `herdr-plugin` among them); add the tap token; confirm CI passes;
-make the repository public; tag `v0.1.0`.
+(`herdr` and `herdr-plugin` among them); turn on private vulnerability
+reporting, which the security note links to; add the tap token; confirm CI
+passes; make the repository public; tag `v0.1.0`.
 
 → verify: the badges are green; Homebrew installs on a Mac and in a Linux
 container; the curl script installs on a clean Linux machine; the plugin
