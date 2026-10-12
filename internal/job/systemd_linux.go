@@ -19,6 +19,78 @@ import (
 // This file is the systemd --user side of a job: the timer and service units
 // it is armed with, and the order they are stopped, removed, and reloaded in.
 
+// Scheduler is what arms, inspects, and removes a job's timer on this
+// platform: systemctl --user. Each platform's file defines one with the same
+// methods, and the build picks it.
+type Scheduler = Systemctl
+
+// Available says why jobs cannot be scheduled here, as the message shown to
+// the user. Arming also needs /usr/bin/env, which every service runs through.
+func (s Systemctl) Available(arming bool) error {
+	if arming {
+		fi, err := os.Stat("/usr/bin/env")
+		if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm()&0111 == 0 {
+			return errors.New("/usr/bin/env is required to execute scheduled jobs (GNU coreutils).")
+		}
+	}
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		return errors.New("systemctl is required.")
+	}
+	// is-system-running exits non-zero for "degraded", which merely means some
+	// unrelated unit failed earlier. Only a manager we cannot talk to at all is
+	// a real blocker, and that prints nothing.
+	if s.Output("is-system-running") == "" {
+		return errors.New("systemd --user is not available for this account.")
+	}
+	return nil
+}
+
+// Files names what arming writes for a job, as a receipt shows it.
+func (Systemctl) Files(p Paths, id string) string {
+	return p.UnitDir + "/" + UnitPrefix + "-" + id + ".{service,timer}"
+}
+
+// Trigger is a job's rendered units, checked before the job is reserved.
+type Trigger struct{ id, service, timer string }
+
+// Render builds a job's units without touching the disk. pane and calendar
+// describe it, self is the installed executable it runs, and runAt is the
+// instant it fires, which the timer carries in UTC.
+func (Systemctl) Render(pane, calendar, self, id string, runAt int64, persistent bool) (Trigger, error) {
+	service, err := ServiceUnit(pane, calendar, self, id)
+	if err != nil {
+		return Trigger{}, err
+	}
+	utc := time.Unix(runAt, 0).UTC().Format("2006-01-02 15:04:05") + " UTC"
+	return Trigger{id: id, service: service, timer: TimerUnit(id, utc, persistent)}, nil
+}
+
+// Arm writes a job's units under p and enables its timer. attempted reports
+// whether enabling was tried, which decides how a failure is rolled back. An
+// error is the message shown to the user.
+func (s Systemctl) Arm(p Paths, t Trigger) (attempted bool, err error) {
+	// Unit files live on disk rather than being transient, because transient
+	// units are written to /run and would be lost on reboot.
+	if err := os.MkdirAll(p.UnitDir, 0o777); err != nil {
+		return false, fmt.Errorf("Could not create %s: %v", p.UnitDir, err)
+	}
+	service, timer := p.UnitPath(t.id, "service"), p.UnitPath(t.id, "timer")
+	if err := AtomicWrite(service, []byte(t.service), 0o644); err != nil {
+		return false, fmt.Errorf("Could not write %s: %v", service, err)
+	}
+	if err := AtomicWrite(timer, []byte(t.timer), 0o644); err != nil {
+		return false, fmt.Errorf("Could not write %s: %v", timer, err)
+	}
+	if err := s.Quiet("daemon-reload"); err != nil {
+		return false, fmt.Errorf("systemctl daemon-reload failed: %v", err)
+	}
+	unit := UnitPrefix + "-" + t.id
+	if err := s.Quiet("enable", "--now", unit+".timer"); err != nil {
+		return true, fmt.Errorf("Could not arm %s.timer: %v", unit, err)
+	}
+	return true, nil
+}
+
 // defaultUnitDir is where systemd --user reads this account's units.
 func defaultUnitDir(home, config string) string { return config + "/systemd/user" }
 

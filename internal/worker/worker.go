@@ -53,7 +53,7 @@ func (realClock) Sleep(d time.Duration) { time.Sleep(d) }
 type Worker struct {
 	ID    string
 	Paths job.Paths
-	Sys   job.Systemctl
+	Sys   job.Scheduler
 	Out   io.Writer
 	Err   io.Writer
 	Clock Clock

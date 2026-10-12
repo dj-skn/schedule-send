@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -75,7 +74,7 @@ type app struct {
 	openTTY        func() (io.ReadWriteCloser, error)
 	clock          func() int64 // the time now, as an epoch; run sets it when nil
 	paths          job.Paths
-	sys            job.Systemctl
+	sys            job.Scheduler
 	h              herdr.Client
 	selfPane       string                 // HERDR_PANE_ID
 	installedPath  func() (string, error) // private injection for isolated tests
@@ -370,24 +369,11 @@ func (a *app) run(args []string) (retErr error) {
 		resolve = installpath.Resolve
 	}
 	installed, installErr := resolve()
-	if !o.dryRun {
-		if installErr != nil {
-			return die("Cannot arm a job: %v. %s", installErr, installHint)
-		}
-		fi, err := os.Stat("/usr/bin/env")
-		if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm()&0111 == 0 {
-			return die("/usr/bin/env is required to execute scheduled jobs (GNU coreutils).")
-		}
+	if !o.dryRun && installErr != nil {
+		return die("Cannot arm a job: %v. %s", installErr, installHint)
 	}
-
-	if _, err := exec.LookPath("systemctl"); err != nil {
-		return die("systemctl is required.")
-	}
-	// is-system-running exits non-zero for "degraded", which merely means some
-	// unrelated unit failed earlier. Only a manager we cannot talk to at all is
-	// a real blocker, and that prints nothing.
-	if a.sys.Output("is-system-running") == "" {
-		return die("systemd --user is not available for this account.")
+	if err := a.sys.Available(!o.dryRun); err != nil {
+		return die("%v", err)
 	}
 	if err := a.locateHerdr(); err != nil {
 		return err
@@ -481,7 +467,7 @@ func (a *app) run(args []string) (retErr error) {
 		At: calendar, RunAt: runAt, Delay: delay,
 		Mode: mode, Payload: payload, Message: o.message, Keys: o.keys,
 		Persistent: o.persistent, IfBusy: o.ifBusy, Recover: o.recover, Grace: o.grace,
-		UnitFiles: a.paths.UnitDir + "/" + unit + ".{service,timer}",
+		UnitFiles: a.sys.Files(a.paths, id),
 	}
 	// The program and arguments the timer runs; the unit wraps them in
 	// /usr/bin/env with systemd escaping.
@@ -497,7 +483,7 @@ func (a *app) run(args []string) (retErr error) {
 		return nil
 	}
 
-	serviceText, err := job.ServiceUnit(t.Pane, calendar, installed, id)
+	trigger, err := a.sys.Render(t.Pane, calendar, installed, id, runAt, o.persistent)
 	if err != nil {
 		return die("Could not render the service: %v", err)
 	}
@@ -536,24 +522,8 @@ func (a *app) run(args []string) (retErr error) {
 		}
 	}()
 
-	// Unit files live on disk rather than being transient, because transient
-	// units are written to /run and would be lost on reboot.
-	if err := os.MkdirAll(a.paths.UnitDir, 0o777); err != nil {
-		return die("Could not create %s: %v", a.paths.UnitDir, err)
-	}
-	service, timer := a.paths.UnitPath(id, "service"), a.paths.UnitPath(id, "timer")
-	if err := job.AtomicWrite(service, []byte(serviceText), 0o644); err != nil {
-		return die("Could not write %s: %v", service, err)
-	}
-	if err := job.AtomicWrite(timer, []byte(job.TimerUnit(id, time.Unix(runAt, 0).UTC().Format(when.Calendar)+" UTC", o.persistent)), 0o644); err != nil {
-		return die("Could not write %s: %v", timer, err)
-	}
-	if err := a.sys.Quiet("daemon-reload"); err != nil {
-		return die("systemctl daemon-reload failed: %v", err)
-	}
-	activationAttempted = true
-	if err := a.sys.Quiet("enable", "--now", unit+".timer"); err != nil {
-		return die("Could not arm %s.timer: %v", unit, err)
+	if activationAttempted, err = a.sys.Arm(a.paths, trigger); err != nil {
+		return die("%v", err)
 	}
 	// Rendering may read panes again; release the reservation once arming is
 	// settled, before an immediately firing worker needs to clean up.
