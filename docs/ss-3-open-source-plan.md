@@ -338,7 +338,7 @@ tests run on a Mac, and the output wording. All of those are P3.
   `Systemctl`, so every name the tests call still exists.
 - The CLI and the worker hold a `job.Scheduler`. `internal/cli` no longer
   runs a command or names a unit: its `os/exec` import is gone, and status
-  inspection shrank from 212 lines to 91.
+  inspection shrank from 212 lines to 105.
 - Messages are produced in the Linux file with their wording unchanged. `Arm`
   reports whether enabling was attempted, as the inline code did, and the
   service is still rendered before the job is reserved.
