@@ -9,11 +9,16 @@
 #   tools/parity NAME...    only these
 set -uo pipefail
 root=${0:A:h:h}
-ref_commit=${PARITY_REF:-zsh-baseline}
 work=$(mktemp -d)
 trap 'rm -rf $work' EXIT
 
-git -C $root show "${ref_commit}:schedule-send.zsh" > $work/ref.zsh || exit 1
+# The zsh script is kept as a file, so parity needs no tag or history.
+# PARITY_REF compares against the script at a Git revision instead.
+if [[ -n ${PARITY_REF:-} ]]; then
+  git -C $root show "${PARITY_REF}:schedule-send.zsh" > $work/ref.zsh || exit 1
+else
+  cp $root/testdata/baseline/schedule-send.zsh $work/ref.zsh || exit 1
+fi
 chmod +x $work/ref.zsh
 (cd $root && tools/build $work/go-bin $work/go-bin) || exit 1
 
