@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"schedule-send/internal/herdr"
 	"schedule-send/internal/job"
 	"schedule-send/internal/target"
 )
@@ -380,6 +381,11 @@ func TestRecoveryFocusTransitions(t *testing.T) {
 			onFocus: func(f *fake) { f.status = "unknown" },
 			retry:   true,
 		},
+		{
+			name:    "unreadable lifecycle with draft",
+			onFocus: func(f *fake) { f.status = herdr.Unreadable },
+			failure: "Text is still unsent in wB:p1's composer:  ❯ carry on with the plan please",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t)
@@ -449,6 +455,29 @@ func TestDialogIsLeftAlone(t *testing.T) {
 	h.fire()
 	h.wantFailure("Agent in wB:p1 opened a dialog with the text unsent; it is left in the composer.")
 	h.wantCalls("wait wB:p1", "prompt wB:p1 carry on with the plan please")
+}
+
+// A failed lifecycle read is no evidence that a dialog is closed, so the
+// recovery Enter is withheld, while a reported "unknown" status still retries.
+func TestUnreadableLifecycleWithholdsEnter(t *testing.T) {
+	h := newHarness(t)
+	h.f.drops = 1
+	h.f.status = herdr.Unreadable
+	h.arm(agentJob(), text("carry on with the plan please"))
+	h.fire()
+	h.wantFailure("Text is still unsent in wB:p1's composer:  ❯ carry on with the plan please")
+	if !strings.Contains(h.err.String(), "Could not read the state of wB:p1, so Enter is not retried.\n") {
+		t.Errorf("stderr = %q", h.err.String())
+	}
+	h.wantCalls("wait wB:p1", "prompt wB:p1 carry on with the plan please")
+
+	h = newHarness(t)
+	h.f.drops = 1
+	h.f.status = "unknown"
+	h.arm(agentJob(), text("carry on with the plan please"))
+	h.fire()
+	h.wantCode(0)
+	h.wantCalls("wait wB:p1", "prompt wB:p1 carry on with the plan please", "agent send-keys wB:p1 enter")
 }
 
 func TestUnverifiableSendIsReportedNotGuessed(t *testing.T) {

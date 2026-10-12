@@ -228,14 +228,19 @@ func (c Client) Read(pane, source string, lines int) (string, error) {
 	return c.output(nil, "agent", "read", pane, "--source", source, "--lines", strconv.Itoa(lines))
 }
 
+// Unreadable is the status State reports when the query itself failed, which
+// is not the same as an agent Herdr reports as "unknown": a failed read says
+// nothing about whether a dialog is open.
+const Unreadable = "unreadable"
+
 // State is an agent's lifecycle status and its state_change_seq, a counter
 // herdr stamps whenever the agent's own status transitions. Seq is -1 when
-// herdr does not report it, and status "unknown" when the agent cannot be
-// read at all.
+// herdr does not report it. Status is "unknown" when herdr reports none, and
+// Unreadable when the agent cannot be read at all.
 func (c Client) State(pane string) (status string, seq int64) {
 	out, err := c.output(nil, "agent", "get", pane)
 	if err != nil {
-		return "unknown", -1
+		return Unreadable, -1
 	}
 	var v struct {
 		Result struct {
@@ -243,7 +248,7 @@ func (c Client) State(pane string) (status string, seq int64) {
 		} `json:"result"`
 	}
 	if json.Unmarshal([]byte(out), &v) != nil {
-		return "unknown", -1
+		return Unreadable, -1
 	}
 	seq = -1
 	if n, err := strconv.ParseInt(string(v.Result.Agent.StateChangeSeq), 10, 64); err == nil {

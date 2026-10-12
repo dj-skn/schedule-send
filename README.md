@@ -194,8 +194,9 @@ without waiting for an agent turn or verifying prompt submission.
 
 Agent text is sent once. The submission check reads the composer and agent
 lifecycle evidence; a visible draft outweighs a reported state change. Recovery
-presses Enter without resending the message, and stops if a dialog opens or
-fresh draft evidence is unavailable. A read failure cannot establish that a
+presses Enter without resending the message, and stops if a dialog opens,
+the agent's state cannot be read just before Enter, or fresh draft evidence is
+unavailable. A read failure cannot establish that a
 seen draft was submitted. A send with no usable submission evidence is logged
 as unverified; a known unsent draft fails the job.
 
