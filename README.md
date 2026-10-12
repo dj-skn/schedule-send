@@ -9,10 +9,11 @@ open. The target is checked again before delivery. Linux only.
 
 ## Install and automatic updates
 
-Build requirements: Go **1.27.1 or newer**, Git, and `flock`. Running the app
-requires Herdr, GNU `date`, and `systemctl --user`.
+Build requirements: Go **1.27.1 or newer**, Git, `flock`, and GNU coreutils
+(`base64` and `tr`). Running the app requires Herdr, GNU `date`, `/usr/bin/env` (GNU coreutils), and
+`systemctl --user`.
 
-From the main checkout on `master`, run once:
+From the main checkout on `main`, run once:
 
 ```zsh
 cd ~/src/schedule-send
@@ -24,8 +25,10 @@ schedule-send --help
 `tools/setup-hooks` enables this repository's tracked Git hooks and installs
 when needed. After a commit, merge/pull, checkout, or history rewrite, the
 hooks rebuild changed program or installer inputs on a **clean main checkout
-on `master`**. Documentation-only updates do not rebuild. Feature branches,
-linked worktrees, detached HEADs, and dirty checkouts are skipped.
+on `main`**. Documentation-only updates do not rebuild. Feature branches,
+linked worktrees, detached HEADs, and dirty checkouts are skipped. A main
+checkout still on `master` is skipped with a hint to run
+`git branch -m master main`.
 
 The hook compares committed input hashes with the installed build. Changes to
 `tools/install` itself trigger a rebuild. A failed build reports a retry
@@ -38,6 +41,20 @@ tools/install
 
 Installation builds `bin/schedule-send`, replaces it atomically, and links
 `~/.local/bin/schedule-send` to it. Only one installation can run at a time.
+Installer builds record the stable main-checkout binary path. Real scheduling
+requires running from that location (including through its symlink). Plain
+`go build`/`go run` builds and moved or copied binaries cannot arm jobs; run
+`tools/install` from the main checkout on `main` and invoke the installed
+command. Dry-run, management commands, and legacy timer firing remain
+available in plain builds. A dry run shows the installed executable in
+`would_run`; in a build that cannot arm, it warns and leaves `would_run` empty.
+
+Generated services invoke `/usr/bin/env --` with the quoted executable path.
+Percent specifiers and dollar signs are escaped (`%%`, `$$`), which also works
+on systemd releases older than the `:` prefix. The installed path must be a
+clean absolute UTF-8 path without control characters or `=` (env would read
+`=` as a variable assignment); `tools/build` and arming apply the same check.
+The recorded path must be the installed file itself, not a symlink.
 Already-scheduled jobs use the newly installed binary when they fire. The zsh
 shim remains so timers created before the Go rewrite still work.
 
@@ -180,8 +197,9 @@ without waiting for an agent turn or verifying prompt submission.
 
 Agent text is sent once. The submission check reads the composer and agent
 lifecycle evidence; a visible draft outweighs a reported state change. Recovery
-presses Enter without resending the message, and stops if a dialog opens or
-fresh draft evidence is unavailable. A read failure cannot establish that a
+presses Enter without resending the message, and stops if a dialog opens,
+the agent's state cannot be read just before Enter, or fresh draft evidence is
+unavailable. A read failure cannot establish that a
 seen draft was submitted. A send with no usable submission evidence is logged
 as unverified; a known unsent draft fails the job.
 
@@ -210,6 +228,16 @@ is missing. `--status` includes stored state, timer status, and recent journal
 entries. Cancellation stops the timer/service and removes the job's files.
 Completed jobs clean up their own units and state.
 
+Status inspection gives timer status and any confirming unit-state query a
+shared 30-second budget, then gives the journal 10 seconds. Command pipe drains
+are limited to one second. Inactive, failed, and missing units are normal
+inspection results when their unit properties confirm the condition, including
+a unit whose file was removed; stderr from such a status read, like systemd's
+"changed on disk" note, is a warning. A missing state file is normal for a
+completed job. Collection failures (including missing
+commands, deadlines, transport errors, unreadable state, or invalid state JSON)
+exit 1, name the failing source, and retain partial output.
+
 Jobs missed while the machine is down are skipped by default. Add
 `--persistent` when scheduling to run a missed job at the next boot.
 
@@ -237,6 +265,11 @@ JSON mode emits one result object on stdout and separate note/warning/error
 objects on stderr. Errors use `{"error":{"code":"...","message":"..."}}`,
 with `usage`, `not_found`, `ambiguous`, or `failed` codes. JSON does not disable
 interactive prompts; use explicit selectors and `--at` or `--auto` for scripts.
+Status JSON retains `state`, `timer`, `journal`, and optional `warning`, and adds
+optional `diagnostics` with `source`, `severity`, `code`, and `message`. Command
+diagnostics may include `exit_code`, `stderr`, and partial `output`. Even when
+inspection exits 1, stdout contains exactly one partial status result, with the
+usual error envelope on stderr. Command warnings alone do not cause exit 1.
 The internal worker's journal output remains plain text.
 
 ## Structure and storage
@@ -248,6 +281,7 @@ The internal worker's journal output remains plain text.
 | `internal/target`, `limit`, `notice`, `when` | Target matching, usage-limit detection, and time parsing. |
 | `internal/herdr`, `screen` | Herdr calls and terminal-screen interpretation. |
 | `internal/job` | State files, locking, timers, and cleanup. |
+| `internal/installpath` | The recorded installation path and the path rules `tools/build` shares. |
 | `internal/worker` | Delivery and submission verification. |
 | `internal/show`, `term` | Text/JSON output and terminal handling. |
 | `.githooks`, `tools` | Automatic installation, builds, and verification. |
@@ -256,7 +290,13 @@ State and messages live in `~/.local/state/herdr-send` (directory mode 700;
 new files mode 600). Units live in `~/.config/systemd/user`. `XDG_STATE_HOME`
 and `XDG_CONFIG_HOME` override those roots. State records the target identity,
 resolved Herdr executable, and, for new jobs, the firing epoch (`run_at`).
-Older job files remain supported.
+Older job files remain supported. Missing or null numeric fields retain legacy
+defaults: `force=0`, `quiet=0`, `grace=4`, and `run_at=0`. Supplied values must
+be JSON integer literals: force/quiet are 0–1, grace is 1–60, and run_at is a
+nonnegative 64-bit integer. Invalid state stops delivery, raises a Herdr
+notification unless the job loaded as quiet, and retains the job for
+inspection. `--list` warns and lists it with state `invalid` (JSON adds an
+`error` field), while `--status` shows the stored document.
 
 A pane/time pair identifies a job; duplicate scheduling is refused. Scheduling,
 cancellation, and cleanup share a per-job lock. Hidden lock files deliberately

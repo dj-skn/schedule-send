@@ -1,0 +1,19 @@
+#!/bin/sh
+# Succeed only in the main checkout on the deploy branch: armed timers run its
+# binary, so it must outlive feature worktrees. This is the one place that
+# names the deploy branch. With a command name, explain a refusal for it.
+set -eu
+deploy=main
+cd "$(dirname "$0")/.."
+root="$(pwd -P)"
+common="$(git rev-parse --path-format=absolute --git-common-dir)"
+branch="$(git symbolic-ref --quiet --short HEAD)" || branch=""
+[ "$root/.git" = "$common" ] || { [ "$#" -eq 0 ] || echo "Run $1 from the main checkout on $deploy." >&2; exit 1; }
+[ "$branch" != "$deploy" ] || exit 0
+if [ "$branch" = master ]; then
+  # Checkouts made before the rename would otherwise stop installing silently.
+  echo "schedule-send: this checkout is on master, but installs come from $deploy; run: git branch -m master $deploy" >&2
+elif [ "$#" -gt 0 ]; then
+  echo "Run $1 from the main checkout on $deploy." >&2
+fi
+exit 1

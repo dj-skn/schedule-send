@@ -71,7 +71,7 @@ func TestStateAndRead(t *testing.T) {
 	if st, seq := c.State("wB:p3"); st != "idle" || seq != 218 {
 		t.Errorf("State(wB:p3) = %s %d", st, seq)
 	}
-	if st, seq := c.State("wZ:p9"); st != "unknown" || seq != -1 {
+	if st, seq := c.State("wZ:p9"); st != Unreadable || seq != -1 {
 		t.Errorf("State of a missing agent = %s %d", st, seq)
 	}
 	if out, err := c.Read("wB:p1", "visible", 40); err != nil || !strings.Contains(out, "weekly limit") {
@@ -148,7 +148,7 @@ func TestExitZeroJSONErrors(t *testing.T) {
 					t.Errorf("%s error=%v, want no agent", name, err)
 				}
 			}
-			if status, seq := c.State("gone"); status != "unknown" || seq != -1 {
+			if status, seq := c.State("gone"); status != Unreadable || seq != -1 {
 				t.Errorf("State=%s %d", status, seq)
 			}
 		})

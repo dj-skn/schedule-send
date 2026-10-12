@@ -16,7 +16,10 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 	"unicode/utf8"
+
+	"schedule-send/internal/installpath"
 )
 
 // UnitPrefix names every unit this tool writes.
@@ -71,31 +74,60 @@ type State struct {
 	RunAt    int64  `json:"run_at,omitempty"`
 }
 
-// Load reads a state file. recover and grace default to "keys" and 4, so a
-// timer armed before they existed still fires.
+// numericFields are the integer controls, their legacy defaults, and their
+// bounds. Load and Validate both read this one table.
+var numericFields = []struct {
+	name          string
+	def, min, max int64
+	get           func(State) int64
+	set           func(*State, int64)
+}{
+	{"force", 0, 0, 1, func(s State) int64 { return int64(s.Force) }, func(s *State, v int64) { s.Force = int(v) }},
+	{"quiet", 0, 0, 1, func(s State) int64 { return int64(s.Quiet) }, func(s *State, v int64) { s.Quiet = int(v) }},
+	{"grace", 4, 1, 60, func(s State) int64 { return int64(s.Grace) }, func(s *State, v int64) { s.Grace = int(v) }},
+	{"run_at", 0, 0, 1<<63 - 1, func(s State) int64 { return s.RunAt }, func(s *State, v int64) { s.RunAt = v }},
+}
+
+// Load reads a state file, retaining defaults for absent/null optional fields.
+// Numeric fields use JSON integer literals and are range-checked before use.
+// On a field error Load still returns every field it could decode, with
+// defaults for the rest, so a refused job can be reported and listed; such a
+// state must never be delivered.
 func Load(path string) (State, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return State{}, err
 	}
-	var raw map[string]any
+	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return State{}, err
 	}
-	for _, key := range []string{"id", "kind", "pane_id", "agent", "cwd", "at", "mode", "keys", "if_busy", "recover", "herdr_bin", "unit"} {
-		if v := raw[key]; v != nil {
-			if _, ok := v.(string); !ok {
-				return State{}, fmt.Errorf("job field %s must be a string", key)
+	var s State
+	var first error
+	for _, field := range []struct {
+		name string
+		dest *string
+	}{
+		{"id", &s.ID}, {"kind", &s.Kind}, {"pane_id", &s.PaneID},
+		{"agent", &s.Agent}, {"cwd", &s.Cwd}, {"at", &s.At},
+		{"mode", &s.Mode}, {"keys", &s.Keys}, {"if_busy", &s.IfBusy},
+		{"recover", &s.Recover}, {"herdr_bin", &s.HerdrBin}, {"unit", &s.Unit},
+	} {
+		if value := raw[field.name]; len(value) != 0 {
+			if err := json.Unmarshal(value, field.dest); err != nil && first == nil {
+				first = fmt.Errorf("job field %s must be a string", field.name)
 			}
 		}
 	}
-	s := State{
-		ID: str(raw["id"]), Kind: str(raw["kind"]), PaneID: str(raw["pane_id"]),
-		Agent: str(raw["agent"]), Cwd: str(raw["cwd"]), At: str(raw["at"]),
-		Mode: str(raw["mode"]), Keys: str(raw["keys"]), IfBusy: str(raw["if_busy"]),
-		Force: whole(raw["force"], 0), Quiet: whole(raw["quiet"], 0),
-		Recover: str(raw["recover"]), Grace: whole(raw["grace"], 4),
-		HerdrBin: str(raw["herdr_bin"]), Unit: str(raw["unit"]), RunAt: int64(whole(raw["run_at"], 0)),
+	for _, field := range numericFields {
+		value, err := integer(raw[field.name], field.name, field.def, field.min, field.max)
+		if err != nil {
+			if first == nil {
+				first = err
+			}
+			value = field.def
+		}
+		field.set(&s, value)
 	}
 	if s.IfBusy == "" {
 		s.IfBusy = "wait"
@@ -103,27 +135,23 @@ func Load(path string) (State, error) {
 	if s.Recover == "" {
 		s.Recover = "keys"
 	}
-	return s, nil
+	return s, first
 }
 
-func str(v any) string {
-	switch t := v.(type) {
-	case string:
-		return t
-	case nil:
-		return ""
-	default:
-		b, _ := json.Marshal(t)
-		return string(b)
+func integer(raw json.RawMessage, name string, def, min, max int64) (int64, error) {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return def, nil
 	}
-}
-
-func whole(v any, def int) int {
-	f, ok := v.(float64)
-	if !ok || f < 0 || f != float64(int(f)) {
-		return def
+	var value int64
+	// Decoding directly into int64 rejects decimals/exponents and overflow,
+	// and avoids both float64 precision loss and platform-dependent int sizes.
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return 0, fmt.Errorf("job field %s must be a JSON integer representable as int64", name)
 	}
-	return int(f)
+	if value < min || value > max {
+		return 0, fmt.Errorf("job field %s must be between %d and %d", name, min, max)
+	}
+	return value, nil
 }
 
 // Encode renders a state file as jq printed it: two-space indent, keys in
@@ -165,8 +193,10 @@ func (s State) Validate(id string) error {
 	if s.Recover != "keys" && s.Recover != "focus" && s.Recover != "none" {
 		return errors.New("invalid recovery policy")
 	}
-	if s.Grace < 1 || s.Grace > 60 || s.Force < 0 || s.Force > 1 || s.Quiet < 0 || s.Quiet > 1 {
-		return errors.New("invalid job controls")
+	for _, field := range numericFields {
+		if v := field.get(s); v < field.min || v > field.max {
+			return fmt.Errorf("job field %s must be between %d and %d", field.name, field.min, field.max)
+		}
 	}
 	return nil
 }
@@ -277,14 +307,37 @@ func (p Paths) Publish(s State, msg *string) error {
 }
 
 // ServiceUnit is the oneshot service a job's timer starts.
-func ServiceUnit(pane, calendar, self, id string) string {
+func ServiceUnit(pane, calendar, self, id string) (string, error) {
+	for _, value := range []string{pane, calendar, self, id} {
+		if !utf8.ValidString(value) {
+			return "", errors.New("service metadata must be UTF-8")
+		}
+		for _, r := range value {
+			if unicode.IsControl(r) {
+				return "", errors.New("service metadata contains a control character")
+			}
+		}
+	}
+	if err := installpath.Check(self); err != nil {
+		return "", fmt.Errorf("invalid service executable: %w", err)
+	}
+	if !validID.MatchString(id) {
+		return "", errors.New("invalid job id")
+	}
+	// systemd command syntax is not shell syntax: quote the executable and
+	// escape C-style characters, specifiers, and variable references. env
+	// executes the path as an argument, since systemd rejects quotes and
+	// backslashes in its executable token even when escaped. "$$" is used
+	// rather than the ':' prefix, which needs systemd 249 or newer.
+	executable := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `%`, `%%`, `$`, `$$`).Replace(self)
+	description := strings.ReplaceAll("herdr scheduled send to "+pane+" at "+calendar, "%", "%%")
 	return fmt.Sprintf(`[Unit]
-Description=herdr scheduled send to %s at %s
+Description=%s
 
 [Service]
 Type=oneshot
-ExecStart=%s __fire %s
-`, pane, calendar, self, id)
+ExecStart=/usr/bin/env -- "%s" __fire %s
+`, description, executable, id), nil
 }
 
 // TimerUnit fires once at calendar, a resolved wall-clock time, so what
@@ -308,12 +361,52 @@ WantedBy=timers.target
 // is-active responses; mutating callers receive the diagnostics as errors.
 type Systemctl struct{}
 
+// command is how every systemd tool runs: under ctx, in the C locale so
+// diagnostics can be matched, and waiting at most drain for pipes a child
+// process still holds after the command exits.
+func command(ctx context.Context, drain time.Duration, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = drain
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	return cmd
+}
+
 func systemctlCommand(args ...string) (*exec.Cmd, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	cmd := exec.CommandContext(ctx, "systemctl", append([]string{"--user"}, args...)...)
-	cmd.WaitDelay = time.Second
-	cmd.Env = append(os.Environ(), "LC_ALL=C")
-	return cmd, cancel
+	return command(ctx, time.Second, "systemctl", append([]string{"--user"}, args...)...), cancel
+}
+
+// Result is one command's separate output streams and how it ended. ExitCode
+// is nil when the command never ran or was killed.
+type Result struct {
+	Stdout, Stderr string
+	Err            error
+	ExitCode       *int
+}
+
+// Run runs a systemd tool such as journalctl under ctx, keeping stdout and
+// stderr apart. A context deadline is reported as the error even when the
+// killed command exited in some other way.
+func Run(ctx context.Context, drain time.Duration, name string, args ...string) Result {
+	cmd := command(ctx, drain, name, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	r := Result{Stdout: stdout.String(), Stderr: stderr.String(), Err: err}
+	if cmd.ProcessState != nil && cmd.ProcessState.ExitCode() >= 0 {
+		code := cmd.ProcessState.ExitCode()
+		r.ExitCode = &code
+	}
+	return r
+}
+
+// Capture runs systemctl --user under the caller's deadline, for inspection
+// that needs the exit status and stderr separately.
+func (Systemctl) Capture(ctx context.Context, drain time.Duration, args ...string) Result {
+	return Run(ctx, drain, "systemctl", append([]string{"--user"}, args...)...)
 }
 func (Systemctl) Quiet(args ...string) error {
 	cmd, cancel := systemctlCommand(args...)

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"schedule-send/internal/herdr"
 	"schedule-send/internal/job"
 	"schedule-send/internal/target"
 )
@@ -46,6 +48,7 @@ type fake struct {
 	// silent submits leave no trace in the lifecycle.
 	silent   bool
 	onSubmit func(f *fake)
+	onFocus  func(f *fake)
 
 	calls []string
 	notes []string
@@ -135,6 +138,9 @@ func (f *fake) Wait(pane string, timeoutMs int) error {
 func (f *fake) Focus(pane string) error {
 	f.calls = append(f.calls, "focus "+pane)
 	f.focused = pane
+	if f.onFocus != nil {
+		f.onFocus(f)
+	}
 	return nil
 }
 
@@ -349,6 +355,75 @@ func TestFocusRungHandsFocusBack(t *testing.T) {
 		"agent send-keys wB:p1 enter", "focus wB:p1", "agent send-keys wB:p1 enter", "focus wA:p1")
 }
 
+func TestRecoveryFocusTransitions(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		onFocus func(*fake)
+		failure string
+		retry   bool
+	}{
+		{
+			name:    "dialog with draft",
+			onFocus: func(f *fake) { f.status = "blocked" },
+			failure: "Agent in wB:p1 opened a dialog with the text unsent; it is left in the composer.",
+		},
+		{
+			name:    "unreadable screen",
+			onFocus: func(f *fake) { f.readErr = errors.New("screen unavailable") },
+			failure: "Text is still unsent in wB:p1's composer: ",
+		},
+		{
+			name:    "draft submitted during focus",
+			onFocus: func(f *fake) { f.press() },
+		},
+		{
+			name:    "unknown lifecycle with draft",
+			onFocus: func(f *fake) { f.status = "unknown" },
+			retry:   true,
+		},
+		{
+			name:    "unreadable lifecycle with draft",
+			onFocus: func(f *fake) { f.status = herdr.Unreadable },
+			failure: "Text is still unsent in wB:p1's composer:  ❯ carry on with the plan please",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.f.drops = 2
+			h.f.focused = "wA:p1"
+			h.f.onFocus = func(f *fake) {
+				if f.focused == "wB:p1" {
+					tc.onFocus(f)
+				}
+			}
+			st := agentJob()
+			st.Recover = "focus"
+			h.arm(st, text("carry on with the plan please"))
+			h.fire()
+			if tc.failure != "" {
+				h.wantFailure(tc.failure)
+			} else {
+				h.wantCode(0)
+			}
+			calls := []string{
+				"wait wB:p1", "prompt wB:p1 carry on with the plan please",
+				"agent send-keys wB:p1 enter", "focus wB:p1",
+			}
+			if tc.retry {
+				calls = append(calls, "agent send-keys wB:p1 enter")
+			}
+			calls = append(calls, "focus wA:p1")
+			h.wantCalls(calls...)
+			if h.f.focused != "wA:p1" {
+				t.Errorf("focused pane = %q, want wA:p1", h.f.focused)
+			}
+			if tc.name == "dialog with draft" && h.f.draft != "carry on with the plan please" {
+				t.Errorf("dialog draft = %q, want original text", h.f.draft)
+			}
+		})
+	}
+}
+
 func TestLadderExhaustedQuotesTheDraft(t *testing.T) {
 	h := newHarness(t)
 	h.f.drops = 5
@@ -380,6 +455,29 @@ func TestDialogIsLeftAlone(t *testing.T) {
 	h.fire()
 	h.wantFailure("Agent in wB:p1 opened a dialog with the text unsent; it is left in the composer.")
 	h.wantCalls("wait wB:p1", "prompt wB:p1 carry on with the plan please")
+}
+
+// A failed lifecycle read is no evidence that a dialog is closed, so the
+// recovery Enter is withheld, while a reported "unknown" status still retries.
+func TestUnreadableLifecycleWithholdsEnter(t *testing.T) {
+	h := newHarness(t)
+	h.f.drops = 1
+	h.f.status = herdr.Unreadable
+	h.arm(agentJob(), text("carry on with the plan please"))
+	h.fire()
+	h.wantFailure("Text is still unsent in wB:p1's composer:  ❯ carry on with the plan please")
+	if !strings.Contains(h.err.String(), "Could not read the state of wB:p1, so Enter is not retried.\n") {
+		t.Errorf("stderr = %q", h.err.String())
+	}
+	h.wantCalls("wait wB:p1", "prompt wB:p1 carry on with the plan please")
+
+	h = newHarness(t)
+	h.f.drops = 1
+	h.f.status = "unknown"
+	h.arm(agentJob(), text("carry on with the plan please"))
+	h.fire()
+	h.wantCode(0)
+	h.wantCalls("wait wB:p1", "prompt wB:p1 carry on with the plan please", "agent send-keys wB:p1 enter")
 }
 
 func TestUnverifiableSendIsReportedNotGuessed(t *testing.T) {
@@ -694,6 +792,7 @@ func TestRevalidatesTargetAfterWait(t *testing.T) {
 func TestInvalidStateDoesNotSend(t *testing.T) {
 	h := newHarness(t)
 	st := agentJob()
+	st.HerdrBin = h.herdr
 	h.arm(st, text("carry on with the plan please"))
 	st.Mode = "invalid"
 	must(t, os.WriteFile(h.paths.StatePath(jobID), job.Encode(st), 0600))
@@ -702,6 +801,12 @@ func TestInvalidStateDoesNotSend(t *testing.T) {
 	h.wantCalls()
 	if !strings.Contains(h.err.String(), "Invalid state file") {
 		t.Fatalf("stderr=%s", h.err.String())
+	}
+	if len(h.f.notes) != 1 || !strings.HasPrefix(h.f.notes[0], "Scheduled send failed: Invalid state file for "+jobID+": invalid job mode.") {
+		t.Fatalf("notifications %q", h.f.notes)
+	}
+	if _, err := os.Stat(h.paths.StatePath(jobID)); err != nil {
+		t.Fatalf("invalid state was removed: %v", err)
 	}
 }
 
@@ -747,5 +852,80 @@ func TestChangedComposerDoesNotConfirmDraftDisappearance(t *testing.T) {
 	h.wantCalls("wait wB:p1", "prompt wB:p1 carry on with the plan please")
 	if h.f.draft == "" {
 		t.Fatal("draft was unexpectedly submitted")
+	}
+}
+
+// Malformed state is never delivered and stays on disk, but the user hears
+// about it: the elapsed timer will not fire again.
+func TestMalformedNumericStateIsReportedNotDelivered(t *testing.T) {
+	for _, kind := range []string{"agent text", "agent keys", "pane text", "quiet agent text"} {
+		for _, tc := range []struct{ field, value string }{
+			{"force", `"1"`}, {"force", "2"},
+			{"quiet", "true"}, {"quiet", "-1"},
+			{"grace", "-1"}, {"grace", "4.5"}, {"grace", "4.0"}, {"grace", "4e0"}, {"grace", "0"}, {"grace", "61"},
+			{"run_at", "-1"}, {"run_at", "9223372036854775808"},
+		} {
+			if kind == "quiet agent text" && tc.field == "quiet" {
+				continue
+			}
+			t.Run(kind+"/"+tc.field+"="+tc.value, func(t *testing.T) {
+				h := newHarness(t)
+				state := agentJob()
+				if kind == "quiet agent text" {
+					state.Quiet = 1
+				}
+				switch kind {
+				case "agent keys":
+					state.Mode = "keys"
+					state.Keys = "enter"
+				case "pane text":
+					state.Kind = "pane"
+					state.PaneID = "wB:p5"
+					state.Agent = "-"
+				}
+				h.arm(state, text("carry on with the plan please"))
+				stored, err := os.ReadFile(h.paths.StatePath(jobID))
+				must(t, err)
+				var raw map[string]json.RawMessage
+				must(t, json.Unmarshal(stored, &raw))
+				raw[tc.field] = json.RawMessage(tc.value)
+				data, err := json.Marshal(raw)
+				must(t, err)
+				must(t, os.WriteFile(h.paths.StatePath(jobID), data, 0600))
+				connections := 0
+				w := &Worker{ID: jobID, Paths: h.paths, Out: &h.out, Err: &h.err, Clock: h.clock, Connect: func(string) Herdr { connections++; return h.f }}
+				h.code = w.Run()
+				h.wantCode(1)
+				h.wantCalls()
+				if !strings.Contains(h.err.String(), "job field "+tc.field) {
+					t.Fatalf("stderr: %s", h.err.String())
+				}
+				// A quiet flag that loaded is honoured; a malformed one is not.
+				if kind == "quiet agent text" {
+					if connections != 0 || len(h.f.notes) != 0 {
+						t.Fatalf("quiet job notified: %d connections, %q", connections, h.f.notes)
+					}
+				} else {
+					want := "Scheduled send failed: The state file for " + jobID + " cannot be read: job field " + tc.field
+					if connections != 1 || len(h.f.notes) != 1 || !strings.HasPrefix(h.f.notes[0], want) ||
+						!strings.HasSuffix(h.f.notes[0], "The job is kept; inspect it with schedule-send --status "+jobID+".") {
+						t.Fatalf("notifications %q after %d connections", h.f.notes, connections)
+					}
+				}
+				stored, err = os.ReadFile(h.paths.StatePath(jobID))
+				must(t, err)
+				if string(stored) != string(data) {
+					t.Fatal("malformed state was changed or removed")
+				}
+				for _, path := range []string{h.paths.MessagePath(jobID), h.paths.UnitPath(jobID, "timer"), h.paths.UnitPath(jobID, "service")} {
+					if _, err := os.Stat(path); err != nil {
+						t.Fatalf("job artifact removed: %s: %v", path, err)
+					}
+				}
+				if calls, err := os.ReadFile(h.sysLog); err == nil && len(calls) != 0 {
+					t.Fatalf("systemctl calls on invalid state: %s", calls)
+				}
+			})
+		}
 	}
 }

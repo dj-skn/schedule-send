@@ -6,7 +6,8 @@ root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd -P)"
 fixture="$(mktemp -d)"
 trap 'rm -rf "$fixture"' EXIT HUP INT TERM
 mkdir -p "$fixture/tools" "$fixture/.githooks"
-cp "$root/tools/source-id" "$root/tools/auto-install" "$root/tools/setup-hooks" "$fixture/tools/"
+cp "$root/tools/source-id" "$root/tools/auto-install" "$root/tools/setup-hooks" \
+  "$root/tools/main-checkout" "$fixture/tools/"
 cp "$root/.githooks/"* "$fixture/.githooks/"
 cat > "$fixture/tools/install" <<'MOCK'
 #!/bin/sh
@@ -21,9 +22,10 @@ printf 'installed\n' >> installations
 MOCK
 chmod +x "$fixture/tools/install"
 printf 'bin/\ninstallations\nFAIL\n' > "$fixture/.gitignore"
+printf '#!/bin/sh\n# mock builder\n' > "$fixture/tools/build"
 printf 'module hookfixture\n' > "$fixture/go.mod"
 printf '# Hook fixture\n' > "$fixture/README.md"
-git -C "$fixture" init -q -b master
+git -C "$fixture" init -q -b main
 git -C "$fixture" config user.name 'Hook Test'
 git -C "$fixture" config user.email 'hooks@example.invalid'
 git -C "$fixture" config commit.gpgSign false
@@ -56,35 +58,40 @@ printf '// feature change\n' >> "$fixture/go.mod"
 git -C "$fixture" add go.mod
 git -C "$fixture" commit -qm 'feat: change fixture inputs'
 count 1
-git -C "$fixture" checkout -q master
+git -C "$fixture" checkout -q main
 count 1
 git -C "$fixture" merge -q --ff-only feature > /dev/null
 count 2
+# Build-helper changes are installer inputs, too.
+printf '\n# builder update\n' >> "$fixture/tools/build"
+git -C "$fixture" add tools/build
+git -C "$fixture" commit -qm 'chore: update mock builder' > /dev/null
+count 3
 # Changing tools/install itself triggers installation after commit.
 printf '\n# installer update\n' >> "$fixture/tools/install"
 git -C "$fixture" add tools/install
 git -C "$fixture" commit -qm 'chore: update mock installer' > /dev/null
-count 3
+count 4
 # post-rewrite also picks up new committed inputs.
 printf '// rewrite change\n' >> "$fixture/go.mod"
 git -C "$fixture" add go.mod
 git -C "$fixture" -c core.hooksPath=/dev/null commit -qm 'feat: rewrite fixture'
 (cd "$fixture" && .githooks/post-rewrite rebase) > /dev/null
-count 4
+count 5
 # Dirty sources, including untracked Go inputs, must not be deployed.
 printf '// dirty\n' >> "$fixture/go.mod"
 (cd "$fixture" && .githooks/post-commit) > /dev/null 2>&1
-count 4
+count 5
 git -C "$fixture" restore go.mod
 mkdir -p "$fixture/cmd"
 printf 'package main\n' > "$fixture/cmd/untracked.go"
 (cd "$fixture" && .githooks/post-checkout) > /dev/null 2>&1
-count 4
+count 5
 rm "$fixture/cmd/untracked.go"
 # A missing binary rebuilds even when its fingerprint is current.
 rm "$fixture/bin/schedule-send"
 (cd "$fixture" && .githooks/post-checkout) > /dev/null
-count 5
+count 6
 # Failed installs preserve the prior binary/stamp, report the failure and retry.
 touch "$fixture/FAIL"
 old_stamp="$(cat "$fixture/bin/.installed-source")"
@@ -92,7 +99,7 @@ printf '// failed build\n' >> "$fixture/go.mod"
 git -C "$fixture" add go.mod
 git -C "$fixture" -c core.hooksPath=/dev/null commit -qm 'feat: exercise build failure'
 (cd "$fixture" && .githooks/post-merge) > "$fixture/bin/failure-output" 2>&1
-count 5
+count 6
 [ "$(cat "$fixture/bin/.installed-source")" = "$old_stamp" ]
 [ -x "$fixture/bin/schedule-send" ]
 if ! grep -q 'automatic install failed' "$fixture/bin/failure-output"; then
@@ -100,12 +107,28 @@ if ! grep -q 'automatic install failed' "$fixture/bin/failure-output"; then
 fi
 rm "$fixture/FAIL"
 (cd "$fixture" && .githooks/post-merge) > /dev/null
-count 6
+count 7
 # Detached HEADs and linked worktrees must never activate an installation.
 git -C "$fixture" checkout -q --detach HEAD
 (cd "$fixture" && .githooks/post-commit) > /dev/null
-count 6
-git -C "$fixture" checkout -q master
+count 7
+git -C "$fixture" checkout -q main
+# A main checkout left on master says how to rename it instead of going quiet.
+git -C "$fixture" branch -m main master
+printf '// master change\n' >> "$fixture/go.mod"
+git -C "$fixture" add go.mod
+git -C "$fixture" -c core.hooksPath=/dev/null commit -qm 'feat: change inputs on master'
+(cd "$fixture" && .githooks/post-merge) > "$fixture/bin/master-output" 2>&1
+count 7
+if ! grep -q 'git branch -m master main' "$fixture/bin/master-output"; then
+  echo 'missing master rename hint' >&2; exit 1
+fi
+if (cd "$fixture" && tools/setup-hooks) > /dev/null 2>&1; then
+  echo 'setup accepted a checkout on master' >&2; exit 1
+fi
+git -C "$fixture" branch -m master main
+(cd "$fixture" && .githooks/post-merge) > /dev/null
+count 8
 worktree="$fixture/bin/worktree"
 git -C "$fixture" worktree add -q -b preview "$worktree"
 (cd "$worktree" && tools/auto-install) > /dev/null
@@ -113,5 +136,5 @@ git -C "$fixture" worktree add -q -b preview "$worktree"
 if (cd "$worktree" && tools/setup-hooks) > /dev/null 2>&1; then
   echo 'setup accepted a linked worktree' >&2; exit 1
 fi
-count 6
+count 8
 echo 'hooks: ok'

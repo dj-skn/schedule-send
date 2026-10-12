@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"schedule-send/internal/herdr"
+	"schedule-send/internal/installpath"
 	"schedule-send/internal/job"
 	"schedule-send/internal/limit"
 	"schedule-send/internal/show"
@@ -46,6 +47,9 @@ func fail(kind, format string, a ...any) error {
 // limit is what a detected time is for.
 const resumeMessage = "resume"
 
+// installHint is how to get a build that can arm jobs.
+const installHint = "Run tools/install from the main checkout, then invoke the installed schedule-send."
+
 // A notice names its reset to the minute, and the reset lands somewhere inside
 // that minute — a notice reading 12:27 AM was for a reset at 00:27:52 — so the
 // first moment certainly past it is one minute on.
@@ -73,8 +77,9 @@ type app struct {
 	paths          job.Paths
 	sys            job.Systemctl
 	h              herdr.Client
-	selfPane       string // HERDR_PANE_ID
-	self           string // this executable, which the timer runs
+	selfPane       string                 // HERDR_PANE_ID
+	installedPath  func() (string, error) // private injection for isolated tests
+	statusTimeouts statusTimeouts         // private deadlines for isolated tests
 
 	rows []target.Row
 	tgt  target.Row
@@ -302,8 +307,7 @@ func (a *app) run(args []string) (retErr error) {
 	case "--cancel":
 		return a.cancel(a.o.operationID)
 	case "--status":
-		a.status(a.o.operationID)
-		return nil
+		return a.status(a.o.operationID)
 	case "--help":
 		fmt.Fprint(a.stdout, usage)
 		return nil
@@ -357,6 +361,23 @@ func (a *app) run(args []string) (retErr error) {
 	}
 	if o.keys == "" && o.message == "" {
 		return die("Nothing to send. Pass --message, --message-file, or --keys.")
+	}
+
+	// A dry run previews the same executable arming would record, and says
+	// when this build could not arm at all.
+	resolve := a.installedPath
+	if resolve == nil {
+		resolve = installpath.Resolve
+	}
+	installed, installErr := resolve()
+	if !o.dryRun {
+		if installErr != nil {
+			return die("Cannot arm a job: %v. %s", installErr, installHint)
+		}
+		fi, err := os.Stat("/usr/bin/env")
+		if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm()&0111 == 0 {
+			return die("/usr/bin/env is required to execute scheduled jobs (GNU coreutils).")
+		}
 	}
 
 	if _, err := exec.LookPath("systemctl"); err != nil {
@@ -461,12 +482,24 @@ func (a *app) run(args []string) (retErr error) {
 		Mode: mode, Payload: payload, Message: o.message, Keys: o.keys,
 		Persistent: o.persistent, IfBusy: o.ifBusy, Recover: o.recover, Grace: o.grace,
 		UnitFiles: a.paths.UnitDir + "/" + unit + ".{service,timer}",
-		WouldRun:  a.selfPath() + " __fire " + id,
+	}
+	// The program and arguments the timer runs; the unit wraps them in
+	// /usr/bin/env with systemd escaping.
+	if installErr == nil {
+		sched.WouldRun = installed + " __fire " + id
 	}
 
 	if o.dryRun {
+		if installErr != nil {
+			a.warn(fmt.Sprintf("Warning: this build cannot arm jobs (%v), so a real run would be refused. %s", installErr, installHint))
+		}
 		a.receipt(sched, now)
 		return nil
+	}
+
+	serviceText, err := job.ServiceUnit(t.Pane, calendar, installed, id)
+	if err != nil {
+		return die("Could not render the service: %v", err)
 	}
 
 	lock, err := a.paths.Lock(id)
@@ -509,7 +542,7 @@ func (a *app) run(args []string) (retErr error) {
 		return die("Could not create %s: %v", a.paths.UnitDir, err)
 	}
 	service, timer := a.paths.UnitPath(id, "service"), a.paths.UnitPath(id, "timer")
-	if err := job.AtomicWrite(service, []byte(job.ServiceUnit(t.Pane, calendar, a.selfPath(), id)), 0o644); err != nil {
+	if err := job.AtomicWrite(service, []byte(serviceText), 0o644); err != nil {
 		return die("Could not write %s: %v", service, err)
 	}
 	if err := job.AtomicWrite(timer, []byte(job.TimerUnit(id, time.Unix(runAt, 0).UTC().Format(when.Calendar)+" UTC", o.persistent)), 0o644); err != nil {
@@ -583,22 +616,6 @@ func (a *app) locateHerdr() error {
 	}
 	a.h.Bin = bin
 	return nil
-}
-
-// selfPath is this executable with symlinks resolved, which is what an armed
-// timer runs.
-func (a *app) selfPath() string {
-	if a.self != "" {
-		return a.self
-	}
-	p, err := os.Executable()
-	if err == nil {
-		if r, err := filepath.EvalSymlinks(p); err == nil {
-			p = r
-		}
-	}
-	a.self = p
-	return p
 }
 
 func alnum(s string) string {
@@ -909,21 +926,22 @@ func (a *app) confirmAt(def int64, fromNow bool, report show.Report) (int64, err
 func (a *app) list() {
 	var jobs []show.Job
 	for _, f := range a.paths.StateFiles() {
+		id := strings.TrimSuffix(filepath.Base(f), ".json")
 		s, err := job.Load(f)
 		if err != nil {
 			a.warn(fmt.Sprintf("Could not read job state %s: %v", f, err))
-			continue
-		}
-		id := strings.TrimSuffix(filepath.Base(f), ".json")
-		if s.ID != id {
+		} else if s.ID != id {
+			err = errors.New("id does not match its filename")
 			a.warn(fmt.Sprintf("Invalid job state %s: id does not match its filename.", f))
-			continue
 		}
-		state := a.sys.Output("is-active", job.UnitPrefix+"-"+s.ID+".timer")
-		if state == "" {
-			state = "gone"
+		j := show.Job{ID: id, At: s.At, Kind: s.Kind, Agent: s.Agent, Pane: s.PaneID, Payload: job.Preview(f)}
+		if err != nil {
+			// Listed rather than skipped: its timer will refuse it, and it
+			// stays until cancelled.
+			j.State, j.Error = "invalid", err.Error()
+		} else if j.State = a.sys.Output("is-active", job.UnitPrefix+"-"+id+".timer"); j.State == "" {
+			j.State = "gone"
 		}
-		j := show.Job{ID: s.ID, At: s.At, Kind: s.Kind, Agent: s.Agent, Pane: s.PaneID, State: state, Payload: job.Preview(f)}
 		if s.Mode == "keys" {
 			j.Payload, j.Keys = "keys: "+s.Keys, s.Keys
 		} else if b, err := os.ReadFile(strings.TrimSuffix(f, ".json") + ".msg"); err == nil {
@@ -974,59 +992,6 @@ func (a *app) cancel(id string) error {
 	}
 	fmt.Fprintln(a.stdout, "cancelled "+id)
 	return nil
-}
-
-func (a *app) status(id string) {
-	if a.o.json {
-		a.statusJSON(id)
-		return
-	}
-	unit := job.UnitPrefix + "-" + id
-	if b, err := os.ReadFile(a.paths.StatePath(id)); err == nil {
-		var out bytes.Buffer
-		if json.Indent(&out, bytes.TrimSpace(b), "", "  ") == nil {
-			out.WriteByte('\n')
-			a.stdout.Write(out.Bytes())
-		} else {
-			a.stdout.Write(b)
-		}
-	} else {
-		fmt.Fprintf(a.stderr, "No state file for %s (job may have already run).\n", id)
-	}
-	fmt.Fprintln(a.stdout)
-	_ = a.sys.Through(a.stdout, nil, "status", unit+".timer", "--no-pager")
-	fmt.Fprintln(a.stdout)
-	cmd := exec.Command("journalctl", "--user", "-u", unit+".service", "--no-pager", "-n", "40")
-	cmd.Stdout = a.stdout
-	_ = cmd.Run()
-}
-
-// statusJSON is --status --json: the stored job, the timer text and the
-// journal, as one object. A missing state file is a warning inside it, and
-// the command still exits 0, as the plain form does.
-func (a *app) statusJSON(id string) {
-	unit := job.UnitPrefix + "-" + id
-	state := json.RawMessage("null")
-	warning := ""
-	if b, err := os.ReadFile(a.paths.StatePath(id)); err == nil && json.Valid(b) {
-		state = json.RawMessage(bytes.TrimSpace(b))
-	} else if err != nil {
-		warning = fmt.Sprintf("No state file for %s (job may have already run).", id)
-	} else {
-		warning = fmt.Sprintf("Invalid JSON in state file for %s.", id)
-	}
-	var timer bytes.Buffer
-	_ = a.sys.Through(&timer, &timer, "status", unit+".timer", "--no-pager")
-	var journal bytes.Buffer
-	cmd := exec.Command("journalctl", "--user", "-u", unit+".service", "--no-pager", "-n", "40")
-	cmd.Stdout = &journal
-	_ = cmd.Run()
-	emit(a.stdout, struct {
-		State   json.RawMessage `json:"state"`
-		Timer   string          `json:"timer"`
-		Journal string          `json:"journal"`
-		Warning string          `json:"warning,omitempty"`
-	}{state, strings.TrimRight(timer.String(), "\n"), strings.TrimRight(journal.String(), "\n"), warning})
 }
 
 // showTargets lists every pane and, for an agent, the usage limit read from

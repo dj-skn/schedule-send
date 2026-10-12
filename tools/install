@@ -1,15 +1,11 @@
 #!/bin/sh
-# Build and activate only from the master checkout: timer paths must survive
-# removal of feature worktrees. Publish the binary atomically after a full build.
+# Build and activate only from the main checkout (tools/main-checkout): timer
+# paths must survive removal of feature worktrees. Publish the binary
+# atomically after a full build.
 set -eu
 cd "$(dirname "$0")/.."
 root="$(pwd -P)"
-common="$(git rev-parse --path-format=absolute --git-common-dir)"
-branch="$(git symbolic-ref --quiet --short HEAD)"
-if [ "$root/.git" != "$common" ] || [ "$branch" != master ]; then
-  echo 'Run tools/install from the main checkout on master.' >&2
-  exit 1
-fi
+tools/main-checkout tools/install || exit 1
 mkdir -p bin
 # Concurrent hooks must not publish a stale build over a newer installation.
 exec 9>"$root/bin/.install.lock"
@@ -22,7 +18,7 @@ clean_before=true
 [ -z "$(git status --porcelain)" ] || clean_before=false
 build_tmp="$(mktemp "$root/bin/.schedule-send.XXXXXX")"
 trap 'rm -f "$build_tmp"' EXIT HUP INT TERM
-go build -trimpath -o "$build_tmp" ./cmd/schedule-send
+tools/build "$build_tmp" "$root/bin/schedule-send"
 if [ "$source_id" != "$(tools/source-id)" ] ||
    { [ "$clean_before" = true ] && [ -n "$(git status --porcelain)" ]; }; then
   echo 'Sources changed during the build; retry tools/install.' >&2

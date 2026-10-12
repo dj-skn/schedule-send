@@ -206,9 +206,11 @@ func (w *Worker) recoverSubmission(g gate) outcome {
 			w.restoreFocus(prevFocus, g.pane)
 			return exhausted
 		}
-		if status, _ := w.h.State(g.pane); status == "blocked" {
+		// A visible draft is not permission to answer a dialog. This check
+		// comes before anything this rung does; the focus rung checks again.
+		if stop, ok := w.holdEnter(g.pane); ok {
 			w.restoreFocus(prevFocus, g.pane)
-			return dialog
+			return stop
 		}
 		if rung == "focus" {
 			// Herdr's own notes record background panes swallowing input until
@@ -229,12 +231,16 @@ func (w *Worker) recoverSubmission(g gate) outcome {
 				w.restoreFocus(prevFocus, g.pane)
 				return exhausted
 			}
+			// Focusing and the screen read after it can expose a dialog.
+			if stop, ok := w.holdEnter(g.pane); ok {
+				w.restoreFocus(prevFocus, g.pane)
+				return stop
+			}
 			w.recovery = "focused, Enter retried"
 		} else {
 			fmt.Fprintf(w.Err, "Enter was dropped by the agent in %s; retrying the submit.\n", g.pane)
 			w.recovery = "Enter retried"
 		}
-
 		if w.h.SendKeys("agent", g.pane, []string{"enter"}, nil) != nil {
 			fmt.Fprintf(w.Err, "Could not send Enter to %s.\n", g.pane)
 			continue
@@ -246,6 +252,21 @@ func (w *Worker) recoverSubmission(g gate) outcome {
 	}
 	w.restoreFocus(prevFocus, g.pane)
 	return exhausted
+}
+
+// holdEnter reports whether Enter must not be pressed now, and the outcome to
+// return instead: a dialog, or a lifecycle that could not be read, which is
+// no evidence that a dialog is closed. An agent Herdr reports as "unknown"
+// proceeds; that is Codex's flapping title, not a failed read.
+func (w *Worker) holdEnter(pane string) (outcome, bool) {
+	switch status, _ := w.h.State(pane); status {
+	case "blocked":
+		return dialog, true
+	case herdr.Unreadable:
+		fmt.Fprintf(w.Err, "Could not read the state of %s, so Enter is not retried.\n", pane)
+		return exhausted, true
+	}
+	return 0, false
 }
 
 // restoreFocus hands focus back after the focus rung, which is a repair, not a

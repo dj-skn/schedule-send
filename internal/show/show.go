@@ -41,7 +41,7 @@ type Scheduled struct {
 	Recover    string
 	Grace      string // --submit-grace as typed, which is how it is printed
 	UnitFiles  string // "<dir>/<unit>.{service,timer}"
-	WouldRun   string // the command the timer runs
+	WouldRun   string // the program and arguments the timer runs; empty when this build cannot arm
 }
 
 // Plain writes s as key=value lines: every field for a dry run, and for an
@@ -101,8 +101,11 @@ func (s Scheduled) Styled(w io.Writer, c term.Colors, now int64) {
 			p.row("grace", plain(s.Grace+"s"), ""),
 			p.row("persist", plain(persist), ""),
 			p.row("id", plain(s.ID), ""),
-			p.row("units", plain(s.UnitFiles), ""),
-			p.row("runs", plain(s.WouldRun), ""))
+			p.row("units", plain(s.UnitFiles), ""))
+		// A build that cannot arm jobs has no command to show.
+		if s.WouldRun != "" {
+			lines = append(lines, p.row("runs", plain(s.WouldRun), ""))
+		}
 	} else {
 		lines = append(lines,
 			headline(p.green("✓"), "scheduled "+sends), at,
@@ -236,7 +239,8 @@ type Job struct {
 	At                string // the fire time as stored, when.Calendar in when.Loc
 	RunAt             int64  // At as an epoch; 0 when it does not parse
 	Kind, Agent, Pane string // the target
-	State             string // the timer's systemctl is-active state, or "gone"
+	State             string // the timer's systemctl is-active state, "gone", or "invalid"
+	Error             string // why an "invalid" job's state could not be used
 	Payload           string // the message's preview, or "keys: " and the keys
 	Message           string // the whole message; empty for keys
 	Keys              string // empty for text
@@ -438,7 +442,7 @@ func ListJSON(w io.Writer, jobs []Job) {
 	for _, j := range jobs {
 		rows = append(rows, jobJSON{
 			ID: j.ID, At: j.At, RunAt: j.RunAt, Kind: j.Kind,
-			Agent: j.Agent, Pane: j.Pane, State: j.State, Payload: j.Payload,
+			Agent: j.Agent, Pane: j.Pane, State: j.State, Payload: j.Payload, Error: j.Error,
 		})
 	}
 	writeJSON(w, struct {
@@ -455,6 +459,7 @@ type jobJSON struct {
 	Pane    string `json:"pane"`
 	State   string `json:"state"`
 	Payload string `json:"payload"`
+	Error   string `json:"error,omitempty"`
 }
 
 // Target is one pane as --targets --json prints it.
