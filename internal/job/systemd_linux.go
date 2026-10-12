@@ -94,6 +94,12 @@ func (s Systemctl) Arm(p Paths, t Trigger) (attempted bool, err error) {
 	return true, nil
 }
 
+// Await says what a started worker does about its job's time. systemd starts
+// the service at that time, so the answer is always to deliver.
+func (Systemctl) Await(runAt int64, now func() time.Time, sleep func(time.Duration)) (Verdict, string) {
+	return Go, ""
+}
+
 // Armed is a job's timer state as --list shows it: the word systemctl
 // is-active prints, or "" when it prints nothing.
 func (s Systemctl) Armed(id string) string {
@@ -103,7 +109,8 @@ func (s Systemctl) Armed(id string) string {
 // Inspect collects a job's timer status and recent journal. The status and
 // any confirming unit-state query share the timer budget; the journal has its
 // own. A failed unit is an observation; a failed collection is a diagnostic.
-func (s Systemctl) Inspect(id string, timerBudget, journalBudget, drain time.Duration) Inspection {
+// Both come from systemd, so p is not consulted.
+func (s Systemctl) Inspect(p Paths, id string, timerBudget, journalBudget, drain time.Duration) Inspection {
 	var r Inspection
 	unit := UnitPrefix + "-" + id + ".timer"
 	timerCtx, cancel := context.WithTimeout(context.Background(), timerBudget)

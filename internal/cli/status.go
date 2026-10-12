@@ -97,7 +97,7 @@ func (a *app) collectStatus(id string) statusResult {
 	if limits.drain <= 0 {
 		limits.drain = time.Second
 	}
-	in := a.sys.Inspect(id, limits.timer, limits.journal, limits.drain)
+	in := a.sys.Inspect(a.paths, id, limits.timer, limits.journal, limits.drain)
 	r.timerOutput, r.Timer = in.TimerOutput, in.Timer
 	r.journalOutput, r.Journal = in.JournalOutput, in.Journal
 	r.Diagnostics = append(r.Diagnostics, in.Diagnostics...)

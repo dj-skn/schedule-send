@@ -1,0 +1,36 @@
+#!/bin/sh
+# A stand-in for launchctl that loads nothing. Calls are appended to
+# $LAUNCHCTL_STANDIN_LOG when it is set. A job "loaded" by bootstrap is
+# remembered as a file under $LAUNCHCTL_STANDIN_DIR, so print and bootout
+# answer as launchd does: 113 and 3 for a job it does not have.
+# $LAUNCHCTL_STANDIN_FAIL names a subcommand that fails with exit 5.
+[ -n "${LAUNCHCTL_STANDIN_LOG:-}" ] && printf '%s\n' "$*" >> "$LAUNCHCTL_STANDIN_LOG"
+dir="${LAUNCHCTL_STANDIN_DIR:-}"
+if [ "${1:-}" = "${LAUNCHCTL_STANDIN_FAIL:-}" ]; then
+  echo "$1 failed: 5: Input/output error" >&2
+  exit 5
+fi
+loaded() { [ -n "$dir" ] && [ -e "$dir/$1" ]; }
+case "${1:-}" in
+  bootstrap)
+    [ -n "$dir" ] && : > "$dir/$(basename "$3" .plist)" ;;
+  bootout)
+    label="${2##*/}"
+    if ! loaded "$label"; then
+      echo "Boot-out failed: 3: No such process" >&2
+      exit 3
+    fi
+    rm -f "$dir/$label" ;;
+  print)
+    case "$2" in
+      */*/*)
+        label="${2##*/}"
+        if ! loaded "$label"; then
+          echo "Could not find service \"$label\" in domain for user gui" >&2
+          exit 113
+        fi
+        printf '%s = {\n\tstate = not running\n}\n' "$2" ;;
+      *) printf '%s = {\n}\n' "$2" ;;
+    esac ;;
+esac
+exit 0
