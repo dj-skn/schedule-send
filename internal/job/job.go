@@ -344,6 +344,47 @@ func removeFile(path string) error {
 	return err
 }
 
+// Diagnostic is one finding from inspecting a job's timer, as --status
+// reports it.
+type Diagnostic struct {
+	Source   string `json:"source"`
+	Severity string `json:"severity"`
+	Code     string `json:"code"`
+	Message  string `json:"message"`
+	ExitCode *int   `json:"exit_code,omitempty"`
+	Stderr   string `json:"stderr,omitempty"`
+	Output   string `json:"output,omitempty"`
+}
+
+// Inspection is what --status shows of a job's timer and of its log: each as
+// printed, and trimmed for JSON, with whatever went wrong collecting them.
+type Inspection struct {
+	TimerOutput, Timer     string
+	JournalOutput, Journal string
+	Diagnostics            []Diagnostic
+}
+
+func commandDiagnostic(source string, result Result) Diagnostic {
+	code := "command_failed"
+	switch {
+	case errors.Is(result.Err, context.DeadlineExceeded):
+		code = "timeout"
+	case errors.Is(result.Err, exec.ErrWaitDelay):
+		code = "pipe_timeout"
+	case errors.Is(result.Err, exec.ErrNotFound), errors.Is(result.Err, os.ErrNotExist):
+		code = "not_found"
+	}
+	message := result.Err.Error()
+	if stderr := strings.TrimSpace(result.Stderr); stderr != "" {
+		message += ": " + stderr
+	}
+	return Diagnostic{Source: source, Severity: "error", Code: code, Message: message, ExitCode: result.ExitCode, Stderr: result.Stderr, Output: result.Stdout}
+}
+
+func commandWarning(source string, result Result) Diagnostic {
+	return Diagnostic{Source: source, Severity: "warning", Code: "command_stderr", Message: strings.TrimSpace(result.Stderr), ExitCode: result.ExitCode, Stderr: result.Stderr}
+}
+
 // StateFiles lists the stored jobs' state files in name order.
 func (p Paths) StateFiles() []string {
 	files, _ := filepath.Glob(filepath.Join(p.StateDir, "*.json"))

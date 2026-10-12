@@ -91,6 +91,100 @@ func (s Systemctl) Arm(p Paths, t Trigger) (attempted bool, err error) {
 	return true, nil
 }
 
+// Armed is a job's timer state as --list shows it: the word systemctl
+// is-active prints, or "" when it prints nothing.
+func (s Systemctl) Armed(id string) string {
+	return s.Output("is-active", UnitPrefix+"-"+id+".timer")
+}
+
+// Inspect collects a job's timer status and recent journal. The status and
+// any confirming unit-state query share the timer budget; the journal has its
+// own. A failed unit is an observation; a failed collection is a diagnostic.
+func (s Systemctl) Inspect(id string, timerBudget, journalBudget, drain time.Duration) Inspection {
+	var r Inspection
+	unit := UnitPrefix + "-" + id + ".timer"
+	timerCtx, cancel := context.WithTimeout(context.Background(), timerBudget)
+	timer := s.Capture(timerCtx, drain, "status", unit, "--no-pager")
+	r.TimerOutput = timer.Stdout
+	r.Timer = strings.TrimRight(timer.Stdout+timer.Stderr, "\n")
+	if timer.Err != nil {
+		normal := false
+		if timer.ExitCode != nil && (*timer.ExitCode == 3 || *timer.ExitCode == 4) && timerCtx.Err() == nil && !errors.Is(timer.Err, exec.ErrWaitDelay) {
+			show := s.Capture(timerCtx, drain, "show", unit, "--property=LoadState,ActiveState,SubState", "--no-pager")
+			normal = normalUnitStatus(timer, show, unit)
+			if show.Err != nil && !normal {
+				r.Diagnostics = append(r.Diagnostics, commandDiagnostic("unit_state", show))
+			} else if !normal {
+				r.Diagnostics = append(r.Diagnostics, Diagnostic{Source: "unit_state", Severity: "error", Code: "invalid_response", Message: "Could not confirm the unit state from systemctl show.", Stderr: show.Stderr, Output: show.Stdout})
+			} else if show.Stderr != "" {
+				r.Diagnostics = append(r.Diagnostics, commandWarning("unit_state", show))
+			}
+		}
+		if !normal {
+			r.Diagnostics = append(r.Diagnostics, commandDiagnostic("timer", timer))
+		} else if timer.Stderr != "" {
+			r.Diagnostics = append(r.Diagnostics, commandWarning("timer", timer))
+		}
+	} else if timer.Stderr != "" {
+		r.Diagnostics = append(r.Diagnostics, commandWarning("timer", timer))
+	}
+	cancel()
+	journalCtx, cancel := context.WithTimeout(context.Background(), journalBudget)
+	journal := Run(journalCtx, drain, "journalctl", "--user", "-u", UnitPrefix+"-"+id+".service", "--no-pager", "-n", "40")
+	cancel()
+	r.JournalOutput = journal.Stdout
+	r.Journal = strings.TrimRight(journal.Stdout, "\n")
+	if journal.Err != nil {
+		r.Diagnostics = append(r.Diagnostics, commandDiagnostic("journal", journal))
+	} else if journal.Stderr != "" {
+		r.Diagnostics = append(r.Diagnostics, commandWarning("journal", journal))
+	}
+	return r
+}
+
+// Status 3/4 can be a normal unit condition. Confirm properties separately;
+// transport failures and malformed replies remain errors. Exit 3 means
+// systemctl reached the manager and printed the unit, so its stderr (such as
+// "changed on disk") is a warning once show confirms the state.
+func normalUnitStatus(status, show Result, unit string) bool {
+	properties := map[string]string{}
+	for _, line := range strings.Split(show.Stdout, "\n") {
+		if key, value, ok := strings.Cut(line, "="); ok {
+			properties[key] = value
+		}
+	}
+	load, active, sub := properties["LoadState"], properties["ActiveState"], properties["SubState"]
+	if load == "" || active == "" || sub == "" {
+		return false
+	}
+	if show.Err != nil {
+		var exit *exec.ExitError
+		if !errors.As(show.Err, &exit) || exit.ExitCode() != 4 || load != "not-found" {
+			return false
+		}
+	}
+	if *status.ExitCode == 4 {
+		if load != "not-found" {
+			return false
+		}
+		stderr := strings.TrimSpace(status.Stderr)
+		return stderr == "" || stderr == "Unit "+unit+" could not be found."
+	}
+	// A failed or still-active unit whose file is gone loads as not-found
+	// and is printed with exit 3 rather than 4.
+	switch load {
+	case "loaded", "not-found", "masked", "error", "bad-setting":
+	default:
+		return false
+	}
+	// A unit can change between status and show, so active states are valid too.
+	switch active {
+	case "active", "reloading", "inactive", "failed", "activating", "deactivating", "maintenance":
+		return true
+	}
+	return false
+}
+
 // defaultUnitDir is where systemd --user reads this account's units.
 func defaultUnitDir(home, config string) string { return config + "/systemd/user" }
 

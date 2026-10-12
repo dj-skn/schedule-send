@@ -909,7 +909,7 @@ func (a *app) list() {
 			// Listed rather than skipped: its timer will refuse it, and it
 			// stays until cancelled.
 			j.State, j.Error = "invalid", err.Error()
-		} else if j.State = a.sys.Output("is-active", job.UnitPrefix+"-"+id+".timer"); j.State == "" {
+		} else if j.State = a.sys.Armed(id); j.State == "" {
 			j.State = "gone"
 		}
 		if s.Mode == "keys" {
