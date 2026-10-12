@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"schedule-send/internal/installpath"
+	"github.com/dj-skn/schedule-send/internal/installpath"
 )
 
 func main() {

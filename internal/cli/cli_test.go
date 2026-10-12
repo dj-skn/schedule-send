@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"schedule-send/internal/job"
-	"schedule-send/internal/limit"
-	"schedule-send/internal/when"
+	"github.com/dj-skn/schedule-send/internal/job"
+	"github.com/dj-skn/schedule-send/internal/limit"
+	"github.com/dj-skn/schedule-send/internal/when"
 )
 
 // fakeTTY is a terminal fed fixed input, recording what was drawn on it.

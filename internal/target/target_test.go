@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"schedule-send/internal/term"
+	"github.com/dj-skn/schedule-send/internal/term"
 )
 
 var rows = []Row{

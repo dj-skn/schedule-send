@@ -12,10 +12,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"schedule-send/internal/limit"
-	"schedule-send/internal/target"
-	"schedule-send/internal/term"
-	"schedule-send/internal/when"
+	"github.com/dj-skn/schedule-send/internal/limit"
+	"github.com/dj-skn/schedule-send/internal/target"
+	"github.com/dj-skn/schedule-send/internal/term"
+	"github.com/dj-skn/schedule-send/internal/when"
 )
 
 // Scheduled is one send, as armed or as a dry run would arm it.

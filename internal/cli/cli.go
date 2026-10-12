@@ -17,15 +17,15 @@ import (
 	"strings"
 	"time"
 
-	"schedule-send/internal/herdr"
-	"schedule-send/internal/installpath"
-	"schedule-send/internal/job"
-	"schedule-send/internal/limit"
-	"schedule-send/internal/show"
-	"schedule-send/internal/target"
-	"schedule-send/internal/term"
-	"schedule-send/internal/when"
-	"schedule-send/internal/worker"
+	"github.com/dj-skn/schedule-send/internal/herdr"
+	"github.com/dj-skn/schedule-send/internal/installpath"
+	"github.com/dj-skn/schedule-send/internal/job"
+	"github.com/dj-skn/schedule-send/internal/limit"
+	"github.com/dj-skn/schedule-send/internal/show"
+	"github.com/dj-skn/schedule-send/internal/target"
+	"github.com/dj-skn/schedule-send/internal/term"
+	"github.com/dj-skn/schedule-send/internal/when"
+	"github.com/dj-skn/schedule-send/internal/worker"
 )
 
 // failure ends the command: msg goes to stderr, code is the exit status.

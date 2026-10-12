@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"schedule-send/internal/screen"
-	"schedule-send/internal/when"
+	"github.com/dj-skn/schedule-send/internal/screen"
+	"github.com/dj-skn/schedule-send/internal/when"
 )
 
 func warsaw(t *testing.T) *time.Location {

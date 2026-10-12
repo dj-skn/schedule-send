@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"schedule-send/internal/limit"
-	"schedule-send/internal/term"
-	"schedule-send/internal/when"
+	"github.com/dj-skn/schedule-send/internal/limit"
+	"github.com/dj-skn/schedule-send/internal/term"
+	"github.com/dj-skn/schedule-send/internal/when"
 )
 
 func warsaw(t *testing.T) *time.Location {

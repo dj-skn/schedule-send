@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"schedule-send/internal/target"
+	"github.com/dj-skn/schedule-send/internal/target"
 )
 
 // Locate finds the herdr binary: HERDR_BIN_OVERRIDE when set, otherwise herdr

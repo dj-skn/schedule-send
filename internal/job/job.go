@@ -19,7 +19,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"schedule-send/internal/installpath"
+	"github.com/dj-skn/schedule-send/internal/installpath"
 )
 
 // UnitPrefix names every unit this tool writes.

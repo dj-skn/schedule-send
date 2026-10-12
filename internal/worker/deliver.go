@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"schedule-send/internal/herdr"
-	"schedule-send/internal/notice"
-	"schedule-send/internal/screen"
+	"github.com/dj-skn/schedule-send/internal/herdr"
+	"github.com/dj-skn/schedule-send/internal/notice"
+	"github.com/dj-skn/schedule-send/internal/screen"
 )
 
 // Herdr confirms a prompt by observing a lifecycle state change, but that

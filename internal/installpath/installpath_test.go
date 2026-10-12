@@ -98,7 +98,7 @@ func TestBuildHelperEncodesFinalPath(t *testing.T) {
 				t.Fatalf("build helper: %v: %s", err, out)
 			}
 			args := strings.Split(strings.TrimSpace(string(out)), "\n")
-			want := []string{"build", "-trimpath", "-ldflags", "-X schedule-send/internal/installpath.Encoded=" + base64.StdEncoding.EncodeToString([]byte(final)), "-o", tc.want, "./cmd/schedule-send"}
+			want := []string{"build", "-trimpath", "-ldflags", "-X github.com/dj-skn/schedule-send/internal/installpath.Encoded=" + base64.StdEncoding.EncodeToString([]byte(final)), "-o", tc.want, "./cmd/schedule-send"}
 			if strings.Join(args, "\n") != strings.Join(want, "\n") {
 				t.Fatalf("arguments %q, want %q", args, want)
 			}

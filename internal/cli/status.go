@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"schedule-send/internal/job"
+	"github.com/dj-skn/schedule-send/internal/job"
 )
 
 type statusTimeouts struct{ timer, journal, drain time.Duration }

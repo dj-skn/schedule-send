@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"schedule-send/internal/term"
+	"github.com/dj-skn/schedule-send/internal/term"
 )
 
 // Row is one agent or plain pane. Fields herdr left out hold "-", so a row

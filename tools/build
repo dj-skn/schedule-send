@@ -9,4 +9,4 @@ cd "$(dirname "$0")/.."
 # The installed path is checked with the same rules arming uses.
 go run ./internal/installpath/check "$2"
 encoded="$(printf '%s' "$2" | base64 -w 0)"
-go build -trimpath -ldflags "-X schedule-send/internal/installpath.Encoded=$encoded" -o "$output" ./cmd/schedule-send
+go build -trimpath -ldflags "-X github.com/dj-skn/schedule-send/internal/installpath.Encoded=$encoded" -o "$output" ./cmd/schedule-send

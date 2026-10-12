@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"schedule-send/internal/target"
+	"github.com/dj-skn/schedule-send/internal/target"
 )
 
 // standin points a client at the stand-in herdr, serving a copy of the saved

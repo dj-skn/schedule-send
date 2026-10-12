@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"schedule-send/internal/herdr"
-	"schedule-send/internal/job"
-	"schedule-send/internal/target"
+	"github.com/dj-skn/schedule-send/internal/herdr"
+	"github.com/dj-skn/schedule-send/internal/job"
+	"github.com/dj-skn/schedule-send/internal/target"
 )
 
 // fake is an agent pane as the worker sees it through herdr. A submit clears
