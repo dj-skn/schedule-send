@@ -13,7 +13,7 @@ Build requirements: Go **1.27.1 or newer**, Git, `flock`, and GNU coreutils
 (`base64` and `tr`). Running the app requires Herdr, GNU `date`, `/usr/bin/env` (GNU coreutils), and
 `systemctl --user`.
 
-From the main checkout on `master`, run once:
+From the main checkout on `main`, run once:
 
 ```zsh
 cd ~/src/schedule-send
@@ -25,7 +25,7 @@ schedule-send --help
 `tools/setup-hooks` enables this repository's tracked Git hooks and installs
 when needed. After a commit, merge/pull, checkout, or history rewrite, the
 hooks rebuild changed program or installer inputs on a **clean main checkout
-on `master`**. Documentation-only updates do not rebuild. Feature branches,
+on `main`**. Documentation-only updates do not rebuild. Feature branches,
 linked worktrees, detached HEADs, and dirty checkouts are skipped.
 
 The hook compares committed input hashes with the installed build. Changes to
@@ -42,7 +42,7 @@ Installation builds `bin/schedule-send`, replaces it atomically, and links
 Installer builds record the stable main-checkout binary path. Real scheduling
 requires running from that location (including through its symlink). Plain
 `go build`/`go run` builds and moved or copied binaries cannot arm jobs; run
-`tools/install` from main `master` and invoke the installed command. Dry-run,
+`tools/install` from main `main` and invoke the installed command. Dry-run,
 management commands, and legacy timer firing remain available in plain builds.
 Generated services invoke `/usr/bin/env --` with the quoted executable path
 and disable systemd environment expansion. Percent specifiers are escaped;

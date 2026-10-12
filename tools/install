@@ -1,13 +1,13 @@
 #!/bin/sh
-# Build and activate only from the master checkout: timer paths must survive
+# Build and activate only from the main checkout: timer paths must survive
 # removal of feature worktrees. Publish the binary atomically after a full build.
 set -eu
 cd "$(dirname "$0")/.."
 root="$(pwd -P)"
 common="$(git rev-parse --path-format=absolute --git-common-dir)"
 branch="$(git symbolic-ref --quiet --short HEAD)"
-if [ "$root/.git" != "$common" ] || [ "$branch" != master ]; then
-  echo 'Run tools/install from the main checkout on master.' >&2
+if [ "$root/.git" != "$common" ] || [ "$branch" != main ]; then
+  echo 'Run tools/install from the main checkout on main.' >&2
   exit 1
 fi
 mkdir -p bin

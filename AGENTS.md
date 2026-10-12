@@ -9,16 +9,16 @@ entrypoint; `schedule-send.zsh` is the compatibility shim for older timers.
 
 ## Workflow
 
-- Keep the main checkout `/home/dev/src/schedule-send` on `master`. Develop and
+- Keep the main checkout `/home/dev/src/schedule-send` on `main`. Develop and
   build feature changes in worktrees under `/home/dev/src/schedule-send.worktrees`.
 - Run `tools/check` before committing. For delivery or scheduling changes,
   run the relevant `tools/parity` cases or the full suite as appropriate.
 - Use the user's commit prefixes: `feat:`, `fix:`, `docs:`, `refactor:`,
   and `chore:`. Use `chore:` for merge commits and tooling changes.
 - `tools/install` and `tools/setup-hooks` must run only from the main checkout
-  on `master`; both enforce this. Never point the installed binary at a worktree.
+  on `main`; both enforce this. Never point the installed binary at a worktree.
 - Tracked Git hooks automatically install changed program/installer inputs on
-  clean main `master` after commits, merges/pulls, checkouts, and rewrites.
+  clean main `main` after commits, merges/pulls, checkouts, and rewrites.
   They skip other branches, linked worktrees, dirty trees, and unchanged inputs.
   File saves do not run hooks. Explicit manual installation remains available.
 - `tools/setup-hooks` enables hooks once per repository and installs if needed.
@@ -30,8 +30,8 @@ entrypoint; `schedule-send.zsh` is the compatibility shim for older timers.
 | --- | --- |
 | `tools/check` | Formatting, vet, Go tests, zsh shim syntax, shell syntax, and isolated hook tests. |
 | `tools/parity [CASE...]` | Compare behavior against the `zsh-baseline` tag with documented differences checked. |
-| `tools/install` | Build, atomically publish, and link the binary; main `master` only. |
-| `tools/setup-hooks` | Enable this repository's hooks and install if needed; main `master` only. |
+| `tools/install` | Build, atomically publish, and link the binary; main `main` only. |
+| `tools/setup-hooks` | Enable this repository's hooks and install if needed; main `main` only. |
 
 Build/install needs Go 1.27.1+, Git, `flock`, and GNU coreutils (`base64`, `tr`). Checks also need `zsh` and
 `jq`; parity uses Python 3 and `script`. Runtime needs Herdr, GNU `date`, `/usr/bin/env` (GNU coreutils), and

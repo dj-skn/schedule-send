@@ -24,7 +24,7 @@ printf 'bin/\ninstallations\nFAIL\n' > "$fixture/.gitignore"
 printf '#!/bin/sh\n# mock builder\n' > "$fixture/tools/build"
 printf 'module hookfixture\n' > "$fixture/go.mod"
 printf '# Hook fixture\n' > "$fixture/README.md"
-git -C "$fixture" init -q -b master
+git -C "$fixture" init -q -b main
 git -C "$fixture" config user.name 'Hook Test'
 git -C "$fixture" config user.email 'hooks@example.invalid'
 git -C "$fixture" config commit.gpgSign false
@@ -57,7 +57,7 @@ printf '// feature change\n' >> "$fixture/go.mod"
 git -C "$fixture" add go.mod
 git -C "$fixture" commit -qm 'feat: change fixture inputs'
 count 1
-git -C "$fixture" checkout -q master
+git -C "$fixture" checkout -q main
 count 1
 git -C "$fixture" merge -q --ff-only feature > /dev/null
 count 2
@@ -111,7 +111,7 @@ count 7
 git -C "$fixture" checkout -q --detach HEAD
 (cd "$fixture" && .githooks/post-commit) > /dev/null
 count 7
-git -C "$fixture" checkout -q master
+git -C "$fixture" checkout -q main
 worktree="$fixture/bin/worktree"
 git -C "$fixture" worktree add -q -b preview "$worktree"
 (cd "$worktree" && tools/auto-install) > /dev/null

@@ -91,16 +91,16 @@ history; its old status paragraph is not the current master behavior.
 | --- | --- | --- | --- |
 | P1 | Recovery stops when a dialog appears during focusing | `ss-2-p1` | complete in ss-2 |
 | P2 | Stable installed executable and valid systemd ExecStart | `ss-2-p2` | complete in ss-2 |
-| P3 | Strict numeric state loading with legacy defaults | `ss-2-p3` | built and verified; fast-forwarded into ss-2 with this update |
-| P4 | Bounded, honest status diagnostics | `ss-2-p4` | approved; not built |
+| P3 | Strict numeric state loading with legacy defaults | `ss-2-p3` | complete in ss-2 |
+| P4 | Bounded, honest status diagnostics | `ss-2-p4` | complete in ss-2 |
 
 Each phase starts with a fresh source check and an owner walkthrough. Build
 only the approved phase on its phase branch. Every implementation step has a
 conventional commit with a body explaining why, after the required gate.
 Record As built and verification results, then fast-forward the phase into
-`ss-2`. Stop if a fast-forward cannot be made. A master merge and push require
-separate owner instructions. Installation is only from clean main master;
-repository hooks may install program changes after an authorized master merge.
+`ss-2`. Stop if a fast-forward cannot be made. A main merge and push require
+separate owner instructions. Installation is only from clean main;
+repository hooks may install program changes after an authorized main merge.
 
 ## P1 — Recovery stops at dialogs
 
@@ -455,6 +455,15 @@ Each report states what was checked now, any changed compatibility behavior,
 and what still needs owner review.
 
 Once every phase is built, verified, and fast-forwarded into `ss-2`, present
-its final diff and verification results for the owner's master-merge decision.
-Do not push, merge master, run tools/install, or run tools/setup-hooks as part
+its final diff and verification results for the owner's main-merge decision.
+Do not push, merge main, run tools/install, or run tools/setup-hooks as part
 of preparing or building this plan.
+
+## Default branch rename — 2026-10-12
+
+The owner requested renaming master to main after the private GitHub repository
+and PR #1 were created. The GitHub default and local main-checkout branch now
+use main. Installer, hook setup, automatic installation guards, and isolated
+hook fixtures are updated on ss-2; README and AGENTS.md use main. Earlier
+master references above describe the historical phase builds. The phase table
+now reflects the completed story. No story merge or installation is included.

@@ -5,8 +5,8 @@ cd "$(dirname "$0")/.."
 root="$(pwd -P)"
 common="$(git rev-parse --path-format=absolute --git-common-dir)"
 branch="$(git symbolic-ref --quiet --short HEAD)"
-if [ "$root/.git" != "$common" ] || [ "$branch" != master ]; then
-  echo 'Run tools/setup-hooks from the main checkout on master.' >&2
+if [ "$root/.git" != "$common" ] || [ "$branch" != main ]; then
+  echo 'Run tools/setup-hooks from the main checkout on main.' >&2
   exit 1
 fi
 configured="$(git config --local --get core.hooksPath || true)"
