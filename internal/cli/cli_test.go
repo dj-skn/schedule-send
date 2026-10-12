@@ -989,12 +989,29 @@ func TestInvalidServiceMetadataRefusedBeforePublication(t *testing.T) {
 	}
 }
 
+// keepGoCaches pins Go's caches before a harness points HOME at a directory
+// that does not exist, so the builds a test runs do not look for them there.
+func keepGoCaches(t *testing.T) {
+	t.Helper()
+	out, err := exec.Command("go", "env", "GOCACHE", "GOMODCACHE").Output()
+	if err != nil {
+		t.Fatalf("go env: %v", err)
+	}
+	dirs := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(dirs) != 2 {
+		t.Fatalf("go env: unexpected output %q", out)
+	}
+	t.Setenv("GOCACHE", dirs[0])
+	t.Setenv("GOMODCACHE", dirs[1])
+}
+
 // Exercise the real linked metadata and CLI with isolated Herdr/systemd stand-ins.
 func TestBuiltInstallationAndUnmanagedCommands(t *testing.T) {
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
 	}
+	keepGoCaches(t)
 	h := newHarness(t, nil)
 	stateRoot := filepath.Join(h.dir, "state-root")
 	configRoot := filepath.Join(h.dir, "config-root")
