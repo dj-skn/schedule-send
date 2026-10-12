@@ -57,7 +57,7 @@ func TestUnitsMatchTheShellVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	// New services quote the executable; legacy fixtures remain unchanged.
-	service = bytes.Replace(service, []byte("ExecStart=/home/dev/src/schedule-send/schedule-send.zsh"), []byte(`ExecStart=:/usr/bin/env -- "/home/dev/src/schedule-send/schedule-send.zsh"`), 1)
+	service = bytes.Replace(service, []byte("ExecStart=/home/dev/src/schedule-send/schedule-send.zsh"), []byte(`ExecStart=/usr/bin/env -- "/home/dev/src/schedule-send/schedule-send.zsh"`), 1)
 	if got != string(service) {
 		t.Errorf("service:\n%s\nwant:\n%s", got, service)
 	}
@@ -95,7 +95,9 @@ func TestServiceCommandEncoding(t *testing.T) {
 		{`/opt/quote"name`, `/opt/quote\"name`},
 		{`/opt/back\name`, `/opt/back\\name`},
 		{"/opt/percent%name", `/opt/percent%%name`},
-		{"/opt/dollar${HOME}", `/opt/dollar${HOME}`},
+		{"/opt/dollar${HOME}", `/opt/dollar$${HOME}`},
+		{"/opt/$HOME", `/opt/$$HOME`},
+		{"/opt/two$$dollars", `/opt/two$$$$dollars`},
 		{"/opt/apostrophe'name", `/opt/apostrophe'name`},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
@@ -103,7 +105,7 @@ func TestServiceCommandEncoding(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := `ExecStart=:/usr/bin/env -- "` + tc.encoded + `" __fire job-1` + "\n"
+			want := `ExecStart=/usr/bin/env -- "` + tc.encoded + `" __fire job-1` + "\n"
 			if !strings.Contains(unit, want) {
 				t.Fatalf("unit %q does not contain %q", unit, want)
 			}
@@ -118,6 +120,8 @@ func TestServiceCommandEncoding(t *testing.T) {
 		{"pane", "date", "/opt/bad\tbin", "job"},
 		{"pane", "date", "/opt/bad\xff", "job"},
 		{"pane", "date", "relative", "job"},
+		{"pane", "date", "/opt/a=b/bin", "job"},
+		{"pane", "date", "/opt//bin", "job"},
 		{"pane", "date", "/opt/bin", "bad\njob"},
 	} {
 		if _, err := ServiceUnit(args[0], args[1], args[2], args[3]); err == nil {

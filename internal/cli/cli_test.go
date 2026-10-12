@@ -479,7 +479,7 @@ func TestArmWritesStateAndUnits(t *testing.T) {
 		t.Errorf("message %q", msg)
 	}
 	service, _ := os.ReadFile(h.a.paths.UnitPath(id, "service"))
-	if !strings.Contains(string(service), `ExecStart=:/usr/bin/env -- "/opt/schedule-send" __fire `+id+"\n") {
+	if !strings.Contains(string(service), `ExecStart=/usr/bin/env -- "/opt/schedule-send" __fire `+id+"\n") {
 		t.Errorf("service:\n%s", service)
 	}
 	if !strings.HasSuffix(h.stdout.String(), "payload=two\n\ncancel with: schedule-send --cancel "+id+"\n") {

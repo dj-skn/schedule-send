@@ -138,8 +138,8 @@ try:
         assert go_files.pop(lock) == "", f"lock unexpectedly contains data: {lock}"
     if armed:
         service_path = f"config/systemd/user/herdr-send-{job_id}.service"
-        command = f'ExecStart=:/usr/bin/env -- "<self>" __fire {job_id}\n'
-        assert command in go_files[service_path], "service must disable expansion and quote its recorded executable via env"
+        command = f'ExecStart=/usr/bin/env -- "<self>" __fire {job_id}\n'
+        assert command in go_files[service_path], "service must quote its recorded executable via env"
         go_files[service_path] = go_files[service_path].replace(command, f"ExecStart=<self> __fire {job_id}\n", 1)
         state_path = f"state/herdr-send/{job_id}.json"
         old_state, new_state = json.loads(ref_files[state_path]), json.loads(go_files[state_path])

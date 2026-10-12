@@ -18,6 +18,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"schedule-send/internal/installpath"
 )
 
 // UnitPrefix names every unit this tool writes.
@@ -308,21 +310,25 @@ func ServiceUnit(pane, calendar, self, id string) (string, error) {
 			}
 		}
 	}
-	if !filepath.IsAbs(self) || !validID.MatchString(id) {
-		return "", errors.New("invalid service executable or job id")
+	if err := installpath.Check(self); err != nil {
+		return "", fmt.Errorf("invalid service executable: %w", err)
+	}
+	if !validID.MatchString(id) {
+		return "", errors.New("invalid job id")
 	}
 	// systemd command syntax is not shell syntax: quote the executable and
-	// escape C-style characters and specifiers. env executes the path as an
-	// argument, since systemd rejects quotes/backslashes in its executable
-	// token even when escaped. The ':' prefix disables environment expansion.
-	executable := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `%`, `%%`).Replace(self)
+	// escape C-style characters, specifiers, and variable references. env
+	// executes the path as an argument, since systemd rejects quotes and
+	// backslashes in its executable token even when escaped. "$$" is used
+	// rather than the ':' prefix, which needs systemd 249 or newer.
+	executable := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `%`, `%%`, `$`, `$$`).Replace(self)
 	description := strings.ReplaceAll("herdr scheduled send to "+pane+" at "+calendar, "%", "%%")
 	return fmt.Sprintf(`[Unit]
 Description=%s
 
 [Service]
 Type=oneshot
-ExecStart=:/usr/bin/env -- "%s" __fire %s
+ExecStart=/usr/bin/env -- "%s" __fire %s
 `, description, executable, id), nil
 }
 
