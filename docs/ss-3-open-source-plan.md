@@ -103,7 +103,7 @@ Stated in the walkthrough; the owner did not object.
 
 | Phase | Outcome | Branch | Status |
 | --- | --- | --- | --- |
-| P1 | A tree that is safe to publish, under its final name | `ss-3-p1` | not started |
+| P1 | A tree that is safe to publish, under its final name | `ss-3-p1` | approved 2026-10-12, in progress |
 | P2 | Timer operations behind one seam, behaviour unchanged | `ss-3-p2` | not started |
 | P3 | A launchd backend for macOS | `ss-3-p3` | not started |
 | P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | not started |
@@ -125,15 +125,75 @@ decisions, and steps when the owner instructs its build.
 
 ### P1 — Publishable tree
 
-Replace the fixtures and every test expectation that names them with invented
-data. Remove personal paths from the agent guidance, README, tests, and
-`tools/parity`. Remove the two earlier plan documents. Store the zsh baseline
-as a tracked file and point parity at it. Rename the module. Add the licence, a
-changelog, and short contributing and security notes.
+Swap every real capture and private name for invented ones without changing
+what any test proves, then add the files a public repository needs. Behaviour
+does not change, apart from two example lines in the usage text.
 
-→ verify: `tools/check` passes; parity still gives 41 identical, 37 known, and
-0 unexpected; a scan of the tree for the private terms finds nothing. The list
-of terms is itself private and stays out of the repository.
+#### Code check — 2026-10-12
+
+- The usage text printed by `--help` names one of the owner's private projects
+  in two example lines, and the old zsh script has the same two lines. A scan
+  against the owner's list of private repository names found it after a first
+  scan of hand-picked terms had missed it. That list is part of the check.
+- The tests read four things from each captured screen: the limit notice, the
+  usage figures in the footer, the prompt box, and the rule lines. Everything
+  above those is conversation.
+- Private names are in 13 files, not only the fixtures: six Go test files and
+  `tools/parity` repeat them, one project name on 54 lines, much of it
+  column-aligned expected output.
+- The owner's timezone is on 44 lines in 12 files, including comments in
+  shipped code and the README. 35 pinned times in 7 files depend on it.
+- The module rename touches 43 import lines in 19 files and one build flag.
+- The zsh baseline is 1,378 lines (51 KB). `tools/parity` reads it from the
+  `zsh-baseline` tag, which a fresh history will not have.
+- The owner's other public project carries a MIT licence in their full name and
+  short contributing, security, and code-of-conduct files.
+
+#### Decisions settled 2026-10-12
+
+The owner agreed to the P1 walkthrough and instructed build.
+
+1. **Timezone.** `Europe/Warsaw` stays. It shows a country and nothing more;
+   replacing it would mean recomputing the pinned times and re-proving the
+   daylight-saving tests.
+2. **Licence name.** The copyright line reads "Jan Halczuk", as on the owner's
+   other public project.
+
+Assumptions the owner did not object to: the home directory in tests becomes
+`/home/dev`; usage figures and notice wording in the screens stay exactly as
+captured while costs, titles, identifiers, and conversation are invented; the
+community files match the owner's other public project, kept short, plus a
+changelog; the guidance says "keep the baseline file" where it said "keep the
+`zsh-baseline` tag"; the README loses only its personal path, since P7
+rewrites it.
+
+#### Steps
+
+1. Build the map from each private name to an invented one. It stays outside
+   the repository.
+   → verify: every stand-in is as long as the name it replaces.
+2. Rewrite the four screens, the two listings, and the job fixture, and apply
+   the map to the tests and `tools/parity`.
+   → verify: `tools/check` passes; parity gives 41 identical, 37 known, 0
+   unexpected.
+3. Replace the two usage examples. Store the zsh script as
+   `testdata/baseline/schedule-send.zsh` with the same two lines changed, and
+   point parity at the file.
+   → verify: parity gives the same counts from the file as from the tag.
+4. Rename the module to `github.com/dj-skn/schedule-send`.
+   → verify: `tools/check` and parity, which rebuild through `tools/build`.
+5. Remove the SS-1 and SS-2 plans. Take personal paths out of `AGENTS.md` and
+   the README, and describe the baseline as a file.
+   → verify: both read correctly from top to bottom.
+6. Add `LICENSE`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, and
+   `CODE_OF_CONDUCT.md`.
+   → verify: read each; links that can resolve today do.
+7. Scan the tree for the private terms, the owner's private repository names,
+   and secret patterns. Run the full gate. Record As built.
+   → verify: zero hits; counts quoted.
+
+Not included: the README rewrite (P7), `--version` (P4), the git history and
+anything on GitHub (P8).
 
 ### P2 — Timer seam
 
