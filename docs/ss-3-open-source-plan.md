@@ -434,6 +434,31 @@ last 40 lines; README and `AGENTS.md` change only where they say Linux only.
 7. Full gate and As built.
    → verify: counts quoted for both systems.
 
+#### Probe results — 2026-10-12
+
+Measured by a throwaway workflow on a GitHub macOS runner (macOS 26.6.2, ARM64,
+a logged-in `gui` session). The probe branch is not merged.
+
+| Question | Answer |
+| --- | --- |
+| Can a job unload itself? | Only as its last act. `launchctl bootout` of its own label killed the job at once: nothing after that line ran. Doing the work first, removing the job file, then running bootout left nothing loaded |
+| What if a job removes its file and just exits? | It stays loaded until something else boots it out |
+| How late does a calendar job start? | 5 seconds after the minute in one measurement |
+| Is a calendar event queued while the job is running? | No. A job still running at its calendar minute was not started again afterwards |
+| Does a direct start cancel the calendar? | No. A job started with `kickstart` that had exited ran again at its calendar minute |
+| What environment does a job get? | `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, with `HOME`, `USER`, and `TMPDIR` set. Homebrew's directory is not on the path |
+| Can a job file live outside `~/Library/LaunchAgents`? | Yes, `bootstrap` accepts any path |
+| Does macOS record a background item per job file? | For a file in `~/Library/LaunchAgents`, yes: one "legacy agent" record each. For a file bootstrapped from elsewhere, none. Whether a record becomes a visible notice could not be seen on a runner |
+| What do failures look like? | `print` and `kickstart` on a missing job exit 113; `bootout` on a missing job exits 3; `bootstrap` exits 5 for a duplicate, a missing file, and a malformed file alike |
+
+What the design takes from this: cleanup removes the job's files and state
+first and boots itself out last; the job file carries the scheduling shell's
+`PATH`; a job due within two minutes is started at load, with no calendar
+trigger; exit 3 and 113 mean "not loaded", and exit 5 cannot tell a duplicate
+from a bad file. The background-item finding is evidence for the alternative
+in decision 3 and goes back to the owner with the result of the run on their
+Mac.
+
 The phase closes only after step 6. Not included: the Homebrew formula (P4),
 the permanent CI workflow (P6), and trying a real pane, which stays the
 owner's to do by hand.
