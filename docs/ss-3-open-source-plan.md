@@ -861,8 +861,15 @@ On the owner's Mac, 2026-10-13: `tools/plugin-smoke` ended `plugin-smoke: ok`.
 Eleven checks passed, the Linux install was skipped as intended, and Herdr
 0.9.3 there accepted the manifest under temporary roots.
 
-Still to confirm: the live check of step 3, on a Herdr server running 0.9.3.
-On the development machine the server was still 0.9.1 when this was written. Not testable before P8: `herdr plugin install` from
+Live check on the owner's Mac, 2026-10-13, first part: the live Herdr 0.9.3
+linked the plugin from the clone and, on `herdr plugin action invoke`, started
+the action. Its reply showed the context Herdr builds for an action:
+`focused_pane_id`, `focused_pane_cwd`, `focused_pane_status`,
+`invocation_source`, and the tab and workspace ids. The owner then unlinked the
+plugin and removed the test binary.
+
+Still to confirm: what the overlay showed. The command's reply says the action
+started, not whether its pane opened or which pane it named. Not testable before P8: `herdr plugin install` from
 GitHub.
 
 ### P6 — CI and release
