@@ -4,9 +4,11 @@
 
 Plan recorded on 2026-10-12 on story branch `ss-3`, starting from `main`. P1,
 P2, and P3 are complete in `ss-3`; this update accompanies P3's fast-forward
-from `ss-3-p3`, after the owner's Mac confirmed it. P4 to P8 are not started.
-`ss-3-p3` was pushed to the private repository for that run, on the owner's
-word; nothing else is pushed, merged into `main`, installed, or published.
+from `ss-3-p3`, after the owner's Mac confirmed it. P4 is built on `ss-3-p4`
+and verified on Linux and on a macOS runner; it is not merged, because it
+closes after the run on the owner's Mac. P5 to P8 are not started.
+`ss-3-p3` and `ss-3-p4` were pushed to the private repository for those runs,
+on the owner's word; nothing else is pushed, merged into `main`, installed, or published.
 
 The owner settled the story's decisions on 2026-10-12 and asked for this plan.
 That is not a build instruction: every phase still gets its own source check,
@@ -109,7 +111,7 @@ Stated in the walkthrough; the owner did not object.
 | P1 | A tree that is safe to publish, under its final name | `ss-3-p1` | complete in ss-3 |
 | P2 | Timer operations behind one seam, behaviour unchanged | `ss-3-p2` | complete in ss-3 |
 | P3 | A launchd backend for macOS | `ss-3-p3` | complete in ss-3 |
-| P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | approved 2026-10-13, in progress |
+| P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | built; awaiting the owner's Mac run |
 | P5 | The Herdr plugin | `ss-3-p5` | not started |
 | P6 | CI and release automation | `ss-3-p6` | not started |
 | P7 | README and visuals | `ss-3-p7` | not started |
@@ -682,6 +684,65 @@ Homebrew image is deleted from the development machine when the phase closes.
 
 Not included: putting the formula in the tap, the release workflow (P6), an
 uninstall command, and macOS archives.
+
+#### As built — 2026-10-13, steps 1 to 5
+
+- `--version` prints `schedule-send <version>`, or a JSON object with
+  `--json`. `tools/build` takes an optional third argument for it, falls back
+  to Git's description of the checkout, then to `dev`, and refuses a version
+  with characters a linker flag cannot carry.
+- `tools/build` builds for another system when `GOOS` and `GOARCH` are set,
+  by running its path check for the build machine, and adds
+  `SCHEDULE_SEND_LDFLAGS` to the linker flags.
+- A recorded path may begin `~/`. It is expanded against the user's home when
+  the program runs and then passes the existing checks. `tools/build` accepts
+  that form; what follows `~/` must be a clean path that stays under the home.
+- `tools/dist VERSION` builds `schedule-send-linux-amd64.tar.gz`,
+  `schedule-send-linux-arm64.tar.gz`, and `checksums.txt`: static, stripped
+  binaries that record `~/.local/bin/schedule-send`.
+- `install.sh` installs the archive for the machine at
+  `~/.local/bin/schedule-send`, refusing unless it matches exactly one line of
+  the checksum file. `SCHEDULE_SEND_VERSION` picks a release and
+  `SCHEDULE_SEND_DOWNLOAD` another source.
+- `packaging/homebrew/schedule-send.rb` is the formula. It builds with
+  `tools/build`, recording `opt_bin`. Its URL and checksum are placeholders
+  until P8.
+- `tools/install-smoke` and `tools/brew-smoke` test the two installers from
+  the checkout.
+- The message for a build that cannot arm names Homebrew and the install
+  script as well as `tools/install`.
+
+Measured:
+
+- Linux: `tools/check` exit 0; 396 tests and subtests in 12 packages; parity
+  41 identical, 37 known differences, 0 unexpected.
+- Archives: 1.5 MB for x86-64 and 1.4 MB for ARM64; both binaries static; two
+  builds of the same source gave identical checksums.
+- `install.sh`: `tools/install-smoke` passes its 13 checks. The same cases
+  passed by hand in a clean Ubuntu 24.04 container, as a new user, with
+  archives built beforehand.
+- Formula on Linux, Homebrew 7.0.9 in a container: `tools/brew-smoke` passes
+  its 7 checks, and `brew style` reports no offences. The run took 70 seconds.
+- Formula on macOS 26.6.2 with Homebrew 7.0.9, on a runner: the same 7 checks
+  pass, tests pass in 11 packages, and `tools/launchd-smoke` still passes.
+
+Differs from the walkthrough: `brew audit` was not run. It expects a formula
+with a real download, which does not exist before P8; `brew style` and
+`brew test` were run instead.
+
+Not tested: a job armed by the Homebrew-installed binary firing under real
+launchd or systemd. The Homebrew test stops at a dry run, and the launchd
+test uses a binary built in a temporary directory.
+
+Still to confirm: step 6, `tools/brew-smoke` on the owner's Mac.
+
+For later phases: P5's plugin runs `install.sh` on Linux. P6 can call
+`tools/dist`, `tools/install-smoke`, and `tools/brew-smoke` as they are, and
+must run `brew update` first, because a runner's Homebrew may predate the
+trust rule. P7's install commands must be the fully qualified
+`brew install dj-skn/tap/schedule-send`; tapping first and installing by bare
+name is refused. P8 fills in the formula's URL and checksum, copies it to the
+tap, and should correct the tap README, which recommends the refused form.
 
 ### P5 — Herdr plugin
 
