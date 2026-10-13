@@ -13,7 +13,9 @@ fi
 loaded() { [ -n "$dir" ] && [ -e "$dir/$1" ]; }
 case "${1:-}" in
   bootstrap)
-    [ -n "$dir" ] && : > "$dir/$(basename "$3" .plist)" ;;
+    # The job's name is the label inside the file, whatever the file is called.
+    label="$(sed -n '/<key>Label<\/key>/{n;s/.*<string>\(.*\)<\/string>.*/\1/p;}' "$3")"
+    [ -n "$dir" ] && [ -n "$label" ] && : > "$dir/$label" ;;
   bootout)
     label="${2##*/}"
     if ! loaded "$label"; then
