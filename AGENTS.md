@@ -38,6 +38,7 @@ entrypoint; `schedule-send.zsh` is the compatibility shim for older timers.
 | `tools/dist VERSION` | Build the Linux release archives and their checksum file. |
 | `tools/install-smoke` | Run `install.sh` against archives built from the checkout, under a temporary home; Linux only. |
 | `tools/brew-smoke` | Install the formula from a temporary local tap and check it, then uninstall; needs Homebrew. |
+| `tools/plugin-smoke` | Check the Herdr plugin's scripts against stand-ins, and its manifest with Herdr under temporary roots. |
 | `tools/setup-hooks` | Enable this repository's hooks and install if needed; main checkout on `main` only. |
 
 Build/install needs Go 1.27.1+, Git, `flock`, and GNU coreutils (`base64`, `tr`). Checks also need `zsh` and

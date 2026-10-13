@@ -304,6 +304,7 @@ The internal worker's journal output remains plain text.
 | `internal/installpath` | The recorded installation path and the path rules `tools/build` shares. |
 | `internal/worker` | Delivery and submission verification. |
 | `internal/show`, `term` | Text/JSON output and terminal handling. |
+| `herdr-plugin.toml`, `plugin` | The Herdr plugin: one action that opens the scheduling prompt for the focused agent. |
 | `.githooks`, `tools` | Automatic installation, builds, and verification. |
 
 State and messages live in `~/.local/state/herdr-send` (directory mode 700;

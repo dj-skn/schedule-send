@@ -27,3 +27,5 @@ The first public release.
 - Install with Homebrew on macOS or Linux, or with `install.sh` on Linux,
   which downloads a checked release binary to `~/.local/bin`.
 - `--version`.
+- A Herdr plugin, `dj-skn.schedule-send`, with one action that opens the
+  scheduling prompt for the focused agent in an overlay. It needs Herdr 0.9.3.
