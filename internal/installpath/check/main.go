@@ -14,7 +14,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Usage: check INSTALLED_PATH")
 		os.Exit(2)
 	}
-	if err := installpath.Check(os.Args[1]); err != nil {
+	if err := installpath.CheckRecorded(os.Args[1]); err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid installed path %q: %v.\n", os.Args[1], err)
 		os.Exit(1)
 	}
