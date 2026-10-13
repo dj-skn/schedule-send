@@ -1,0 +1,60 @@
+#!/bin/sh
+# Run install.sh against archives built from this checkout, as a user with an
+# empty home, and check what it leaves. Linux only. Nothing outside a
+# temporary directory is touched, and no release is downloaded.
+set -eu
+cd "$(dirname "$0")/.."
+root="$(pwd -P)"
+[ "$(uname -s)" = Linux ] || { echo 'tools/install-smoke runs on Linux only.' >&2; exit 1; }
+case "$(uname -m)" in x86_64 | amd64) arch=amd64 ;; *) arch=arm64 ;; esac
+
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+failures=0
+check() { # description, then a command that must succeed
+  what="$1"; shift
+  if "$@"; then echo "  ok    $what"; else echo "  FAIL  $what"; failures=$((failures + 1)); fi
+}
+
+tools/dist 0.0.1-smoke "$work/v1" > /dev/null
+tools/dist 0.0.2-smoke "$work/v2" > /dev/null
+asset=schedule-send-linux-$arch.tar.gz
+cp -r "$work/v2" "$work/corrupt" && printf x >> "$work/corrupt/$asset"
+cp -r "$work/v1" "$work/twice" && cat "$work/v1/checksums.txt" >> "$work/twice/checksums.txt"
+
+# An empty home, and no herdr or systemctl but the stand-ins.
+export HOME="$work/home"
+mkdir -p "$HOME" "$work/path" "$work/scenario" "$work/mac"
+cp testdata/fixtures/2026-10-03/* "$work/scenario/"
+ln -s "$root/testdata/standin/systemctl" "$root/testdata/standin/journalctl" "$work/path/"
+printf '#!/bin/sh\n[ "${1:-}" = -s ] && echo Darwin || echo arm64\n' > "$work/mac/uname"
+chmod +x "$work/mac/uname"
+bin=$HOME/.local/bin/schedule-send
+unset XDG_STATE_HOME XDG_CONFIG_HOME HERDR_SCHEDULE_NOW_EPOCH
+
+run_install() { SCHEDULE_SEND_DOWNLOAD="file://$work/$1" sh install.sh > "$work/out" 2>&1; }
+version() { "$bin" --version; }
+schedule() { # extra arguments
+  PATH="$work/path:$PATH" HERDR_BIN_OVERRIDE="$root/testdata/standin/herdr" HERDR_STANDIN_DIR="$work/scenario" \
+    HERDR_PANE_ID=wB:p2 "$bin" --pane wB:p3 --at '+10 min' --message hello "$@" 2>&1
+}
+
+check "a first install succeeds" run_install v1
+check "the binary is a real file, mode 755" sh -c "[ -f '$bin' ] && [ ! -L '$bin' ] && [ \"\$(stat -c %a '$bin')\" = 755 ]"
+check "it reports the release's version" sh -c "[ \"\$('$bin' --version)\" = 'schedule-send 0.0.1-smoke' ]"
+check "a dry run would run it from ~/.local/bin" sh -c "echo \"\$1\" | grep -q '^would_run=$bin __fire '" _ "$(schedule --dry-run)"
+schedule > /dev/null
+check "an armed job's service runs it from there" sh -c "grep -q 'ExecStart=/usr/bin/env -- \"$bin\" __fire' '$HOME'/.config/systemd/user/herdr-send-*.service"
+check "running it again upgrades in place" sh -c "SCHEDULE_SEND_DOWNLOAD='file://$work/v2' sh install.sh > /dev/null && [ \"\$('$bin' --version)\" = 'schedule-send 0.0.2-smoke' ]"
+check "a corrupted archive is refused" sh -c "! SCHEDULE_SEND_DOWNLOAD='file://$work/corrupt' sh install.sh > /dev/null 2>&1"
+check "a checksum file naming the archive twice is refused" sh -c "! SCHEDULE_SEND_DOWNLOAD='file://$work/twice' sh install.sh > /dev/null 2>&1"
+check "a missing release is refused" sh -c "! SCHEDULE_SEND_DOWNLOAD='file://$work/none' sh install.sh > /dev/null 2>&1"
+check "a refusal leaves the installed binary alone" sh -c "[ \"\$('$bin' --version)\" = 'schedule-send 0.0.2-smoke' ] && ! ls '$HOME'/.local/bin/*.new.* > /dev/null 2>&1"
+check "macOS is pointed to Homebrew" sh -c "PATH='$work/mac':\$PATH SCHEDULE_SEND_DOWNLOAD='file://$work/v1' sh install.sh 2>&1 | grep -q 'brew install dj-skn/tap/schedule-send'"
+rm -f "$bin" && ln -s /bin/true "$bin"
+check "a link at the destination is replaced, not followed" sh -c "SCHEDULE_SEND_DOWNLOAD='file://$work/v1' sh install.sh > /dev/null && [ -f '$bin' ] && [ ! -L '$bin' ] && /bin/true"
+rm -f "$bin"
+check "it installs when piped to sh" sh -c "cat install.sh | SCHEDULE_SEND_DOWNLOAD='file://$work/v1' sh > /dev/null && [ -x '$bin' ]"
+
+echo
+if [ "$failures" -eq 0 ]; then echo "install-smoke: ok"; else echo "install-smoke: $failures check(s) failed"; exit 1; fi
