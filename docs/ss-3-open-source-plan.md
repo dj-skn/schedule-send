@@ -529,10 +529,8 @@ Known limits on macOS, not addressed: a job at a local time that occurs twice
 when clocks go back is started at the first and waits for its instant only if
 that is within two hours; and a non-persistent job missed while the Mac was
 off is loaded again at the next login and listed as `active`, although it
-will not fire until the seven-day limit drops it a year later. Keeping
-non-persistent agents beside the job's state would remove the second, and by
-the probe would also avoid the background-item record; that is the
-alternative in decision 3, for the owner to weigh with step 6.
+will not fire until the seven-day limit drops it a year later. The second was
+removed by the split recorded below.
 
 #### Step 6 — 2026-10-13
 
@@ -572,6 +570,37 @@ What follows from it:
 
 That no record means no visible notice is inferred from the runner. The
 owner's next run confirms or refutes it.
+
+#### As built — the split, 2026-10-13
+
+- An ordinary job's agent is `<state>/<id>.plist`, mode 600; a persistent
+  job's is `~/Library/LaunchAgents/herdr-send-<id>.plist`. Removal and
+  sweeping look in both places. Where the earlier As built says every agent
+  is in `~/Library/LaunchAgents`, and where it describes a five-minute rule
+  for jobs started at load, this section replaces it.
+- `Files` takes the persistent flag on both systems; systemd ignores it.
+- `testdata/standin/launchctl` reads a job's label from its file, as launchd
+  does. It had named jobs after their files, which two tests on the runner
+  exposed once ordinary jobs had shorter file names.
+- `tools/launchd-smoke` arms four jobs. With `LAUNCHD_SMOKE_RECORDS` set, as
+  on a runner, it also counts macOS's background-item records.
+
+Measured:
+
+- Linux: `tools/check` exit 0; 394 tests and subtests in 12 packages; parity
+  41 identical, 37 known differences, 0 unexpected.
+- macOS 26 runner: `go vet` clean; tests pass in 10 packages; the smoke test
+  passes, with both timed jobs delivered once, 0 seconds after their time,
+  and nothing left behind.
+- Background items on that runner: of the four jobs, exactly one has a
+  record, the persistent one. The three files beside the state have none.
+
+One commit message on the phase branch is wrong and is corrected by the commit
+after it: it says the record check waits a few seconds, and that edit had not
+been applied.
+
+Still to confirm: a second run on the owner's Mac, expecting one notice
+instead of one per job.
 
 ### P4 — Versions and installers
 
