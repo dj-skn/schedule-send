@@ -21,3 +21,9 @@ The first public release.
   and retry Enter only on fresh evidence of a stuck draft.
 - List, inspect, and cancel jobs, with `--json` for scripts and `--dry-run`
   to preview a schedule without creating it.
+- macOS support, through launchd agents in the login session. A job whose
+  time passes while the Mac is asleep is sent on wake; `--persistent` also
+  covers a restart.
+- Install with Homebrew on macOS or Linux, or with `install.sh` on Linux,
+  which downloads a checked release binary to `~/.local/bin`.
+- `--version`.

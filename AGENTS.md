@@ -35,6 +35,9 @@ entrypoint; `schedule-send.zsh` is the compatibility shim for older timers.
 | `tools/parity [CASE...]` | Compare behavior against the zsh baseline in `testdata/baseline` with documented differences checked. |
 | `tools/launchd-smoke` | Arm real launchd jobs aimed at the stand-in Herdr and check they fire and clean up; macOS only. |
 | `tools/install` | Build, atomically publish, and link the binary; main checkout on `main` only. |
+| `tools/dist VERSION` | Build the Linux release archives and their checksum file. |
+| `tools/install-smoke` | Run `install.sh` against archives built from the checkout, under a temporary home; Linux only. |
+| `tools/brew-smoke` | Install the formula from a temporary local tap and check it, then uninstall; needs Homebrew. |
 | `tools/setup-hooks` | Enable this repository's hooks and install if needed; main checkout on `main` only. |
 
 Build/install needs Go 1.27.1+, Git, `flock`, and GNU coreutils (`base64`, `tr`). Checks also need `zsh` and
@@ -53,7 +56,10 @@ Build/install needs Go 1.27.1+, Git, `flock`, and GNU coreutils (`base64`, `tr`)
   cleanup there removes its files and state first and unloads itself last.
   Only a `--persistent` job's agent goes in `~/Library/LaunchAgents`: macOS
   announces every file written there.
-- Armed jobs run the installed main-checkout binary. Preserve the zsh shim and
+- Armed jobs run an installed binary, at the path compiled into it: the main
+  checkout's, Homebrew's `opt` path, or `~/.local/bin` for a release. A
+  recorded path is absolute or begins `~/`; arming from anywhere else is
+  refused. Preserve the zsh shim and
   old state-file compatibility. Add state keys with defaults; never rename or
   remove existing keys. Validate required fields before delivering.
 - Recheck target identity and working directory before sending, including

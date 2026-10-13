@@ -44,7 +44,10 @@ tools/install
 
 Installation builds `bin/schedule-send`, replaces it atomically, and links
 `~/.local/bin/schedule-send` to it. Only one installation can run at a time.
-Installer builds record the stable main-checkout binary path. Real scheduling
+Every installed build records the path it arms jobs from: the main-checkout
+binary for `tools/install`, Homebrew's `opt` path for the formula in
+`packaging/homebrew`, and `~/.local/bin/schedule-send` for a release binary
+installed by `install.sh`. Real scheduling
 requires running from that location (including through its symlink). Plain
 `go build`/`go run` builds and moved or copied binaries cannot arm jobs; run
 `tools/install` from the main checkout on `main` and invoke the installed
