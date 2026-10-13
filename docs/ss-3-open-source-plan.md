@@ -112,7 +112,7 @@ Stated in the walkthrough; the owner did not object.
 | P2 | Timer operations behind one seam, behaviour unchanged | `ss-3-p2` | complete in ss-3 |
 | P3 | A launchd backend for macOS | `ss-3-p3` | complete in ss-3 |
 | P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | complete in ss-3 |
-| P5 | The Herdr plugin | `ss-3-p5` | not started |
+| P5 | The Herdr plugin | `ss-3-p5` | approved 2026-10-13, in progress |
 | P6 | CI and release automation | `ss-3-p6` | not started |
 | P7 | README and visuals | `ss-3-p7` | not started |
 | P8 | Publication | `ss-3-p8` | not started |
@@ -751,14 +751,70 @@ tap, and should correct the tap README, which recommends the refused form.
 
 ### P5 — Herdr plugin
 
-Add `herdr-plugin.toml` with an install step that runs the curl script on Linux
-and checks for the Homebrew install on macOS, and one action that opens the
-existing confirm prompt in a popup for the focused agent. Unverified so far:
-which action contexts exist, the lowest Herdr version that supports popups, and
-whether Herdr's plugin registry can be isolated under a temporary home.
+A manifest and a few small shell scripts around the existing program: one
+action that opens an overlay pane running `schedule-send` for the focused
+agent, and an install step. No Go code changes.
 
-→ verify: Herdr accepts the manifest; the owner invokes the action in their
-live Herdr.
+#### Code check — 2026-10-13
+
+- Stable Herdr has no plugin popup. The 0.9.3 client offers overlay, split,
+  tab, and zoomed. The documentation that describes a popup is Herdr's "next"
+  documentation. The manifest check accepts the word, so a plugin using it
+  would fail only when its pane opens.
+- On the development machine the Herdr client is 0.9.3 and the running server
+  is still 0.9.1. Plugins are run by the server.
+- Herdr's own example plugin shows the pattern: an action script asks Herdr to
+  open the plugin's pane and hands values over with `--env`. The documentation
+  says an action receives the focused pane's id in its environment; that was
+  not observed before building.
+- `herdr plugin link` under temporary configuration roots validates and
+  registers a manifest without touching the live Herdr: it accepted a probe
+  manifest with an install step, and refused one that demanded a newer Herdr.
+- Invoking an action needs a running server, so the action can only be tried
+  in a live Herdr.
+- `install.sh` replaces whatever is at `~/.local/bin/schedule-send`, which on
+  the development machine is a link to the checkout's build.
+- `herdr plugin install` from GitHub needs the public repository, so it cannot
+  be tested before P8. The script it runs can.
+
+#### Decisions settled 2026-10-13
+
+The owner agreed to the revised P5 walkthrough and instructed build.
+
+1. **Overlay.** The pane opens as an overlay. No popup path is built.
+2. **Minimum Herdr version.** 0.9.3, the current release.
+3. **macOS.** The owner tests on their Mac when asked. The walkthrough had
+   proposed a macOS runner; the owner's answer was read as preferring their
+   own Mac, so only the phase branch is pushed, for that run.
+
+Assumptions the owner did not object to: the plugin is `dj-skn.schedule-send`,
+named "Schedule Send", with its manifest at the repository root and its
+scripts in `plugin/`; it has one action, and its pane stays open until Enter
+is pressed; on Linux the install step runs `install.sh` only when
+`schedule-send` is not already installed, and on macOS it requires the
+Homebrew install; extra options can be put in a file in the plugin's
+configuration folder; for the live check the plugin is linked from the phase
+worktree with `--dry-run` in that file and unlinked afterwards; the plugin
+binds no key.
+
+#### Steps
+
+1. The manifest and the scripts.
+   → verify: Herdr accepts the manifest under temporary roots; `tools/check`
+   syntax-checks the scripts.
+2. A script test against a stand-in Herdr.
+   → verify: the action passes the focused pane; the pane script finds the
+   program in each install place and explains when it is missing; the install
+   step skips an existing install and, on macOS, demands Homebrew. Passes on
+   Linux and on the owner's Mac.
+3. A live check in the owner's Herdr, on a 0.9.3 server.
+   → verify: the owner invokes the action on an agent pane and sees the prompt
+   and a dry-run receipt for that pane in an overlay.
+4. Full gate and As built.
+
+Not included: a popup, until stable Herdr has one; a second action to list or
+cancel jobs; scheduling automatically when a limit is hit; Windows; and the
+plugin index listing, which appears in P8.
 
 ### P6 — CI and release
 
