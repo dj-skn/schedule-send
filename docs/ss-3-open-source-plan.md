@@ -842,6 +842,21 @@ identical, 37 known differences, 0 unexpected; `tools/plugin-smoke` passes its
 action made its check fail. The live Herdr was not touched and still lists no
 plugins.
 
+Found while building:
+
+- **Some tests fail when the machine is busy.** One gate run failed and the
+  next passed. Repeated 12 times in sequence the tests never failed; with four
+  suites running at once, 7 of 32 runs failed. The same load on `main` also
+  failed 7 of 32, in the same tests: the status-inspection deadline test, and
+  tests that call `date` under its two-second limit. They predate this story
+  and were left alone. P6 has to deal with them, because CI runners are
+  noisier than this machine.
+- **The gate's result was being read from its last line.** The commands that
+  ran `tools/check` before committing piped it through `tail`, which hides its
+  exit status. On the run that failed, the commit recording the Linux steps
+  was made and pushed anyway. It changes only this document, and the tree
+  passes the gate; from here the exit status itself is checked.
+
 Still to confirm: `tools/plugin-smoke` on the owner's Mac, and the live check
 of step 3, which needs the owner's Herdr server on 0.9.3; it was still 0.9.1
 when this was written. Not testable before P8: `herdr plugin install` from
