@@ -5,8 +5,9 @@
 Plan recorded on 2026-10-12 on story branch `ss-3`, starting from `main`. P1,
 P2, and P3 are complete in `ss-3`; this update accompanies P3's fast-forward
 from `ss-3-p3`, after the owner's Mac confirmed it. P4 is complete in `ss-3`
-as well, fast-forwarded from `ss-3-p4` after the same confirmation. P5 to P8
-are not started.
+as well, fast-forwarded from `ss-3-p4` after the same confirmation. P5 is built on
+`ss-3-p5` and verified on Linux; it is not merged, because it closes after
+the owner's Mac run and a live check in their Herdr. P6 to P8 are not started.
 `ss-3-p3` and `ss-3-p4` were pushed to the private repository for those runs,
 on the owner's word; nothing else is pushed, merged into `main`, installed, or published.
 
@@ -112,7 +113,7 @@ Stated in the walkthrough; the owner did not object.
 | P2 | Timer operations behind one seam, behaviour unchanged | `ss-3-p2` | complete in ss-3 |
 | P3 | A launchd backend for macOS | `ss-3-p3` | complete in ss-3 |
 | P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | complete in ss-3 |
-| P5 | The Herdr plugin | `ss-3-p5` | approved 2026-10-13, in progress |
+| P5 | The Herdr plugin | `ss-3-p5` | built; awaiting the owner's two checks |
 | P6 | CI and release automation | `ss-3-p6` | not started |
 | P7 | README and visuals | `ss-3-p7` | not started |
 | P8 | Publication | `ss-3-p8` | not started |
@@ -815,6 +816,36 @@ binds no key.
 Not included: a popup, until stable Herdr has one; a second action to list or
 cancel jobs; scheduling automatically when a limit is hit; Windows; and the
 plugin index listing, which appears in P8.
+
+#### As built — 2026-10-13, steps 1 and 2 on Linux
+
+- `herdr-plugin.toml` declares `dj-skn.schedule-send`, version 0.1.0, for
+  Herdr 0.9.3 on Linux and macOS: one install step, one action (`schedule`),
+  and one overlay pane (`prompt`).
+- `plugin/schedule.sh` is the action. It asks Herdr to open the pane as an
+  overlay and passes the focused pane's id as `SCHEDULE_SEND_TARGET`.
+- `plugin/prompt.sh` runs in the pane: it finds the program, adds the options
+  from an `args` file in the plugin's configuration directory, runs
+  `schedule-send --pane <target>`, and waits for Enter.
+- `plugin/setup.sh` is the install step: it leaves an existing install alone,
+  runs `install.sh` on Linux when there is none, and on macOS stops with the
+  Homebrew command.
+- `plugin/find.sh` looks for the program on `PATH`, then in `~/.local/bin` and
+  Homebrew's directories, since Herdr starts plugin commands with its server's
+  `PATH`.
+- `tools/plugin-smoke` tests those scripts against stand-ins and links the
+  manifest with the installed Herdr under temporary configuration roots.
+
+Measured on Linux: `tools/check` exit 0; 396 tests and subtests; parity 41
+identical, 37 known differences, 0 unexpected; `tools/plugin-smoke` passes its
+13 checks, with Herdr 0.9.3 accepting the manifest; a deliberately broken
+action made its check fail. The live Herdr was not touched and still lists no
+plugins.
+
+Still to confirm: `tools/plugin-smoke` on the owner's Mac, and the live check
+of step 3, which needs the owner's Herdr server on 0.9.3; it was still 0.9.1
+when this was written. Not testable before P8: `herdr plugin install` from
+GitHub.
 
 ### P6 — CI and release
 
