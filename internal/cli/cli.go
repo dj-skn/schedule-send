@@ -47,7 +47,7 @@ func fail(kind, format string, a ...any) error {
 const resumeMessage = "resume"
 
 // installHint is how to get a build that can arm jobs.
-const installHint = "Run tools/install from the main checkout, then invoke the installed schedule-send."
+const installHint = "Install it again with Homebrew, the install script, or tools/install from a checkout, then run the installed schedule-send."
 
 // A notice names its reset to the minute, and the reset lands somewhere inside
 // that minute — a notice reading 12:27 AM was for a reset at 00:27:52 — so the
@@ -197,7 +197,7 @@ func (a *app) parse(args []string) error {
 	for i := 0; i < len(args); {
 		flag := args[i]
 		switch flag {
-		case "--json", "--targets", "--list", "--cancel", "--status", "--help", "-h":
+		case "--json", "--targets", "--list", "--cancel", "--status", "--help", "-h", "--version":
 		default:
 			scheduling = true
 		}
@@ -273,6 +273,9 @@ func (a *app) parse(args []string) error {
 		case "-h", "--help":
 			err = operation("--help")
 			i++
+		case "--version":
+			err = operation(flag)
+			i++
 		default:
 			if a.o.json {
 				return failure{code: 2, kind: "usage", msg: "Unknown argument: " + flag}
@@ -309,6 +312,15 @@ func (a *app) run(args []string) (retErr error) {
 		return a.status(a.o.operationID)
 	case "--help":
 		fmt.Fprint(a.stdout, usage)
+		return nil
+	case "--version":
+		if a.o.json {
+			emit(a.stdout, struct {
+				Version string `json:"version"`
+			}{Version})
+			return nil
+		}
+		fmt.Fprintln(a.stdout, "schedule-send", Version)
 		return nil
 	}
 	o := &a.o

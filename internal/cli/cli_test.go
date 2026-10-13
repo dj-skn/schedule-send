@@ -940,7 +940,7 @@ func TestUnmanagedSchedulingRefusedBeforePublication(t *testing.T) {
 	if code := h.a.main([]string{"--pane", "wB:p3", "--at", "16:30", "--message", "hello"}); code != 1 {
 		t.Fatalf("exit %d, want 1", code)
 	}
-	if !strings.Contains(h.stderr.String(), "Run tools/install from the main checkout, then") {
+	if !strings.Contains(h.stderr.String(), "or tools/install from a checkout, then run the installed schedule-send.") {
 		t.Fatalf("stderr: %s", h.stderr)
 	}
 	for _, dir := range []string{h.a.paths.StateDir, h.a.paths.UnitDir} {
@@ -963,7 +963,7 @@ func TestDryRunFromUnmanagedBuild(t *testing.T) {
 		if code := h.a.main(args); code != 0 {
 			t.Fatalf("exit %d: %s", code, h.stderr)
 		}
-		if !strings.Contains(h.stderr.String(), "Warning: this build cannot arm jobs (this build has no installation path), so a real run would be refused. Run tools/install") {
+		if !strings.Contains(h.stderr.String(), "Warning: this build cannot arm jobs (this build has no installation path), so a real run would be refused. Install it again with Homebrew") {
 			t.Errorf("stderr: %s", h.stderr)
 		}
 		if strings.Contains(h.stdout.String(), "__fire") {

@@ -57,6 +57,7 @@ Other:
                          without this flag stays key=value.
   --targets              List every pane, with each agent's usage limit.
   -h, --help             Show this help.
+  --version              Show the version.
 
 Examples:
   schedule-send --at 15:50 --message 'resume, then commit when done'

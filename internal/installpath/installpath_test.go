@@ -91,18 +91,24 @@ func TestBuildHelperEncodesFinalPath(t *testing.T) {
 		{"relative output", "relative output", dir, filepath.Join(dir, "relative output")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cmd := exec.Command(helper, tc.output, final)
+			cmd := exec.Command(helper, tc.output, final, "9.9.9-rc.1")
 			cmd.Dir = tc.cwd
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				t.Fatalf("build helper: %v: %s", err, out)
 			}
 			args := strings.Split(strings.TrimSpace(string(out)), "\n")
-			want := []string{"build", "-trimpath", "-ldflags", "-X github.com/dj-skn/schedule-send/internal/installpath.Encoded=" + base64.StdEncoding.EncodeToString([]byte(final)), "-o", tc.want, "./cmd/schedule-send"}
+			want := []string{"build", "-trimpath", "-ldflags", "-X github.com/dj-skn/schedule-send/internal/installpath.Encoded=" + base64.StdEncoding.EncodeToString([]byte(final)) + " -X github.com/dj-skn/schedule-send/internal/cli.Version=9.9.9-rc.1", "-o", tc.want, "./cmd/schedule-send"}
 			if strings.Join(args, "\n") != strings.Join(want, "\n") {
 				t.Fatalf("arguments %q, want %q", args, want)
 			}
 		})
+	}
+	for _, version := range []string{"1.0 0", "1.0;x", "$(id)"} {
+		out, err := exec.Command(helper, filepath.Join(dir, "output"), final, version).CombinedOutput()
+		if err == nil || strings.Contains(string(out), "-trimpath") {
+			t.Fatalf("accepted version %q: %s", version, out)
+		}
 	}
 	for _, invalid := range []string{
 		"relative", dir + "/bad\npath", dir + "/bad\tpath", dir + "/bad\x7fpath",
