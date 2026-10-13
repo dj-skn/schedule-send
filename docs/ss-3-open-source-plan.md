@@ -4,9 +4,9 @@
 
 Plan recorded on 2026-10-12 on story branch `ss-3`, starting from `main`. P1,
 P2, and P3 are complete in `ss-3`; this update accompanies P3's fast-forward
-from `ss-3-p3`, after the owner's Mac confirmed it. P4 is built on `ss-3-p4`
-and verified on Linux and on a macOS runner; it is not merged, because it
-closes after the run on the owner's Mac. P5 to P8 are not started.
+from `ss-3-p3`, after the owner's Mac confirmed it. P4 is complete in `ss-3`
+as well, fast-forwarded from `ss-3-p4` after the same confirmation. P5 to P8
+are not started.
 `ss-3-p3` and `ss-3-p4` were pushed to the private repository for those runs,
 on the owner's word; nothing else is pushed, merged into `main`, installed, or published.
 
@@ -111,7 +111,7 @@ Stated in the walkthrough; the owner did not object.
 | P1 | A tree that is safe to publish, under its final name | `ss-3-p1` | complete in ss-3 |
 | P2 | Timer operations behind one seam, behaviour unchanged | `ss-3-p2` | complete in ss-3 |
 | P3 | A launchd backend for macOS | `ss-3-p3` | complete in ss-3 |
-| P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | built; awaiting the owner's Mac run |
+| P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | complete in ss-3 |
 | P5 | The Herdr plugin | `ss-3-p5` | not started |
 | P6 | CI and release automation | `ss-3-p6` | not started |
 | P7 | README and visuals | `ss-3-p7` | not started |
@@ -734,7 +734,12 @@ Not tested: a job armed by the Homebrew-installed binary firing under real
 launchd or systemd. The Homebrew test stops at a dry run, and the launchd
 test uses a binary built in a temporary directory.
 
-Still to confirm: step 6, `tools/brew-smoke` on the owner's Mac.
+Step 6, 2026-10-13: the owner ran `tools/brew-smoke` on their Mac and it
+ended `brew-smoke: ok`, all 7 checks passing. Homebrew built the formula in
+10 seconds, recorded `/opt/homebrew/opt/schedule-send/bin/schedule-send`, and
+that path ran the new version after the upgrade. Homebrew upgraded the Mac's
+Go from 1.27.1 to 1.27.2 to build it, and asked for confirmation before doing
+so. The phase is closed.
 
 For later phases: P5's plugin runs `install.sh` on Linux. P6 can call
 `tools/dist`, `tools/install-smoke`, and `tools/brew-smoke` as they are, and
