@@ -101,9 +101,10 @@ check "all four are loaded" sh -c "launchctl print '$domain/herdr-send-$soon_id'
 # macOS keeps a record of each background item; a record is what its notice
 # comes from. Reading the records needs root, so this runs only when asked.
 if [ -n "${LAUNCHD_SMOKE_RECORDS:-}" ]; then
+  sleep 5 # a record appears a moment after its file
   sudo -n sfltool dumpbtm > "$work/records" 2> /dev/null || : > "$work/records"
   records="$(grep -c "herdr-send-.*\.plist\|$state/" "$work/records" || true)"
-  echo "        $records background-item record(s) name these jobs"
+  echo "        $records background-item record(s) name these jobs, of $(grep -c 'URL:' "$work/records" || true) in all"
   check "only the persistent job is recorded as a background item" sh -c "[ '$records' = 1 ] && grep -q 'herdr-send-$keep_id.plist' '$work/records'"
 fi
 
