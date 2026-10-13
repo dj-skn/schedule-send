@@ -1,0 +1,115 @@
+#!/bin/sh
+# Check the Herdr plugin's scripts against stand-ins: what the action asks
+# Herdr for, how the prompt finds and runs the program, and what the install
+# step does. Runs on Linux and macOS. Nothing outside a temporary directory is
+# touched, and the live Herdr is not asked anything.
+set -eu
+cd "$(dirname "$0")/.."
+root="$(pwd -P)"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+failures=0
+check() { # description, then a command that must succeed
+  what="$1"; shift
+  if "$@"; then echo "  ok    $what"; else echo "  FAIL  $what"; failures=$((failures + 1)); fi
+}
+
+# PATH without any directory that already holds a schedule-send, so the
+# machine's own install cannot answer for the stand-ins.
+bare=
+old_ifs=$IFS
+IFS=:
+for dir in $PATH; do
+  [ -x "$dir/schedule-send" ] || bare="${bare:+$bare:}$dir"
+done
+IFS=$old_ifs
+
+standin() { # directory, name: a schedule-send that records how it was run
+  mkdir -p "$1"
+  cat > "$1/schedule-send" <<S
+#!/bin/sh
+[ "\${1:-}" = --version ] && { echo "schedule-send 9.9.9-$2"; exit 0; }
+echo "$2: \$*" >> "$work/runs"
+echo "receipt from $2"
+S
+  chmod +x "$1/schedule-send"
+}
+mkdir -p "$work/home" "$work/config" "$work/empty"
+cat > "$work/herdr" <<S
+#!/bin/sh
+printf '%s\n' "\$*" >> "$work/herdr.calls"
+S
+chmod +x "$work/herdr"
+: > "$work/runs"
+
+echo "The action"
+HERDR_BIN_PATH="$work/herdr" HERDR_PLUGIN_ID=dj-skn.schedule-send HERDR_PANE_ID=wB:p1 sh plugin/schedule.sh
+check "opens the prompt as an overlay and names the focused pane" sh -c "[ \"\$(cat '$work/herdr.calls')\" = 'plugin pane open --plugin dj-skn.schedule-send --entrypoint prompt --placement overlay --env SCHEDULE_SEND_TARGET=wB:p1 --focus' ]"
+
+echo "The prompt"
+prompt() { # environment assignments, then nothing: runs the pane script with Enter on its input
+  printf '\n' | env HOME="$work/home" PATH="$bare" HERDR_PLUGIN_CONFIG_DIR="$work/config" "$@" sh plugin/prompt.sh > "$work/out" 2>&1
+}
+standin "$work/places/b" second
+printf '%s\n' '# defaults for every send' '--dry-run' '--persistent' > "$work/config/args"
+prompt SCHEDULE_SEND_PLUGIN_PLACES="$work/places/a:$work/places/b" SCHEDULE_SEND_TARGET=wB:p1 || true
+check "finds the program in a later install place" grep -q '^second: ' "$work/runs"
+check "passes the pane first, then the options from the args file" grep -q -x 'second: --pane wB:p1 --dry-run --persistent' "$work/runs"
+check "shows the receipt and waits for Enter" sh -c "grep -q 'receipt from second' '$work/out' && grep -q 'Press Enter to close' '$work/out'"
+
+: > "$work/runs"; rm "$work/config/args"
+standin "$work/onpath" path
+printf '\n' | env HOME="$work/home" PATH="$work/onpath:$bare" HERDR_PLUGIN_CONFIG_DIR="$work/config" SCHEDULE_SEND_PLUGIN_PLACES="$work/places/b" sh plugin/prompt.sh > "$work/out" 2>&1 || true
+check "prefers the program on PATH, and passes nothing without a pane or a file" grep -q -x 'path: ' "$work/runs"
+
+: > "$work/runs"
+standin "$work/home/.local/bin" home
+prompt SCHEDULE_SEND_TARGET=wA:p1 || true
+check "looks in ~/.local/bin by default" grep -q -x 'home: --pane wA:p1' "$work/runs"
+rm -rf "$work/home/.local"
+
+status=0
+prompt SCHEDULE_SEND_PLUGIN_PLACES="$work/empty" || status=$?
+check "says how to install when the program is missing" sh -c "[ $status -ne 0 ] && grep -q 'brew install dj-skn/tap/schedule-send' '$work/out' && grep -q 'install.sh | sh' '$work/out' && grep -q 'Press Enter to close' '$work/out'"
+
+echo "The install step"
+setup() { # environment assignments: runs the install step under the temporary home
+  env HOME="$work/home" "$@" sh plugin/setup.sh > "$work/out" 2>&1
+}
+mkdir -p "$work/os"
+os() { printf '#!/bin/sh\n[ "${1:-}" = -s ] && echo %s || echo x86_64\n' "$1" > "$work/os/uname"; chmod +x "$work/os/uname"; }
+
+check "leaves an existing install alone" sh -c "env HOME='$work/home' PATH='$work/onpath:$bare' sh plugin/setup.sh | grep -q 'already installed: $work/onpath/schedule-send (schedule-send 9.9.9-path)'"
+check "and installs nothing beside it" sh -c "[ ! -e '$work/home/.local/bin/schedule-send' ]"
+
+os Darwin
+status=0
+setup PATH="$work/os:$bare" SCHEDULE_SEND_PLUGIN_PLACES="$work/empty" || status=$?
+check "on macOS, stops and names the Homebrew command" sh -c "[ $status -ne 0 ] && grep -q 'brew install dj-skn/tap/schedule-send' '$work/out'"
+os FreeBSD
+status=0
+setup PATH="$work/os:$bare" SCHEDULE_SEND_PLUGIN_PLACES="$work/empty" || status=$?
+check "on another system, stops" [ "$status" -ne 0 ]
+
+if [ "$(uname -s)" = Linux ]; then
+  tools/dist 0.0.1-smoke "$work/dist" > /dev/null
+  status=0
+  setup PATH="$bare" SCHEDULE_SEND_PLUGIN_PLACES="$work/empty" SCHEDULE_SEND_DOWNLOAD="file://$work/dist" || status=$?
+  check "on Linux, runs install.sh when the program is missing" sh -c "[ $status -eq 0 ] && [ \"\$('$work/home/.local/bin/schedule-send' --version)\" = 'schedule-send 0.0.1-smoke' ]"
+else
+  echo "  skip  the Linux install, which needs Linux"
+fi
+
+echo "The manifest"
+if command -v herdr > /dev/null 2>&1; then
+  reply="$(XDG_CONFIG_HOME="$work/xdg/config" XDG_STATE_HOME="$work/xdg/state" XDG_DATA_HOME="$work/xdg/data" herdr plugin link "$root" 2>&1 || true)"
+  case "$reply" in
+    *'requires Herdr'*) echo "  skip  $(herdr --version) is older than the plugin's minimum" ;;
+    *) check "$(herdr --version) accepts it, under temporary roots" sh -c "echo \"\$1\" | grep -q '\"plugin_id\":\"dj-skn.schedule-send\"'" _ "$reply" ;;
+  esac
+else
+  echo "  skip  Herdr is not installed here"
+fi
+
+echo
+if [ "$failures" -eq 0 ]; then echo "plugin-smoke: ok"; else echo "plugin-smoke: $failures check(s) failed"; exit 1; fi
