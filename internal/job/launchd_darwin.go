@@ -35,12 +35,6 @@ type Scheduler struct{}
 // to catch it. Such a job is started when it is loaded, and waits.
 const soon = 2 * time.Minute
 
-// What a job's agent tells its worker about how it was armed.
-const (
-	envAtLoad     = "HERDR_SEND_AT_LOAD"
-	envPersistent = "HERDR_SEND_PERSISTENT"
-)
-
 // zone is the system's zone, which launchd's calendar is read in whatever TZ
 // the scheduling shell has set.
 var zone = func() *time.Location {
@@ -59,10 +53,21 @@ func domain() string          { return "gui/" + strconv.Itoa(os.Getuid()) }
 func label(id string) string  { return UnitPrefix + "-" + id }
 func target(id string) string { return domain() + "/" + label(id) }
 
-// AgentPath and LogPath name a job's agent file and the log launchd writes
-// its output to. The log outlives the job so --status can still show it.
-func (p Paths) AgentPath(id string) string { return filepath.Join(p.UnitDir, label(id)+".plist") }
-func (p Paths) LogPath(id string) string   { return filepath.Join(p.StateDir, id+".log") }
+// agentPath is a job's agent file. An ordinary job keeps it beside its state:
+// launchd loads it from there, macOS records no background item for it, and
+// launchd forgets it at logout, which is when such a job is skipped. A
+// persistent job's file goes where launchd loads agents at login, the only
+// place that survives a restart, and macOS announces each one.
+func (p Paths) agentPath(id string, persistent bool) string {
+	if persistent {
+		return filepath.Join(p.UnitDir, label(id)+".plist")
+	}
+	return filepath.Join(p.StateDir, id+".plist")
+}
+
+// LogPath is where launchd writes a job's output. The log outlives the job so
+// --status can still show it.
+func (p Paths) LogPath(id string) string { return filepath.Join(p.StateDir, id+".log") }
 
 func (Scheduler) run(args ...string) Result {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -105,7 +110,9 @@ func (s Scheduler) Available(arming bool) error {
 func (Scheduler) Name(id string) string { return label(id) }
 
 // Files names what arming writes for a job, as a receipt shows it.
-func (Scheduler) Files(p Paths, id string) string { return p.AgentPath(id) }
+func (Scheduler) Files(p Paths, id string, persistent bool) string {
+	return p.agentPath(id, persistent)
+}
 
 // Trigger is a job's agent, checked before the job is reserved.
 type Trigger struct {
@@ -136,9 +143,9 @@ func (Scheduler) Render(pane, calendar, self, id string, runAt int64, persistent
 }
 
 // agent renders a job's property list. A job due soon has no calendar and
-// runs when it is loaded; a persistent one has both, so that a login after
-// its time still starts it. The scheduling shell's PATH and XDG roots go with
-// it, since launchd gives a job neither.
+// runs when it is loaded; a persistent one runs when loaded as well as on its
+// calendar, so that a login after its time still starts it. The scheduling
+// shell's PATH and XDG roots go with it, since launchd gives a job neither.
 func agent(p Paths, t Trigger, atLoad bool) []byte {
 	var b bytes.Buffer
 	text := func(s string) string {
@@ -185,12 +192,6 @@ func agent(p Paths, t Trigger, atLoad bool) []byte {
 	for _, key := range []string{"PATH", "XDG_STATE_HOME", "XDG_CONFIG_HOME"} {
 		env(key, os.Getenv(key))
 	}
-	if atLoad {
-		env(envAtLoad, "1")
-	}
-	if t.persistent {
-		env(envPersistent, "1")
-	}
 	b.WriteString("\t</dict>\n</dict>\n</plist>\n")
 	return b.Bytes()
 }
@@ -199,14 +200,15 @@ func agent(p Paths, t Trigger, atLoad bool) []byte {
 // loading was tried, which decides how a failure is rolled back. An error is
 // the message shown to the user.
 func (s Scheduler) Arm(p Paths, t Trigger) (attempted bool, err error) {
-	// The agent is a file rather than a submitted job, so that a persistent
-	// one is loaded again at the next login.
-	if err := os.MkdirAll(p.UnitDir, 0o755); err != nil {
-		return false, fmt.Errorf("Could not create %s: %v", p.UnitDir, err)
+	path, dir, mode := p.agentPath(t.id, t.persistent), p.StateDir, os.FileMode(0o600)
+	if t.persistent {
+		dir, mode = p.UnitDir, 0o644
 	}
-	path := p.AgentPath(t.id)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return false, fmt.Errorf("Could not create %s: %v", dir, err)
+	}
 	atLoad := time.Until(time.Unix(t.runAt, 0)) < soon
-	if err := AtomicWrite(path, agent(p, t, atLoad), 0o644); err != nil {
+	if err := AtomicWrite(path, agent(p, t, atLoad), mode); err != nil {
 		return false, fmt.Errorf("Could not write %s: %v", path, err)
 	}
 	if r := s.run("bootstrap", domain(), path); r.Err != nil {
@@ -216,10 +218,9 @@ func (s Scheduler) Arm(p Paths, t Trigger) (attempted bool, err error) {
 }
 
 // Await holds a started worker until its job's firing time, and says whether
-// this start is one to deliver on. The agent's environment says how it was
-// armed.
+// this start is one to deliver on.
 func (Scheduler) Await(runAt int64, now func() time.Time, sleep func(time.Duration)) (Verdict, string) {
-	return await(runAt, now, sleep, os.Getenv(envAtLoad) == "1", os.Getenv(envPersistent) == "1")
+	return await(runAt, now, sleep)
 }
 
 // Armed is a job's state as --list shows it: active while launchd has it
@@ -271,10 +272,11 @@ func (Scheduler) Inspect(p Paths, id string, timerBudget, journalBudget, drain t
 	return r
 }
 
-// removeFiles removes the agent first and the state last, so a job that
-// could not be fully removed is still listed and can be cancelled again.
+// removeFiles removes the agent first, wherever it was written, and the state
+// last, so a job that could not be fully removed is still listed and can be
+// cancelled again.
 func (p Paths) removeFiles(id string) error {
-	for _, path := range []string{p.AgentPath(id), p.MessagePath(id), p.StatePath(id)} {
+	for _, path := range []string{p.agentPath(id, false), p.agentPath(id, true), p.MessagePath(id), p.StatePath(id)} {
 		if err := removeFile(path); err != nil {
 			return err
 		}
@@ -331,7 +333,8 @@ func (p Paths) Cleanup(s Scheduler, id string) error {
 // same lock as scheduling, and drops logs a week after their jobs are gone.
 func (p Paths) Sweep(s Scheduler) {
 	agents, _ := filepath.Glob(filepath.Join(p.UnitDir, UnitPrefix+"-*.plist"))
-	for _, a := range agents {
+	beside, _ := filepath.Glob(filepath.Join(p.StateDir, "*.plist"))
+	for _, a := range append(agents, beside...) {
 		id := strings.TrimPrefix(strings.TrimSuffix(filepath.Base(a), ".plist"), UnitPrefix+"-")
 		lock, err := p.Lock(id)
 		if err != nil {

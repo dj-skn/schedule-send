@@ -543,8 +543,35 @@ third was listed, inspected, and cancelled; nothing was left on disk or
 loaded.
 
 macOS showed two or three background-item notices for the three agent files.
-That is the condition in decision 3, so the alternative goes back to the owner
-before the phase is merged. The phase stays open.
+That is the condition in decision 3, so the alternative went back to the owner
+before the phase was merged.
+
+#### Decision 3 revised — 2026-10-13
+
+The owner agreed to split job files by kind. An ordinary job keeps its agent
+file beside its state and is loaded from there; a `--persistent` job's file
+stays in `~/Library/LaunchAgents`, the only place that survives a restart, and
+still raises a notice. Never using `~/Library/LaunchAgents` was the
+alternative: no notices at all, but `--persistent` would then cover sleep only.
+
+What follows from it:
+
+- An ordinary job is forgotten by launchd at logout or restart, which is the
+  rule the owner chose for it. Its state stays and `--list` shows it as
+  `gone` until it is cancelled, as a missed job is listed on Linux. The limit
+  recorded above, a missed job listed as `active` for a year, no longer
+  applies to ordinary jobs.
+- A late start can now only mean the Mac was asleep at the time, or the job
+  is persistent and was loaded at a later login. Both are delivered, so the
+  rule that dropped a job started at load more than five minutes late is
+  removed, and the agent no longer tells its worker how it was armed. The
+  two-hour and seven-day bounds stay.
+- The receipt's file name depends on the flag, so `Files` takes it.
+- The smoke test arms a fourth, persistent job and cancels it. One notice is
+  expected from a run, for that job.
+
+That no record means no visible notice is inferred from the runner. The
+owner's next run confirms or refutes it.
 
 ### P4 — Versions and installers
 

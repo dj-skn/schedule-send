@@ -96,7 +96,7 @@ func TestAgentCarriesTheCalendarInTheSystemZone(t *testing.T) {
 			t.Errorf("agent lacks %q:\n%s", want, got)
 		}
 	}
-	for _, unwanted := range []string{"RunAtLoad", "XDG_CONFIG_HOME", envAtLoad, envPersistent} {
+	for _, unwanted := range []string{"RunAtLoad", "XDG_CONFIG_HOME"} {
 		if strings.Contains(got, unwanted) {
 			t.Errorf("agent has %q:\n%s", unwanted, got)
 		}
@@ -109,12 +109,11 @@ func TestAgentTriggers(t *testing.T) {
 		name               string
 		atLoad, persistent bool
 		calendar, load     bool
-		env                []string
 	}{
-		{"calendar only", false, false, true, false, nil},
-		{"persistent keeps the calendar and runs at login", false, true, true, true, []string{envPersistent}},
-		{"due soon runs when loaded", true, false, false, true, []string{envAtLoad}},
-		{"due soon and persistent", true, true, false, true, []string{envAtLoad, envPersistent}},
+		{"calendar only", false, false, true, false},
+		{"persistent keeps the calendar and runs at login", false, true, true, true},
+		{"due soon runs when loaded", true, false, false, true},
+		{"due soon and persistent", true, true, false, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -122,16 +121,36 @@ func TestAgentTriggers(t *testing.T) {
 			if strings.Contains(got, "StartCalendarInterval") != c.calendar || strings.Contains(got, "RunAtLoad") != c.load {
 				t.Errorf("calendar=%v load=%v wanted:\n%s", c.calendar, c.load, got)
 			}
-			for _, key := range []string{envAtLoad, envPersistent} {
-				want := false
-				for _, e := range c.env {
-					want = want || e == key
-				}
-				if strings.Contains(got, key) != want {
-					t.Errorf("%s present=%v, want %v", key, !want, want)
-				}
-			}
 		})
+	}
+}
+
+func TestOnlyAPersistentJobIsWrittenWhereLaunchdLoadsAtLogin(t *testing.T) {
+	p, _ := standin(t)
+	armed(t, p, time.Now().Add(time.Hour).Unix(), false)
+	beside, atLogin := p.agentPath(agentID, false), p.agentPath(agentID, true)
+	if filepath.Dir(beside) != p.StateDir || filepath.Dir(atLogin) != p.UnitDir {
+		t.Fatalf("agent paths %q and %q", beside, atLogin)
+	}
+	if !exists(beside) || exists(atLogin) || exists(p.UnitDir) {
+		t.Fatalf("ordinary job: beside its state=%v, login folder=%v", exists(beside), exists(atLogin))
+	}
+	if got := (Scheduler{}).Files(p, agentID, false); got != beside {
+		t.Errorf("receipt names %q, want %q", got, beside)
+	}
+	if err := p.Remove(Scheduler{}, agentID); err != nil {
+		t.Fatal(err)
+	}
+
+	armed(t, p, time.Now().Add(time.Hour).Unix(), true)
+	if exists(beside) || !exists(atLogin) {
+		t.Fatalf("persistent job: beside its state=%v, login folder=%v", exists(beside), exists(atLogin))
+	}
+	if b, _ := os.ReadFile(atLogin); !strings.Contains(string(b), "RunAtLoad") {
+		t.Errorf("persistent agent does not run at login:\n%s", b)
+	}
+	if err := p.Remove(Scheduler{}, agentID); err != nil || exists(atLogin) {
+		t.Fatalf("remove: %v, agent left=%v", err, exists(atLogin))
 	}
 }
 
@@ -153,7 +172,7 @@ func TestRenderRefusesWhatAnAgentCannotCarry(t *testing.T) {
 func TestArmLoadsAndRemoveUnloads(t *testing.T) {
 	p, log := standin(t)
 	armed(t, p, time.Now().Add(time.Hour).Unix(), false)
-	b, err := os.ReadFile(p.AgentPath(agentID))
+	b, err := os.ReadFile(p.agentPath(agentID, false))
 	if err != nil || !strings.Contains(string(b), "StartCalendarInterval") {
 		t.Fatalf("agent: %v\n%s", err, b)
 	}
@@ -163,7 +182,7 @@ func TestArmLoadsAndRemoveUnloads(t *testing.T) {
 	if err := p.Remove(Scheduler{}, agentID); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{p.AgentPath(agentID), p.StatePath(agentID), p.MessagePath(agentID)} {
+	for _, path := range []string{p.agentPath(agentID, false), p.StatePath(agentID), p.MessagePath(agentID)} {
 		if exists(path) {
 			t.Errorf("%s left behind", path)
 		}
@@ -179,7 +198,7 @@ func TestArmLoadsAndRemoveUnloads(t *testing.T) {
 func TestAJobDueSoonRunsWhenLoaded(t *testing.T) {
 	p, _ := standin(t)
 	armed(t, p, time.Now().Add(30*time.Second).Unix(), false)
-	b, _ := os.ReadFile(p.AgentPath(agentID))
+	b, _ := os.ReadFile(p.agentPath(agentID, false))
 	if got := string(b); strings.Contains(got, "StartCalendarInterval") || !strings.Contains(got, "RunAtLoad") {
 		t.Fatalf("agent due in 30 s:\n%s", got)
 	}
@@ -194,8 +213,8 @@ func TestFailedLoadReportsAnAttempt(t *testing.T) {
 		t.Fatalf("attempted=%v err=%v", attempted, err)
 	}
 	t.Setenv("LAUNCHCTL_STANDIN_FAIL", "")
-	if err := p.Rollback(Scheduler{}, agentID, attempted); err != nil || exists(p.AgentPath(agentID)) {
-		t.Fatalf("rollback: %v, agent left=%v", err, exists(p.AgentPath(agentID)))
+	if err := p.Rollback(Scheduler{}, agentID, attempted); err != nil || exists(p.agentPath(agentID, false)) {
+		t.Fatalf("rollback: %v, agent left=%v", err, exists(p.agentPath(agentID, false)))
 	}
 }
 
@@ -206,7 +225,7 @@ func TestCancelKeepsStateWhenUnloadingFails(t *testing.T) {
 	if err := p.Remove(Scheduler{}, agentID); err == nil || !strings.Contains(err.Error(), "Input/output error") {
 		t.Fatalf("err = %v", err)
 	}
-	for _, path := range []string{p.AgentPath(agentID), p.StatePath(agentID), p.MessagePath(agentID)} {
+	for _, path := range []string{p.agentPath(agentID, false), p.StatePath(agentID), p.MessagePath(agentID)} {
 		if !exists(path) {
 			t.Errorf("%s removed although the job is still loaded", path)
 		}
@@ -232,7 +251,7 @@ func TestCleanupRemovesEverythingBeforeBootingItselfOut(t *testing.T) {
 	if err := p.Cleanup(Scheduler{}, agentID); err == nil {
 		t.Fatal("a failed bootout was not reported")
 	}
-	for _, path := range []string{p.AgentPath(agentID), p.StatePath(agentID), p.MessagePath(agentID)} {
+	for _, path := range []string{p.agentPath(agentID, false), p.StatePath(agentID), p.MessagePath(agentID)} {
 		if exists(path) {
 			t.Errorf("%s still there when bootout ran", path)
 		}
@@ -259,8 +278,17 @@ func TestSweepUnloadsOrphansAndOldLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.Sweep(Scheduler{})
-	if exists(p.AgentPath(agentID)) || (Scheduler{}).Armed(agentID) != "" {
+	if exists(p.agentPath(agentID, false)) || (Scheduler{}).Armed(agentID) != "" {
 		t.Error("orphan agent left loaded")
+	}
+
+	armed(t, p, time.Now().Add(time.Hour).Unix(), true)
+	if err := os.Remove(p.StatePath(agentID)); err != nil {
+		t.Fatal(err)
+	}
+	p.Sweep(Scheduler{})
+	if exists(p.agentPath(agentID, true)) || (Scheduler{}).Armed(agentID) != "" {
+		t.Error("orphan persistent agent left loaded")
 	}
 	if exists(old) || !exists(fresh) {
 		t.Errorf("old log left=%v, fresh log kept=%v", exists(old), exists(fresh))
@@ -295,19 +323,5 @@ func TestInspectShowsTheJobAndTheEndOfItsLog(t *testing.T) {
 	in = Scheduler{}.Inspect(p, agentID, time.Second, time.Second, time.Second)
 	if !strings.Contains(in.Timer, "is not loaded") || in.Journal != "" || len(in.Diagnostics) != 0 {
 		t.Errorf("unloaded job: timer %q journal %q diagnostics %+v", in.Timer, in.Journal, in.Diagnostics)
-	}
-}
-
-func TestAwaitReadsHowTheAgentWasArmed(t *testing.T) {
-	runAt := time.Now().Add(-10 * time.Minute).Unix()
-	never := func(time.Duration) { t.Fatal("slept for a late job") }
-	t.Setenv(envAtLoad, "1")
-	t.Setenv(envPersistent, "")
-	if got, _ := (Scheduler{}).Await(runAt, time.Now, never); got != Drop {
-		t.Errorf("late at-load job: verdict %d, want drop", got)
-	}
-	t.Setenv(envPersistent, "1")
-	if got, _ := (Scheduler{}).Await(runAt, time.Now, never); got != Go {
-		t.Errorf("late persistent job: verdict %d, want go", got)
 	}
 }

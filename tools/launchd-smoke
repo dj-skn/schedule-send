@@ -1,11 +1,12 @@
 #!/bin/sh
 # Arms real launchd jobs and checks that each fires once, on time, and leaves
 # nothing behind. macOS only. No real pane is touched: the jobs deliver to
-# testdata/standin/herdr. The agents go in the real ~/Library/LaunchAgents,
-# because that is what is being tested, and are removed again on any exit.
+# testdata/standin/herdr. Whatever it loads or writes is removed on any exit.
 #
 # One job is due soon and is started when it is loaded, one waits for
-# launchd's calendar, and one is cancelled. It takes about four minutes.
+# launchd's calendar, one is cancelled, and one is persistent and cancelled.
+# Only the persistent one is written to the real ~/Library/LaunchAgents, so
+# macOS should announce one background item, not four. About four minutes.
 set -eu
 cd "$(dirname "$0")/.."
 root="$(pwd -P)"
@@ -59,10 +60,11 @@ chmod +x "$work/herdr"
 : > "$work/calls"
 
 export HERDR_BIN_OVERRIDE="$work/herdr" XDG_STATE_HOME="$work/state" HERDR_PANE_ID=wB:p2
+state="$XDG_STATE_HOME/herdr-send"
 unset HERDR_SCHEDULE_NOW_EPOCH
 
-arm() { # pane, when -> prints "id run_at"
-  "$bin" --pane "$1" --at "$2" --message resume --json 2> "$work/arm.err" > "$work/arm.json" || {
+arm() { # pane, when, [flag] -> prints "id run_at"
+  "$bin" --pane "$1" --at "$2" --message resume --json ${3:-} 2> "$work/arm.err" > "$work/arm.json" || {
     echo "Could not schedule for $1 at $2:" >&2; cat "$work/arm.err" "$work/arm.json" >&2; exit 1
   }
   id="$(jq -er .id "$work/arm.json")"
@@ -78,26 +80,33 @@ delivered() { # pane, run_at: exactly one prompt, no earlier than its time and w
 }
 
 settled() { # id: nothing of the job is left
-  check "state removed" absent "$XDG_STATE_HOME/herdr-send/$1.json"
-  check "message removed" absent "$XDG_STATE_HOME/herdr-send/$1.msg"
-  check "agent file removed" absent "$agents/herdr-send-$1.plist"
+  check "state removed" absent "$state/$1.json"
+  check "message removed" absent "$state/$1.msg"
+  check "agent file removed" sh -c "[ ! -e '$state/$1.plist' ] && [ ! -e '$agents/herdr-send-$1.plist' ]"
   check "unloaded from launchd" unloaded "$1"
 }
 
 set -- $(arm wB:p1 '+75 sec');  soon_id=$1 soon_at=$2
 set -- $(arm wA:p1 '+200 sec'); cal_id=$1 cal_at=$2
 set -- $(arm wB:p3 '+30 min');  far_id=$1
+set -- $(arm wB:p3 '+40 min' --persistent); keep_id=$1
 
-echo "Armed: $soon_id (started when loaded), $cal_id (calendar), $far_id (to cancel)"
-check "the soon job has no calendar" sh -c "! grep -q StartCalendarInterval '$agents/herdr-send-$soon_id.plist'"
-check "the later job has a calendar" grep -q StartCalendarInterval "$agents/herdr-send-$cal_id.plist"
-check "all three are loaded" sh -c "launchctl print '$domain/herdr-send-$soon_id' > /dev/null && launchctl print '$domain/herdr-send-$cal_id' > /dev/null && launchctl print '$domain/herdr-send-$far_id' > /dev/null"
+echo "Armed: $soon_id (started when loaded), $cal_id (calendar), $far_id (to cancel), $keep_id (persistent, to cancel)"
+check "the soon job has no calendar" sh -c "! grep -q StartCalendarInterval '$state/$soon_id.plist'"
+check "the later job has a calendar" grep -q StartCalendarInterval "$state/$cal_id.plist"
+check "ordinary jobs wrote nothing to LaunchAgents" sh -c "[ ! -e '$agents/herdr-send-$soon_id.plist' ] && [ ! -e '$agents/herdr-send-$cal_id.plist' ] && [ ! -e '$agents/herdr-send-$far_id.plist' ]"
+check "the persistent job is in LaunchAgents and runs at login" grep -q RunAtLoad "$agents/herdr-send-$keep_id.plist"
+check "all four are loaded" sh -c "launchctl print '$domain/herdr-send-$soon_id' > /dev/null && launchctl print '$domain/herdr-send-$cal_id' > /dev/null && launchctl print '$domain/herdr-send-$far_id' > /dev/null && launchctl print '$domain/herdr-send-$keep_id' > /dev/null"
 
 echo "Cancelling $far_id"
 check "--list shows it active" sh -c "'$bin' --list --json | jq -e --arg id '$far_id' '.. | objects | select(.id? == \$id) | .state == \"active\"' > /dev/null"
 check "--status succeeds" sh -c "'$bin' --status '$far_id' --json > '$work/status.json' 2> '$work/status.err'"
 check "--cancel succeeds" "$bin" --cancel "$far_id"
 settled "$far_id"
+
+echo "Cancelling $keep_id"
+check "--cancel succeeds" "$bin" --cancel "$keep_id"
+settled "$keep_id"
 
 wait_until() { # epoch
   left=$(( $1 - $(date +%s) ))
@@ -108,20 +117,20 @@ echo "Waiting for $soon_id"
 wait_until $(( soon_at + 35 ))
 check "delivered once, on time" delivered wB:p1 "$soon_at"
 settled "$soon_id"
-sed 's/^/        | /' "$XDG_STATE_HOME/herdr-send/$soon_id.log" 2> /dev/null || echo "        (no log)"
+sed 's/^/        | /' "$state/$soon_id.log" 2> /dev/null || echo "        (no log)"
 
 echo "Waiting for $cal_id"
 wait_until $(( cal_at + 35 ))
 check "delivered once, on time" delivered wA:p1 "$cal_at"
 settled "$cal_id"
-sed 's/^/        | /' "$XDG_STATE_HOME/herdr-send/$cal_id.log" 2> /dev/null || echo "        (no log)"
+sed 's/^/        | /' "$state/$cal_id.log" 2> /dev/null || echo "        (no log)"
 
 check "--status of a finished job shows its log" sh -c "'$bin' --status '$cal_id' --json 2> /dev/null | jq -e '.journal | length > 0' > /dev/null"
 
 echo
 if [ "$failures" -eq 0 ]; then
   echo "launchd-smoke: ok"
-  echo "If macOS showed a \"Background Items Added\" notice while this ran, note how many: three agent files were written."
+  echo "macOS should have shown one \"Background Items Added\" notice, for the persistent job. Note how many it showed."
 else
   echo "launchd-smoke: $failures check(s) failed"
   exit 1

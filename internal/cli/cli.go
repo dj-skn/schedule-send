@@ -467,7 +467,7 @@ func (a *app) run(args []string) (retErr error) {
 		At: calendar, RunAt: runAt, Delay: delay,
 		Mode: mode, Payload: payload, Message: o.message, Keys: o.keys,
 		Persistent: o.persistent, IfBusy: o.ifBusy, Recover: o.recover, Grace: o.grace,
-		UnitFiles: a.sys.Files(a.paths, id),
+		UnitFiles: a.sys.Files(a.paths, id, o.persistent),
 	}
 	// The program and arguments the timer runs; the unit wraps them in
 	// /usr/bin/env with systemd escaping.

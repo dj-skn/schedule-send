@@ -21,28 +21,24 @@ func TestAwait(t *testing.T) {
 	const runAt = 1791036060
 	at := time.Unix(runAt, 0)
 	cases := []struct {
-		name               string
-		start              time.Duration // relative to the firing time
-		atLoad, persistent bool
-		want               Verdict
-		waited             time.Duration
+		name   string
+		start  time.Duration // relative to the firing time
+		want   Verdict
+		waited time.Duration
 	}{
-		{"on time", 0, false, false, Go, 0},
-		{"a calendar start five seconds late", 5 * time.Second, false, false, Go, 0},
-		{"started at load, waits out the seconds", -75 * time.Second, true, false, Go, 75 * time.Second},
-		{"an hour early waits it out", -time.Hour, false, false, Go, time.Hour},
-		{"loaded far ahead stands down", -3 * time.Hour, false, true, StandDown, 0},
-		{"woken hours late still delivers", 9 * time.Hour, false, false, Go, 0},
-		{"persistent, loaded days late, delivers", 3 * 24 * time.Hour, false, true, Go, 0},
-		{"at load, minutes late, not persistent", 6 * time.Minute, true, false, Drop, 0},
-		{"at load, minutes late, persistent", 6 * time.Minute, true, true, Go, 0},
-		{"at load, inside the grace", 4 * time.Minute, true, false, Go, 0},
-		{"a year late never delivers", 365 * 24 * time.Hour, false, true, Drop, 0},
+		{"on time", 0, Go, 0},
+		{"a calendar start five seconds late", 5 * time.Second, Go, 0},
+		{"started at load, waits out the seconds", -75 * time.Second, Go, 75 * time.Second},
+		{"an hour early waits it out", -time.Hour, Go, time.Hour},
+		{"loaded far ahead stands down", -3 * time.Hour, StandDown, 0},
+		{"woken hours late still delivers", 9 * time.Hour, Go, 0},
+		{"loaded days late, delivers", 3 * 24 * time.Hour, Go, 0},
+		{"a year late never delivers", 365 * 24 * time.Hour, Drop, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			clock := &stepClock{now: at.Add(c.start)}
-			got, why := await(runAt, clock.Now, clock.Sleep, c.atLoad, c.persistent)
+			got, why := await(runAt, clock.Now, clock.Sleep)
 			if got != c.want {
 				t.Fatalf("verdict %d (%q), want %d", got, why, c.want)
 			}
@@ -65,7 +61,7 @@ func TestAwait(t *testing.T) {
 
 func TestAwaitWithoutARecordedInstant(t *testing.T) {
 	clock := &stepClock{now: time.Unix(1791036060, 0)}
-	if got, _ := await(0, clock.Now, clock.Sleep, true, false); got != Go || len(clock.slept) != 0 {
+	if got, _ := await(0, clock.Now, clock.Sleep); got != Go || len(clock.slept) != 0 {
 		t.Fatalf("verdict %d after %d sleeps, want an immediate go", got, len(clock.slept))
 	}
 }

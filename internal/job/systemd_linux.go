@@ -48,8 +48,9 @@ func (s Systemctl) Available(arming bool) error {
 // Name is a job's timer as receipts show it.
 func (Systemctl) Name(id string) string { return UnitPrefix + "-" + id + ".timer" }
 
-// Files names what arming writes for a job, as a receipt shows it.
-func (Systemctl) Files(p Paths, id string) string {
+// Files names what arming writes for a job, as a receipt shows it. systemd
+// units live in one place whether or not the job is persistent.
+func (Systemctl) Files(p Paths, id string, persistent bool) string {
 	return p.UnitDir + "/" + UnitPrefix + "-" + id + ".{service,timer}"
 }
 

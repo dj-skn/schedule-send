@@ -51,6 +51,8 @@ Build/install needs Go 1.27.1+, Git, `flock`, and GNU coreutils (`base64`, `tr`)
   `launchd_darwin.go`) providing the same functions. Code outside those files
   names neither system. launchd kills a job that boots itself out, so a job's
   cleanup there removes its files and state first and unloads itself last.
+  Only a `--persistent` job's agent goes in `~/Library/LaunchAgents`: macOS
+  announces every file written there.
 - Armed jobs run the installed main-checkout binary. Preserve the zsh shim and
   old state-file compatibility. Add state keys with defaults; never rename or
   remove existing keys. Validate required fields before delivering.

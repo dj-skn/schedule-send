@@ -251,9 +251,11 @@ systemctl --user list-timers 'herdr-send-*'
 journalctl --user -u 'herdr-send-<id>.service'
 ```
 
-On macOS a job is a launchd agent, `~/Library/LaunchAgents/herdr-send-<id>.plist`,
-loaded in your login session, and its output goes to a log beside its state,
-which `--status` shows. launchd starts a calendar job a few seconds into its
+On macOS a job is a launchd agent loaded in your login session, and its output
+goes to a log beside its state, which `--status` shows. An ordinary job keeps
+its agent file beside its state, so macOS shows no background-item notice for
+it and launchd forgets it at logout. A `--persistent` job's file goes in
+`~/Library/LaunchAgents`, which survives a restart and which macOS announces. launchd starts a calendar job a few seconds into its
 minute and the job then waits for its exact second. A job whose time passed
 while the Mac was asleep is sent on wake; one whose time passed while it was
 off or logged out is skipped unless scheduled with `--persistent`; and a job
@@ -302,8 +304,9 @@ The internal worker's journal output remains plain text.
 | `.githooks`, `tools` | Automatic installation, builds, and verification. |
 
 State and messages live in `~/.local/state/herdr-send` (directory mode 700;
-new files mode 600). Units live in `~/.config/systemd/user` on Linux and
-`~/Library/LaunchAgents` on macOS. `XDG_STATE_HOME` and, on Linux,
+new files mode 600). Units live in `~/.config/systemd/user` on Linux. On macOS
+agent files live beside the state, or in `~/Library/LaunchAgents` for
+`--persistent` jobs. `XDG_STATE_HOME` and, on Linux,
 `XDG_CONFIG_HOME` override those roots. State records the target identity,
 resolved Herdr executable, and, for new jobs, the firing epoch (`run_at`).
 Older job files remain supported. Missing or null numeric fields retain legacy
