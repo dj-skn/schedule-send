@@ -6,7 +6,8 @@ Plan recorded on 2026-10-12 on story branch `ss-3`, starting from `main`. P1,
 P2, and P3 are complete in `ss-3`; this update accompanies P3's fast-forward
 from `ss-3-p3`, after the owner's Mac confirmed it. P4 to P8 are not started.
 `ss-3-p3` was pushed to the private repository for that run, on the owner's
-word; nothing else is pushed, merged into `main`, installed, or published. 
+word; nothing else is pushed, merged into `main`, installed, or published.
+
 The owner settled the story's decisions on 2026-10-12 and asked for this plan.
 That is not a build instruction: every phase still gets its own source check,
 walkthrough, and explicit instruction to build.
@@ -108,7 +109,7 @@ Stated in the walkthrough; the owner did not object.
 | P1 | A tree that is safe to publish, under its final name | `ss-3-p1` | complete in ss-3 |
 | P2 | Timer operations behind one seam, behaviour unchanged | `ss-3-p2` | complete in ss-3 |
 | P3 | A launchd backend for macOS | `ss-3-p3` | complete in ss-3 |
-| P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | not started |
+| P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | approved 2026-10-13, in progress |
 | P5 | The Herdr plugin | `ss-3-p5` | not started |
 | P6 | CI and release automation | `ss-3-p6` | not started |
 | P7 | README and visuals | `ss-3-p7` | not started |
@@ -614,17 +615,73 @@ directory reaches the worker. The permanent workflow (P6) can run
 
 ### P4 — Versions and installers
 
-Add `--version`, stamped at build time from the tag. Build static Linux
-binaries for x86-64 and ARM64 with checksums. Accept a home-relative recorded
-path. Write the curl script: detect the architecture, download, verify the
-SHA-256, install to the fixed location, link the command, and accept a local
-source for testing. Write the formula on a branch of the tap: build from source
-with Homebrew's upgrade-proof path, depend on `coreutils` on macOS, and tell
-the user to install Herdr.
+Four pieces: a version number, a path rule that lets a downloaded binary arm
+jobs, a curl installer for Linux with release archives, and a Homebrew formula.
 
-→ verify: the curl install in a clean Ubuntu container; the formula in a
-Homebrew Linux container, where a dry run shows the upgrade-proof path;
-`brew install` from the tap branch on the owner's Mac.
+#### Code check — 2026-10-13
+
+- Homebrew 7.0.9 was measured in a container. A fully qualified
+  `brew install <user>/<tap>/<formula>` installed from an untrusted tap in one
+  command. Tapping first and installing by bare name was refused until
+  `brew trust` is run. The owner's tap README recommends the refused form for
+  its existing formula; that was left alone.
+- On Linux, Homebrew added gcc and binutils, 598 MB, before building a
+  formula from source. The curl script is the right default there.
+- The Homebrew image on Docker Hub is a year old (4.6.20) and has to be
+  updated inside the container.
+- `tools/build` runs its path check with `go run`, which fails when the
+  target is another architecture, so it cannot cross-build.
+- `internal/installpath`'s test pins the exact build command.
+- The message for a build that cannot arm tells the user to run
+  `tools/install`, which is wrong for a Homebrew or curl install.
+- The formula cannot point at a real download until P8 creates the public
+  repository and its first tag.
+
+#### Decisions settled 2026-10-13
+
+The owner agreed to the P4 walkthrough and instructed build.
+
+1. **Install location.** The curl script installs the real file at
+   `~/.local/bin/schedule-send`, where Herdr's installer puts Herdr, and a
+   release binary arms only from there. No custom location.
+2. **Formula.** It lives in this repository until P8 copies it to the tap.
+3. **macOS runner.** As in P3: the phase branch and a throwaway branch are
+   pushed to the private repository to run the Homebrew install on a macOS
+   runner. This is the owner's word to push those branches.
+
+Assumptions the owner did not object to: release archives are Linux only,
+x86-64 and ARM64, static, with fixed names and a checksum file; the curl
+script checks the SHA-256, refuses on macOS with a pointer to Homebrew, and
+upgrades by being run again; `--version` prints `schedule-send <version>`,
+with the tag plus commits since it for a checkout build and `dev` without a
+tag; the formula builds with the project's build script, needs Go only to
+build and `coreutils` on macOS, and tells the user to install Herdr; the
+Homebrew image is deleted from the development machine when the phase closes.
+
+#### Steps
+
+1. `--version`, the version stamp and the cross-build fix in `tools/build`,
+   and a corrected message for a build that cannot arm.
+   → verify: `tools/check` passes; parity counts unchanged.
+2. A recorded path may start with `~/`.
+   → verify: tests arm from that path under a temporary home and are refused
+   anywhere else.
+3. `tools/dist` builds both archives and the checksum file.
+   → verify: the x86-64 binary runs; both are static; the checksums verify.
+4. `install.sh`.
+   → verify in a clean Ubuntu container: it installs, reports the right
+   version, a dry run shows `~/.local/bin`, a second run upgrades in place,
+   and a corrupted archive is refused.
+5. The formula and a `tools/brew-smoke` script that installs it from a local
+   tap.
+   → verify: passes in the updated Homebrew Linux container and on the macOS
+   runner, including `brew test` and `brew audit`.
+6. The owner runs `tools/brew-smoke` on their Mac.
+   → verify: it passes.
+7. Full gate and As built.
+
+Not included: putting the formula in the tap, the release workflow (P6), an
+uninstall command, and macOS archives.
 
 ### P5 — Herdr plugin
 
