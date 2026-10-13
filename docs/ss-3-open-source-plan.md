@@ -2,12 +2,11 @@
 
 ## Status
 
-Plan recorded on 2026-10-12 on story branch `ss-3`, starting from `main`. P1
-and P2 are complete in `ss-3`. P3 is built on `ss-3-p3` and verified on Linux
-and on a macOS runner; it is not merged, because it closes only after the run
-on the owner's Mac. P4 to P8 are not started. Nothing is merged into `main`,
-installed, published, or pushed.
-
+Plan recorded on 2026-10-12 on story branch `ss-3`, starting from `main`. P1,
+P2, and P3 are complete in `ss-3`; this update accompanies P3's fast-forward
+from `ss-3-p3`, after the owner's Mac confirmed it. P4 to P8 are not started.
+`ss-3-p3` was pushed to the private repository for that run, on the owner's
+word; nothing else is pushed, merged into `main`, installed, or published. 
 The owner settled the story's decisions on 2026-10-12 and asked for this plan.
 That is not a build instruction: every phase still gets its own source check,
 walkthrough, and explicit instruction to build.
@@ -108,7 +107,7 @@ Stated in the walkthrough; the owner did not object.
 | --- | --- | --- | --- |
 | P1 | A tree that is safe to publish, under its final name | `ss-3-p1` | complete in ss-3 |
 | P2 | Timer operations behind one seam, behaviour unchanged | `ss-3-p2` | complete in ss-3 |
-| P3 | A launchd backend for macOS | `ss-3-p3` | built; awaiting the owner's Mac run |
+| P3 | A launchd backend for macOS | `ss-3-p3` | complete in ss-3 |
 | P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | not started |
 | P5 | The Herdr plugin | `ss-3-p5` | not started |
 | P6 | CI and release automation | `ss-3-p6` | not started |
@@ -604,8 +603,14 @@ passing with four jobs. The job started at load was delivered 2 seconds after
 its time and the calendar job 0 seconds after. Ordinary jobs wrote nothing to
 `~/Library/LaunchAgents`.
 
-Still to confirm: how many notices macOS showed during that run. One is
-expected, for the persistent job.
+macOS showed one notice during that run, as expected: the persistent job's.
+Ordinary jobs raise none. The phase is closed.
+
+For later phases: the formula (P4) needs `coreutils` on macOS for `gdate`, and
+a job's agent carries the `PATH` of the shell that scheduled it, so Homebrew's
+directory reaches the worker. The permanent workflow (P6) can run
+`tools/launchd-smoke` with `LAUNCHD_SMOKE_RECORDS=1` as the throwaway one did.
+`internal/cli` and `internal/worker` have no tests on macOS.
 
 ### P4 — Versions and installers
 
