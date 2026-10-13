@@ -857,9 +857,12 @@ Found while building:
   was made and pushed anyway. It changes only this document, and the tree
   passes the gate; from here the exit status itself is checked.
 
-Still to confirm: `tools/plugin-smoke` on the owner's Mac, and the live check
-of step 3, which needs the owner's Herdr server on 0.9.3; it was still 0.9.1
-when this was written. Not testable before P8: `herdr plugin install` from
+On the owner's Mac, 2026-10-13: `tools/plugin-smoke` ended `plugin-smoke: ok`.
+Eleven checks passed, the Linux install was skipped as intended, and Herdr
+0.9.3 there accepted the manifest under temporary roots.
+
+Still to confirm: the live check of step 3, on a Herdr server running 0.9.3.
+On the development machine the server was still 0.9.1 when this was written. Not testable before P8: `herdr plugin install` from
 GitHub.
 
 ### P6 — CI and release
