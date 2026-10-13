@@ -98,6 +98,15 @@ check "ordinary jobs wrote nothing to LaunchAgents" sh -c "[ ! -e '$agents/herdr
 check "the persistent job is in LaunchAgents and runs at login" grep -q RunAtLoad "$agents/herdr-send-$keep_id.plist"
 check "all four are loaded" sh -c "launchctl print '$domain/herdr-send-$soon_id' > /dev/null && launchctl print '$domain/herdr-send-$cal_id' > /dev/null && launchctl print '$domain/herdr-send-$far_id' > /dev/null && launchctl print '$domain/herdr-send-$keep_id' > /dev/null"
 
+# macOS keeps a record of each background item; a record is what its notice
+# comes from. Reading the records needs root, so this runs only when asked.
+if [ -n "${LAUNCHD_SMOKE_RECORDS:-}" ]; then
+  sudo -n sfltool dumpbtm > "$work/records" 2> /dev/null || : > "$work/records"
+  records="$(grep -c "herdr-send-.*\.plist\|$state/" "$work/records" || true)"
+  echo "        $records background-item record(s) name these jobs"
+  check "only the persistent job is recorded as a background item" sh -c "[ '$records' = 1 ] && grep -q 'herdr-send-$keep_id.plist' '$work/records'"
+fi
+
 echo "Cancelling $far_id"
 check "--list shows it active" sh -c "'$bin' --list --json | jq -e --arg id '$far_id' '.. | objects | select(.id? == \$id) | .state == \"active\"' > /dev/null"
 check "--status succeeds" sh -c "'$bin' --status '$far_id' --json > '$work/status.json' 2> '$work/status.err'"
