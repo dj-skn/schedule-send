@@ -599,8 +599,13 @@ One commit message on the phase branch is wrong and is corrected by the commit
 after it: it says the record check waits a few seconds, and that edit had not
 been applied.
 
-Still to confirm: a second run on the owner's Mac, expecting one notice
-instead of one per job.
+Second run on the owner's Mac, 2026-10-13: `launchd-smoke: ok`, every check
+passing with four jobs. The job started at load was delivered 2 seconds after
+its time and the calendar job 0 seconds after. Ordinary jobs wrote nothing to
+`~/Library/LaunchAgents`.
+
+Still to confirm: how many notices macOS showed during that run. One is
+expected, for the persistent job.
 
 ### P4 — Versions and installers
 
