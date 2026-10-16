@@ -5,10 +5,11 @@
 Plan recorded on 2026-10-12 on story branch `ss-3`, starting from `main`. P1,
 P2, and P3 are complete in `ss-3`; this update accompanies P3's fast-forward
 from `ss-3-p3`, after the owner's Mac confirmed it. P4 is complete in `ss-3`
-as well, fast-forwarded from `ss-3-p4` after the same confirmation. P5 is built on
-`ss-3-p5` and verified on Linux; it is not merged, because it closes after
-the owner's Mac run and a live check in their Herdr. P6 to P8 are not started.
-`ss-3-p3` and `ss-3-p4` were pushed to the private repository for those runs,
+as well, fast-forwarded from `ss-3-p4` after the same confirmation. P5 is complete in
+`ss-3` too, fast-forwarded from `ss-3-p5` after the owner's Mac run and a live
+check in their Herdr. P6 to P8 are not started.
+`ss-3-p3`, `ss-3-p4`, and `ss-3-p5` were pushed to the private repository for
+those runs,
 on the owner's word; nothing else is pushed, merged into `main`, installed, or published.
 
 The owner settled the story's decisions on 2026-10-12 and asked for this plan.
@@ -113,7 +114,7 @@ Stated in the walkthrough; the owner did not object.
 | P2 | Timer operations behind one seam, behaviour unchanged | `ss-3-p2` | complete in ss-3 |
 | P3 | A launchd backend for macOS | `ss-3-p3` | complete in ss-3 |
 | P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | complete in ss-3 |
-| P5 | The Herdr plugin | `ss-3-p5` | built; awaiting the owner's two checks |
+| P5 | The Herdr plugin | `ss-3-p5` | complete in ss-3 |
 | P6 | CI and release automation | `ss-3-p6` | not started |
 | P7 | README and visuals | `ss-3-p7` | not started |
 | P8 | Publication | `ss-3-p8` | not started |
@@ -868,8 +869,22 @@ the action. Its reply showed the context Herdr builds for an action:
 `invocation_source`, and the tab and workspace ids. The owner then unlinked the
 plugin and removed the test binary.
 
-Still to confirm: what the overlay showed. The command's reply says the action
-started, not whether its pane opened or which pane it named. Not testable before P8: `herdr plugin install` from
+Second part, 2026-10-16: invoked from a shell pane inside the owner's Herdr on
+the Mac, the action opened an overlay over that pane, which read "Pane w22:p1
+is a plain shell, where the default 'resume' would run as a command. Pass
+--message." and then "Press Enter to close." So the overlay opens, the focused
+pane reaches the program, the program runs with the options file, and the
+pane waits for Enter. The first attempt showed nothing because the action was
+invoked from a terminal outside Herdr, where its overlay cannot be seen. The
+phase is closed.
+
+Noticed and left alone: on a plain shell pane the plugin can only show that
+message, because an overlay offers no way to add `--message`. The action is
+named for agents, where it proposes the resume time.
+
+For later phases: the README (P7) should say the action is invoked from
+inside Herdr, show the key binding, and note that it is for agent panes. P8
+tests `herdr plugin install dj-skn/schedule-send` from GitHub. Not testable before P8: `herdr plugin install` from
 GitHub.
 
 ### P6 — CI and release
