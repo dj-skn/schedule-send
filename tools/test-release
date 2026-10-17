@@ -1,0 +1,63 @@
+#!/bin/sh
+# Check tools/release and tools/release-check in a temporary repository made
+# from this checkout's changelog and plugin manifest. Nothing here is touched.
+set -eu
+cd "$(dirname "$0")/.."
+root="$(pwd -P)"
+fixture="$(mktemp -d)"
+trap 'rm -rf "$fixture"' EXIT
+failures=0
+check() { # description, then a command that must succeed
+  what="$1"; shift
+  if "$@" > /dev/null 2>&1; then :; else echo "release test failed: $what" >&2; failures=$((failures + 1)); fi
+}
+refuses() { # description, then a command that must fail
+  what="$1"; shift
+  if "$@" > /dev/null 2>&1; then echo "release test failed: $what" >&2; failures=$((failures + 1)); fi
+}
+
+mkdir -p "$fixture/tools"
+cp CHANGELOG.md herdr-plugin.toml "$fixture/"
+cp tools/release tools/release-check "$fixture/tools/"
+cd "$fixture"
+git init -q -b main .
+git config user.name 'Release Test'
+git config user.email 'release@example.invalid'
+git add -A
+git commit -qm 'chore: fixture'
+today="$(date -u +%Y-%m-%d)"
+
+refuses "a version with no changelog section passes the check" tools/release-check 0.1.0
+refuses "a malformed version is accepted" tools/release 1.2
+echo x >> CHANGELOG.md
+refuses "a dirty tree is released" tools/release 0.1.0
+git checkout -q -- CHANGELOG.md
+
+check "a release can be prepared" tools/release 0.1.0
+check "it is tagged" git rev-parse --verify --quiet refs/tags/v0.1.0
+check "the tag is annotated" sh -c '[ "$(git cat-file -t v0.1.0)" = tag ]'
+check "the tree is committed" sh -c '[ -z "$(git status --porcelain)" ]'
+check "the changelog has today's heading under an empty Unreleased" \
+  sh -c "awk 'NF' CHANGELOG.md | grep -A1 -x '## \\[Unreleased\\]' | tail -1 | grep -qx '## \\[0.1.0\\] - $today'"
+check "the manifest carries the version" grep -qx 'version = "0.1.0"' herdr-plugin.toml
+check "the check passes and prints the notes" sh -c 'tools/release-check v0.1.0 | grep -q "The first public release."'
+check "the notes stop before the next section" sh -c '! tools/release-check 0.1.0 | grep -q "^## "'
+refuses "the same version is released twice" tools/release 0.1.0
+refuses "an empty Unreleased is released" tools/release 0.2.0
+
+awk '{ print } $0 == "## [Unreleased]" { print ""; print "- A fix." }' CHANGELOG.md > c && mv c CHANGELOG.md
+git commit -qam 'docs: a fix'
+check "a pre-release can be prepared" tools/release 0.2.0-rc.1
+check "its check passes" tools/release-check 0.2.0-rc.1
+
+sed 's/^version = .*/version = "9.9.9"/' herdr-plugin.toml > m && mv m herdr-plugin.toml
+refuses "a manifest with another version passes" tools/release-check 0.2.0-rc.1
+git checkout -q -- herdr-plugin.toml
+sed 's/^## \[0.2.0-rc.1\] - .*/## [0.2.0-rc.1]/' CHANGELOG.md > c && mv c CHANGELOG.md
+refuses "a heading without a date passes" tools/release-check 0.2.0-rc.1
+git checkout -q -- CHANGELOG.md
+awk '/^- A fix\.$/ { next } { print }' CHANGELOG.md > c && mv c CHANGELOG.md
+refuses "an empty section passes" tools/release-check 0.2.0-rc.1
+
+[ "$failures" -eq 0 ] || exit 1
+echo "release: ok"
