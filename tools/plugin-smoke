@@ -6,6 +6,11 @@
 set -eu
 cd "$(dirname "$0")/.."
 root="$(pwd -P)"
+# Inside a Herdr pane these variables lead herdr to the live server, so the
+# manifest check below would reach it. Each check sets what it needs.
+for name in $(env | sed -n 's/^\(HERDR_[A-Za-z0-9_]*\)=.*/\1/p'); do
+  unset "$name"
+done
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 failures=0
