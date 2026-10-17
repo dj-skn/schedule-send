@@ -115,7 +115,7 @@ Stated in the walkthrough; the owner did not object.
 | P3 | A launchd backend for macOS | `ss-3-p3` | complete in ss-3 |
 | P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | complete in ss-3 |
 | P5 | The Herdr plugin | `ss-3-p5` | complete in ss-3 |
-| P6 | CI and release automation | `ss-3-p6` | not started |
+| P6 | CI and release automation | `ss-3-p6` | approved 2026-10-17, in progress |
 | P7 | README and visuals | `ss-3-p7` | not started |
 | P8 | Publication | `ss-3-p8` | not started |
 
@@ -889,13 +889,81 @@ GitHub.
 
 ### P6 — CI and release
 
-A workflow on every push and pull request: the gate and parity on Linux; vet,
-tests, and the real launchd job on macOS. A workflow on a `v*` tag: check the
-tag against the changelog, build the binaries and checksums, create the GitHub
-release, and bump the tap. Keep action versions current with Dependabot.
+Two workflows that mostly call scripts that already exist: one checks every
+push on Linux, Linux ARM, and macOS; one turns a version tag into a GitHub
+release and bumps the owner's tap. The release path can only be fully proven
+once the public repository exists, so it is rehearsed on the private one.
 
-→ verify: the Linux steps pass in a clean Ubuntu container before anything is
-pushed; the workflows themselves can only be proven in P8.
+#### Code check — 2026-10-16
+
+- The busy-machine failures recorded in P5 did not come back: 0 of 32 runs
+  with four suites at once, and 0 of 16 with every core also kept busy by 24
+  busy loops (measured). On 2026-10-13 the same load failed 7 of 32 on both
+  `main` and the branch, so the cause is not settled.
+- Most of those failures were in the status-inspection test, which allows
+  80 ms and needs a shell to start and print within about 40 ms. The others
+  were `date` calls that returned no answer; `date` took at most 29 ms under
+  load, so a slow `date` is not the explanation.
+- Every check CI needs is a script: `tools/check`, `tools/parity`,
+  `tools/install-smoke`, `tools/plugin-smoke`, `tools/brew-smoke`, and
+  `tools/launchd-smoke`. Ubuntu runners lack `zsh`, which the gate and parity
+  need.
+- The version is in three places and nothing checks they agree: the tag, the
+  changelog, and the plugin manifest, where Herdr requires one.
+- Standard runners are free for public repositories. Private repositories get
+  2,000 minutes a month on the Free plan, and macOS costs about ten times Linux
+  per minute.
+- The tap bump writes to the owner's public tap, so it must never run from the
+  private repository.
+- `mislav/bump-homebrew-formula-action` computes the checksum of the GitHub
+  tag archive by default, the URL form the formula uses. The owner's other
+  project uses that action with a `HOMEBREW_TAP_TOKEN` secret.
+
+#### Decisions settled 2026-10-17
+
+The owner agreed to all five recommendations and instructed build.
+
+1. **Flaky tests.** Widen the status test's limits; leave the `date` tests
+   until they fail again with a reason. No automatic reruns in CI.
+2. **macOS real-system tests** run on every push to `main` and every pull
+   request.
+3. **Tap bump** commits straight to the tap, then a macOS runner installs from
+   the tap as the release's last step.
+4. **Release helper.** `tools/release X.Y.Z` updates the changelog and the
+   plugin version, commits and tags locally, and prints the push command.
+5. **Rehearsal.** The phase branch is pushed to the private repository so CI
+   runs there, and a throwaway pre-release tag runs the release workflow with
+   the tap bump skipped; that tag and release are deleted afterwards.
+
+Assumptions the owner did not object to: Linux CI installs the current Herdr
+with its own script so the manifest is checked against each new release; an
+ARM job runs the install test on `ubuntu-24.04-arm`; the release is made with
+the preinstalled `gh`, and the only third-party action is the tap bump; after
+P8 the tap holds the live formula and `packaging/homebrew` stays as the
+template the tests use; Dependabot updates action versions weekly in one
+grouped pull request.
+
+#### Steps
+
+1. Widen the status test's limits.
+   → verify: 32 runs under load with no failures, and the test still fails
+   when the deadline code is removed.
+2. `tools/release` and a version-agreement check.
+   → verify: in a scratch clone it prepares the commit and tag; the check
+   rejects a mismatched manifest or an empty changelog section.
+3. `ci.yml` with Linux, ARM, and macOS jobs, and `dependabot.yml`.
+   → verify: the Linux steps pass in a clean Ubuntu 24.04 container, then all
+   three jobs pass on the private repository.
+4. `release.yml`.
+   → verify: a throwaway pre-release tag produces a release with both archives
+   and the checksums, installs from it on x86-64 and ARM, and skips the tap;
+   then the tag and release are deleted.
+5. The contributing guide's release section, `AGENTS.md`, and the changelog.
+   → verify: read through.
+6. Full gate and As built.
+
+Not included: badges (P7), the public repository and the tap token (P8), code
+signing, Windows, and coverage reports.
 
 ### P7 — README and visuals
 
