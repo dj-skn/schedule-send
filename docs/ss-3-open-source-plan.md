@@ -7,9 +7,9 @@ P2, and P3 are complete in `ss-3`; this update accompanies P3's fast-forward
 from `ss-3-p3`, after the owner's Mac confirmed it. P4 is complete in `ss-3`
 as well, fast-forwarded from `ss-3-p4` after the same confirmation. P5 is complete in
 `ss-3` too, fast-forwarded from `ss-3-p5` after the owner's Mac run and a live
-check in their Herdr. P6 to P8 are not started.
-`ss-3-p3`, `ss-3-p4`, and `ss-3-p5` were pushed to the private repository for
-those runs,
+check in their Herdr. P6 is complete in `ss-3`, fast-forwarded from `ss-3-p6`
+after a rehearsal on the private repository. P7 and P8 are not started.
+`ss-3-p3` to `ss-3-p6` were pushed to the private repository for those runs,
 on the owner's word; nothing else is pushed, merged into `main`, installed, or published.
 
 The owner settled the story's decisions on 2026-10-12 and asked for this plan.
@@ -115,7 +115,7 @@ Stated in the walkthrough; the owner did not object.
 | P3 | A launchd backend for macOS | `ss-3-p3` | complete in ss-3 |
 | P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | complete in ss-3 |
 | P5 | The Herdr plugin | `ss-3-p5` | complete in ss-3 |
-| P6 | CI and release automation | `ss-3-p6` | approved 2026-10-17, in progress |
+| P6 | CI and release automation | `ss-3-p6` | complete in ss-3 |
 | P7 | README and visuals | `ss-3-p7` | not started |
 | P8 | Publication | `ss-3-p8` | not started |
 
@@ -964,6 +964,75 @@ grouped pull request.
 
 Not included: badges (P7), the public repository and the tap token (P8), code
 signing, Windows, and coverage reports.
+
+#### As built — 2026-10-17
+
+- `.github/workflows/ci.yml` runs on pushes to `main`, pull requests, by hand,
+  and when the release workflow calls it. Linux: the gate, parity, the
+  install-script test, and the plugin test, with the current Herdr installed by
+  its own script. Linux ARM: the Go tests and the install-script test, which
+  runs the ARM binary. macOS: vet, the Go tests, the plugin test, the Homebrew
+  formula test, and the real launchd test with the background-item count.
+- `.github/workflows/release.yml` runs on a `v*` tag: the version check, the
+  CI workflow, `tools/dist`, `gh release create` with the changelog section as
+  notes (a pre-release for a version with a hyphen), installs from the release
+  on x86-64 and ARM, the tap bump, and an install from the tap on macOS with
+  `brew test` and `brew audit --strict --online`. The tap bump runs only from
+  `dj-skn/schedule-send` and only for a final version, and fails visibly
+  without `HOMEBREW_TAP_TOKEN`.
+- `.github/dependabot.yml` groups action updates into one weekly pull request.
+- `tools/release VERSION` and `tools/release-check VERSION`, with
+  `tools/test-release` in the gate.
+- The status deadline test allows 500 ms per inspection instead of 80 ms.
+- The contributing guide describes CI and releasing; `AGENTS.md` lists the
+  release tools.
+
+Measured:
+
+- `tools/check` exit 0 on Linux; parity 41 identical, 37 known differences,
+  0 unexpected; 32 runs of the Go tests, four at once, with no failure.
+- The status test: with every fixture command started 100 ms late, the old
+  limits failed all four cases and the new ones pass; with the deadlines
+  disabled, three cases fail as they should.
+- actionlint reports nothing on both workflows, and reported an error seeded
+  into a copy.
+- In a clean Ubuntu 24.04 container as an ordinary user, the Linux job's steps
+  passed: the gate in 22 s, parity in 67 s, and both smoke tests.
+- Rehearsal on the private repository, tag `v0.1.0-rc.1` made with
+  `tools/release`: the second run passed every job that should run (version 5
+  s, Linux 2.5 min, ARM 27 s, macOS 5 min, publish 33 s, installs 7 s each).
+  It published a pre-release with both archives and `checksums.txt` and the
+  changelog section as notes; `install.sh` installed `0.1.0-rc.1` from it on
+  x86-64 and ARM; the tap jobs were skipped. On macOS the Homebrew test and the
+  launchd test passed, with one background-item record. Herdr 0.9.5, the
+  current release, accepted the manifest on both systems. The release, the tag,
+  and the rehearsal branch were then deleted, and the tap's latest commit is
+  still from 2026-09-17.
+
+Found while building:
+
+- **The release test would have blocked every release.** It copied the real
+  changelog and expected entries under Unreleased, which a release commit has
+  just moved. The first rehearsal run failed the gate on exactly that; the
+  test now has its own changelog.
+- **The plugin test could reach a live Herdr.** This session ran inside a
+  Herdr pane, where `HERDR_SOCKET_PATH` sends `herdr` commands to the live
+  server even under temporary configuration roots. The live 0.9.1 server
+  refused the probe manifest, so nothing was registered; a 0.9.3 server would
+  have registered it. `tools/plugin-smoke` now clears every `HERDR_` variable.
+  If the owner ran it inside a Herdr pane on their Mac, the plugin may have
+  been linked into that Herdr from the clone; the owner's later unlink would
+  have removed it.
+- **The busy-machine failures did not come back** in any run; their cause is
+  still not known. The `date` tests are unchanged, as decided.
+
+Not tested before P8: the tap bump, the install from the tap, `brew audit`,
+and `install.sh` downloading anonymously from the public repository.
+
+For later phases: P7's CI badge points at the workflow named `CI`. P8 must put
+`Formula/schedule-send.rb` in the tap before the first release, because the
+bump action edits an existing formula; add the `HOMEBREW_TAP_TOKEN` secret to
+the new repository; then release with `tools/release 0.1.0`.
 
 ### P7 — README and visuals
 
