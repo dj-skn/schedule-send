@@ -43,3 +43,31 @@ in the suite. Run it for anything that touches scheduling or delivery.
 
 Conventional commits (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`) keep the
 changelog easy to assemble, with a body that says why the change was needed.
+
+## CI
+
+Every push to `main` and every pull request runs the checks on Linux, Linux
+ARM and macOS (`.github/workflows/ci.yml`). The macOS job also installs the
+formula with Homebrew and arms real launchd jobs aimed at the stand-in Herdr.
+
+## Releasing
+
+Maintainers only. Add what changed under `## [Unreleased]` in `CHANGELOG.md`
+as you go. To release, from an up-to-date `main`:
+
+```bash
+tools/release 1.2.3
+```
+
+It moves the Unreleased entries under a heading dated today, sets the
+version in `herdr-plugin.toml`, commits, and tags `v1.2.3`. It pushes
+nothing; it prints the push command. Pushing the tag runs the release
+workflow, which checks that the tag, the changelog and the plugin manifest
+agree, runs CI, publishes the GitHub release with the Linux archives, installs
+it on x86-64 and ARM, bumps the formula in
+[dj-skn/homebrew-tap](https://github.com/dj-skn/homebrew-tap), and installs
+from the tap on macOS.
+
+A version such as `1.2.3-rc.1` makes a pre-release, which is never sent to the
+tap. The tap bump needs a `HOMEBREW_TAP_TOKEN` secret holding a token that can
+write to the tap.

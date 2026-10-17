@@ -14,6 +14,9 @@ entrypoint; `schedule-send.zsh` is the compatibility shim for older timers.
   linked worktrees, kept in a `<checkout>.worktrees` directory beside it.
 - Run `tools/check` before committing. For delivery or scheduling changes,
   run the relevant `tools/parity` cases or the full suite as appropriate.
+- CI (`.github/workflows/ci.yml`) runs these checks on Linux, Linux ARM, and
+  macOS; a `v*` tag runs `.github/workflows/release.yml`. Prepare releases with
+  `tools/release`, never by editing versions by hand.
 - Use the user's commit prefixes: `feat:`, `fix:`, `docs:`, `refactor:`,
   and `chore:`. Use `chore:` for merge commits and tooling changes.
 - `tools/install` and `tools/setup-hooks` must run only from the main checkout
@@ -39,6 +42,8 @@ entrypoint; `schedule-send.zsh` is the compatibility shim for older timers.
 | `tools/install-smoke` | Run `install.sh` against archives built from the checkout, under a temporary home; Linux only. |
 | `tools/brew-smoke` | Install the formula from a temporary local tap and check it, then uninstall; needs Homebrew. |
 | `tools/plugin-smoke` | Check the Herdr plugin's scripts against stand-ins, and its manifest with Herdr under temporary roots. |
+| `tools/release VERSION` | Date the changelog's Unreleased entries, set the plugin's version, commit, and tag; pushes nothing. |
+| `tools/release-check VERSION` | Check that the changelog and the plugin manifest carry the version, and print its release notes. |
 | `tools/setup-hooks` | Enable this repository's hooks and install if needed; main checkout on `main` only. |
 
 Build/install needs Go 1.27.1+, Git, `flock`, and GNU coreutils (`base64`, `tr`). Checks also need `zsh` and
@@ -50,7 +55,8 @@ Build/install needs Go 1.27.1+, Git, `flock`, and GNU coreutils (`base64`, `tr`)
 - Never test against real panes or arm real timers. Use the stand-ins under
   `testdata`, temporary directories, and mock installers for hook tests. The
   one exception is `tools/launchd-smoke`, whose real launchd jobs deliver only
-  to the stand-in Herdr.
+  to the stand-in Herdr. A script that runs the real `herdr` first clears
+  every `HERDR_` variable, which inside a Herdr pane leads to the live server.
 - Each system's scheduler is one file in `internal/job` (`systemd_linux.go`,
   `launchd_darwin.go`) providing the same functions. Code outside those files
   names neither system. launchd kills a job that boots itself out, so a job's
