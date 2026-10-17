@@ -1,6 +1,8 @@
 #!/bin/sh
-# Check tools/release and tools/release-check in a temporary repository made
-# from this checkout's changelog and plugin manifest. Nothing here is touched.
+# Check tools/release and tools/release-check in a temporary repository with
+# a changelog of its own and this checkout's plugin manifest. Nothing here is
+# touched. The real changelog is not used: on a release commit its Unreleased
+# section is empty.
 set -eu
 cd "$(dirname "$0")/.."
 root="$(pwd -P)"
@@ -17,7 +19,18 @@ refuses() { # description, then a command that must fail
 }
 
 mkdir -p "$fixture/tools"
-cp CHANGELOG.md herdr-plugin.toml "$fixture/"
+cp herdr-plugin.toml "$fixture/"
+cat > "$fixture/CHANGELOG.md" <<'CHANGELOG'
+# Changelog
+
+## [Unreleased]
+
+The first public release.
+
+### Added
+
+- Scheduling.
+CHANGELOG
 cp tools/release tools/release-check "$fixture/tools/"
 cd "$fixture"
 git init -q -b main .

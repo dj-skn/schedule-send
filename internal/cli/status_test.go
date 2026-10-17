@@ -159,7 +159,7 @@ func TestStatusDeadlines(t *testing.T) {
 		{"timer deadline", "echo timer-partial; exec /bin/sleep 10", "echo journal-partial", "timer", "timeout"},
 		{"journal deadline", "echo timer-partial", "echo journal-partial; exec /bin/sleep 10", "journal", "timeout"},
 		{"shared timer budget", "if [ \"$2\" = status ]; then echo timer-partial; /bin/sleep 0.2; exit 3; fi\n/bin/sleep 0.6; printf 'LoadState=loaded\\nActiveState=inactive\\nSubState=dead\\n'", "echo journal-partial", "unit_state", "timeout"},
-		{"pipe drain", "echo timer-partial", "echo journal-partial; /bin/sleep 5 &", "journal", "pipe_timeout"},
+		{"pipe drain", "echo timer-partial", "echo journal-partial; /bin/sleep 1 &", "journal", "pipe_timeout"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
