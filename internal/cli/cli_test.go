@@ -221,6 +221,56 @@ target [1]:
 	}
 }
 
+// useDemo swaps the stand-in's screens for testdata/demo, the scenario
+// tools/media records, at 13:24 UTC on 2026-10-15, from pane wC:p1.
+func (h *harness) useDemo(t *testing.T) {
+	t.Helper()
+	root, _ := filepath.Abs("../..")
+	herdrDir := filepath.Join(h.dir, "herdr")
+	os.RemoveAll(herdrDir)
+	os.MkdirAll(herdrDir, 0o755)
+	entries, _ := os.ReadDir(filepath.Join(root, "testdata/demo"))
+	for _, e := range entries {
+		b, _ := os.ReadFile(filepath.Join(root, "testdata/demo", e.Name()))
+		os.WriteFile(filepath.Join(herdrDir, e.Name()), b, 0o644)
+	}
+	t.Setenv("HERDR_SCHEDULE_NOW_EPOCH", "1792070640")
+	t.Setenv("TZ", "UTC")
+	when.Loc = time.UTC
+	h.a.selfPane = "wC:p1"
+}
+
+func TestDemoScenario(t *testing.T) {
+	// What the README's recording shows. When this changes, run tools/media.
+	input := "\n\n"
+	h := newHarness(t, &input)
+	h.useDemo(t)
+	if code := h.a.main([]string{"--dry-run"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	want := `
+agents
+  1  ◷ limited  claude   wA:p1    ~/projects/billing-api     Move invoices to the new ledger  resets 16:00 (session)
+  2  ○ idle     codex    wA:p2    ~/projects/billing-api     Add retries to webhook delivery
+  3  ● working  codex    wB:p1    ~/projects/website         Redesign the pricing page
+
+panes
+  4  · zsh      wA:p3    ~/projects/billing-api
+
+target [1]: 
+  ◷ claude wA:p1 hit its session limit
+    resets   Thu 16:00   in 2h 36m
+    send     "resume"    1 min after
+
+  at [Thu 16:01]: `
+	if h.tty.String() != want {
+		t.Errorf("terminal:\n%s\nwant:\n%s", h.tty, want)
+	}
+	if !strings.Contains(h.stdout.String(), "at=2026-10-15 16:01:00\n") {
+		t.Errorf("stdout:\n%s", h.stdout)
+	}
+}
+
 func TestPickerWithAtKeepsOrderAndMarks(t *testing.T) {
 	input := "\n"
 	h := newHarness(t, &input)
