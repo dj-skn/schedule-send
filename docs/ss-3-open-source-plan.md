@@ -116,7 +116,7 @@ Stated in the walkthrough; the owner did not object.
 | P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | complete in ss-3 |
 | P5 | The Herdr plugin | `ss-3-p5` | complete in ss-3 |
 | P6 | CI and release automation | `ss-3-p6` | complete in ss-3 |
-| P7 | README and visuals | `ss-3-p7` | not started |
+| P7 | README and visuals | `ss-3-p7` | approved 2026-10-19, in progress |
 | P8 | Publication | `ss-3-p8` | not started |
 
 Each phase starts with a fresh source check and an owner walkthrough. Build
@@ -1036,15 +1036,73 @@ the new repository; then release with `tools/release 0.1.0`.
 
 ### P7 — README and visuals
 
-Rewrite the README install-first: what it is, a recording, the three install
-commands, a quick start, then reference. Add badges for CI, the latest release,
-and the licence. Link Herdr's site and repository where Herdr is first named.
-Add a hero graphic and a how-it-works diagram as SVG with light and dark
-variants. Record the terminal sessions with one script that runs the real
-binary against the stand-ins inside a container, so it works on Linux and on a
-Mac with Docker.
+A README written for someone who has never seen the tool, and one script that
+records its terminal visuals from the real program inside a container. No
+program code changes.
 
-→ verify: every image is opened and read; the owner runs the script once.
+#### Code check — 2026-10-19
+
+- The README is 344 lines and 2,349 words. Its first section is the
+  maintainer's own install from a checkout with Git hooks, so a reader meets
+  `tools/setup-hooks` before seeing what the tool does.
+- The official VHS image (0.12.1, 3.06 GB) is built for x86-64 and ARM, so it
+  runs natively on an Apple Silicon Mac. A trial recording of the real program
+  against the stand-ins took 18 s and made a 187 KB GIF with the program's
+  colours (measured). The image lacks `jq`, which the stand-in Herdr needs; an
+  image built on top of it adds it in 5 s.
+- The trial program refused to arm because it was not at the path it
+  recorded, so the recording script must build it for its place in the
+  container.
+- At 1200 px the test data's longest target row wraps. The test data also
+  reads as test data in a showcase.
+- The plugin cannot be recorded in a container: Herdr recognises an agent only
+  when a real agent runs in the pane.
+- The VHS image includes Chromium, which can render an SVG to PNG so the
+  diagrams can be read before they are committed.
+- The badges and repository links point at `dj-skn/schedule-send`, which does
+  not exist until P8, so they show "not found" until then.
+
+#### Decisions settled 2026-10-19
+
+The owner agreed to all four recommendations and instructed build.
+
+1. **README shape.** A short README, about 150 to 200 lines: what it is, the
+   recording, three ways to install, a quick start, the plugin, a
+   how-it-works diagram, and links. The full reference moves to
+   `docs/usage.md` and the maintainer setup to the contributing guide.
+2. **Hero.** The recorded GIF: a limited agent found, the reset proposed, and
+   Enter scheduling `resume`. No designed banner.
+3. **Theme.** Dark terminal recordings framed as a window, which read on
+   GitHub's light and dark pages; the diagram in light and dark variants.
+4. **Plugin image.** A screenshot the owner takes in Herdr on an agent pane,
+   cropped and placed afterwards.
+
+Assumptions the owner did not object to: a demo scenario of its own in
+`testdata/demo`, with the tests' data left alone; media in `docs/media`,
+committed with the recording script and its tapes; everything generated and
+read here, with the owner running the script once on the Mac; badges for CI,
+the latest release, the licence, the Go version, the platforms, and the Herdr
+plugin index; Herdr linked to herdr.dev and its repository where first named.
+
+#### Steps
+
+1. A demo scenario in `testdata/demo`.
+   → verify: the program shows it correctly through the stand-in; the gate is
+   unchanged.
+2. `tools/media` and its tapes, recording GIFs and stills into `docs/media`.
+   → verify: it runs here, and every still and the hero's key frames are read.
+3. The how-it-works diagram as SVG, light and dark.
+   → verify: both rendered to PNG and read.
+4. The README rewrite, `docs/usage.md`, and the maintainer setup in the
+   contributing guide.
+   → verify: every relative link and anchor resolves, checked by script; the
+   private-term scan is clean; read top to bottom.
+5. The owner runs `tools/media` on the Mac and sends the plugin screenshot.
+   → verify: the same set comes out.
+6. Full gate, As built, fast-forward into `ss-3`.
+
+Not included: a logo, a recording of the plugin, translations, and a
+documentation site.
 
 ### P8 — Publication
 
