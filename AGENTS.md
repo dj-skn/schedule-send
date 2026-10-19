@@ -4,9 +4,11 @@
 
 `schedule-send` is a Go CLI for Linux and macOS that schedules messages or keys
 into Herdr agents/panes through on-disk timers: systemd user timers on Linux,
-launchd agents on macOS. Read [README.md](README.md)
-for usage, dependencies, and the package map. `cmd/schedule-send` is the
-entrypoint; `schedule-send.zsh` is the compatibility shim for older timers.
+launchd agents on macOS. [README.md](README.md) shows what it does and how
+it is installed, [docs/usage.md](docs/usage.md) is the full reference, and
+[CONTRIBUTING.md](CONTRIBUTING.md) has the package map and the checkout
+install. `cmd/schedule-send` is the entrypoint; `schedule-send.zsh` is the
+compatibility shim for older timers.
 
 ## Workflow
 
@@ -45,6 +47,7 @@ entrypoint; `schedule-send.zsh` is the compatibility shim for older timers.
 | `tools/release VERSION` | Date the changelog's Unreleased entries, set the plugin's version, commit, and tag; pushes nothing. |
 | `tools/release-check VERSION` | Check that the changelog and the plugin manifest carry the version, and print its release notes. |
 | `tools/setup-hooks` | Enable this repository's hooks and install if needed; main checkout on `main` only. |
+| `tools/media [TAPE...]` | Record the README's GIFs from `docs/media/*.tape` with VHS in Docker, against `testdata/demo` and the stand-ins. |
 
 Build/install needs Go 1.27.1+, Git, `flock`, and GNU coreutils (`base64`, `tr`). Checks also need `zsh` and
 `jq`; parity uses Python 3 and `script`, and runs on Linux only. Runtime on Linux needs Herdr, GNU `date`,
@@ -87,4 +90,5 @@ Build/install needs Go 1.27.1+, Git, `flock`, and GNU coreutils (`base64`, `tr`)
 
 Use story names such as `SS-1`, plans in `docs/ss-<n>-<slug>-plan.md`, and
 branches `ss-<n>` with optional phase branches `ss-<n>-p<k>`. Plans record the
-story's history; current behavior is defined by code, tests, and README.
+story's history; current behavior is defined by code, tests, the README, and
+`docs/usage.md`.
