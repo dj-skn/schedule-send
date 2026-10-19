@@ -8,7 +8,9 @@ from `ss-3-p3`, after the owner's Mac confirmed it. P4 is complete in `ss-3`
 as well, fast-forwarded from `ss-3-p4` after the same confirmation. P5 is complete in
 `ss-3` too, fast-forwarded from `ss-3-p5` after the owner's Mac run and a live
 check in their Herdr. P6 is complete in `ss-3`, fast-forwarded from `ss-3-p6`
-after a rehearsal on the private repository. P7 and P8 are not started.
+after a rehearsal on the private repository. P7 is built through step 4 on
+`ss-3-p7` and waits for the owner's Mac run and plugin screenshot before its
+fast-forward. P8 is not started.
 `ss-3-p3` to `ss-3-p6` were pushed to the private repository for those runs,
 on the owner's word; nothing else is pushed, merged into `main`, installed, or published.
 
@@ -116,7 +118,7 @@ Stated in the walkthrough; the owner did not object.
 | P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | complete in ss-3 |
 | P5 | The Herdr plugin | `ss-3-p5` | complete in ss-3 |
 | P6 | CI and release automation | `ss-3-p6` | complete in ss-3 |
-| P7 | README and visuals | `ss-3-p7` | approved 2026-10-19, in progress |
+| P7 | README and visuals | `ss-3-p7` | built through step 4; waits for the owner's Mac |
 | P8 | Publication | `ss-3-p8` | not started |
 
 Each phase starts with a fresh source check and an owner walkthrough. Build
@@ -1103,6 +1105,72 @@ plugin index; Herdr linked to herdr.dev and its repository where first named.
 
 Not included: a logo, a recording of the plugin, translations, and a
 documentation site.
+
+#### As built — 2026-10-19, steps 1 to 4
+
+- `testdata/demo` is the recordings' scenario: a Claude agent stopped at its
+  session limit, two Codex agents, and a shell, in invented projects, at
+  13:24 UTC on 2026-10-15. `TestDemoScenario` runs the picker against it and
+  pins what the hero recording shows.
+- The systemctl stand-in's active units are a name or a shell pattern, so the
+  recorded job list shows every job as armed.
+- `tools/media [TAPE...]` builds the program for `/work/bin` in the container
+  and for the Docker machine's architecture, builds `schedule-send-media` on
+  VHS 0.12.1 with `jq` added, runs each `docs/media/*.tape` against the demo
+  and the stand-ins, and copies the GIFs into `docs/media`. It needs Docker
+  and Go.
+- `docs/media/resume.gif` is the hero: the picker with the limited agent
+  first, the proposal, and the receipt. `docs/media/schedule.gif` schedules a
+  message by directory and lists both jobs. Both are dark, framed as a window.
+- `docs/media/how-it-works-light.svg` and `-dark.svg`: three steps, in
+  GitHub's light and dark colours, chosen with a `<picture>` element.
+- The README is 134 lines: badges, one sentence with Herdr linked, the hero,
+  the three installs, a quick start with the second GIF, the plugin's key
+  binding, the diagram, and links. `docs/usage.md` (280 lines) holds the
+  reference with its wording, plus a section on the plugin. The contributing
+  guide gained the package map, the checkout install, and how to record the
+  media; `AGENTS.md` points at the new places and lists `tools/media`.
+
+Measured:
+
+- `tools/check` exit 0 with 397 tests and subtests; parity 41 identical, 37
+  known differences, 0 unexpected; `tools/install-smoke` and
+  `tools/plugin-smoke` pass.
+- `tools/media` takes about 60 s for both tapes once the image exists. The
+  hero is 1500 × 760 px, 12.3 s, 105 KB; the second GIF is 1500 × 460 px,
+  14.0 s, 119 KB. Every last frame and a contact sheet of the hero were read.
+- `TestDemoScenario` failed when the displayed title or the reset time in the
+  demo was changed, and passed again when restored.
+- The diagrams were rendered through Chromium with Noto Sans and with Arial
+  metrics; every line fits with room. The README was rendered with GitHub's
+  stylesheet in light and dark and read top to bottom.
+- A script checked 29 relative links and anchors in the Markdown files with
+  none broken, and caught three broken links seeded into a probe file.
+- The private-term scan found nothing.
+
+Found while building:
+
+- **The first target row wrapped** at 1480 px with the first demo title. The
+  title is shorter and the window is 1500 px.
+- **The job list showed every job as stopped**, because the stand-in could
+  report only one unit as active. Hence the pattern.
+- **The list's payload column is 26 characters**, and a longer message pushes
+  the job id out of line. That is the program's layout and was left alone;
+  the demo uses a short message.
+- **The recordings are not byte-for-byte repeatable**: each run gives a
+  different file size for the same frames. The contributing guide says to
+  commit them only when what they show changes.
+- **Herdr's config check does not flag a clash with a default key**, so the
+  README's `prefix+alt+s` follows the pattern of Herdr's own example. The
+  binding has not been tried in a live Herdr.
+- `cmd/schedule-send/main.go` still describes only systemd in its package
+  comment; left alone.
+
+Still to do by hand: the owner runs `tools/media` on the Mac, binds the key in
+their Herdr, and takes the plugin screenshot, which then goes into the README.
+
+For P8: the CI, release, and Go badges show "repo not found" until the public
+repository has run CI on `main` and published a release.
 
 ### P8 — Publication
 
