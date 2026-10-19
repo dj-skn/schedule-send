@@ -1,0 +1,63 @@
+#!/bin/sh
+# Record the README's terminal recordings: run each docs/media/*.tape with VHS
+# in a container, against the demo scenario in testdata/demo and the stand-ins,
+# and write the GIFs beside the tapes. Nothing is delivered and no timer is
+# armed. Needs Docker and Go; runs on Linux and on macOS.
+#
+#   tools/media                  every tape
+#   tools/media resume schedule  the named tapes
+set -eu
+cd "$(dirname "$0")/.."
+root="$(pwd -P)"
+vhs=ghcr.io/charmbracelet/vhs:v0.12.1
+image=schedule-send-media:v0.12.1
+
+command -v docker > /dev/null || { echo 'media: Docker is needed' >&2; exit 1; }
+command -v go > /dev/null || { echo 'media: Go is needed to build the program' >&2; exit 1; }
+if [ "$#" -eq 0 ]; then
+  set -- $(cd docs/media && ls *.tape | sed 's/\.tape$//')
+fi
+for name in "$@"; do
+  [ -f "docs/media/$name.tape" ] || { echo "media: no docs/media/$name.tape" >&2; exit 1; }
+done
+
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+# The stand-in Herdr needs jq, which the VHS image lacks.
+if ! docker image inspect "$image" > /dev/null 2>&1; then
+  echo "media: building $image on $vhs"
+  printf 'FROM %s\nRUN apt-get update -qq && apt-get install -y -qq --no-install-recommends jq && rm -rf /var/lib/apt/lists/*\n' "$vhs" |
+    docker build -t "$image" - > "$work/build.log" 2>&1 ||
+    { cat "$work/build.log" >&2; echo "media: could not build $image" >&2; exit 1; }
+fi
+mkdir -p "$work/bin" "$work/out"
+cp -R testdata/standin "$work/standin"
+ln -s /work/standin/systemctl "$work/bin/systemctl"
+ln -s /work/standin/journalctl "$work/bin/journalctl"
+
+# The program records where it is installed and arms jobs only from there, so
+# it is built for its place in the container, for the container's machine.
+arch="$(docker version --format '{{.Server.Arch}}')"
+CGO_ENABLED=0 GOOS=linux GOARCH="$arch" tools/build "$work/bin/schedule-send" /work/bin/schedule-send > /dev/null
+
+# What each tape's shell sources before it starts recording: the demo's clock,
+# time zone, home and calling pane, and the stand-ins first on PATH.
+cat > "$work/env.sh" << 'EOF'
+export PATH=/work/bin:$PATH HOME=/home/dev TZ=UTC
+export HERDR_BIN_OVERRIDE=/work/standin/herdr HERDR_STANDIN_DIR=/work/scenario HERDR_PANE_ID=wC:p1
+export HERDR_SCHEDULE_NOW_EPOCH=1792070640 SYSTEMCTL_STANDIN_ACTIVE='herdr-send-*'
+export XDG_STATE_HOME=/work/state XDG_CONFIG_HOME=/work/config
+PS1='\[\e[38;2;137;180;250m\]❯\[\e[0m\] '
+EOF
+
+for name in "$@"; do
+  # Each tape starts from the demo as committed, with no jobs.
+  rm -rf "$work/scenario" "$work/state" "$work/config"
+  cp -R testdata/demo "$work/scenario"
+  cp "docs/media/$name.tape" "$work/$name.tape"
+  docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$work:/work" -w /work "$image" "$name.tape" > "$work/$name.log" 2>&1 ||
+    { cat "$work/$name.log" >&2; echo "media: $name.tape failed" >&2; exit 1; }
+  cp "$work/out/$name.gif" "docs/media/$name.gif"
+  echo "media: docs/media/$name.gif ($(wc -c < "docs/media/$name.gif" | tr -d ' ') bytes)"
+done

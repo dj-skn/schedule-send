@@ -250,7 +250,7 @@ func TestDemoScenario(t *testing.T) {
 	}
 	want := `
 agents
-  1  ◷ limited  claude   wA:p1    ~/projects/billing-api     Move invoices to the new ledger  resets 16:00 (session)
+  1  ◷ limited  claude   wA:p1    ~/projects/billing-api     Move invoices to the ledger  resets 16:00 (session)
   2  ○ idle     codex    wA:p2    ~/projects/billing-api     Add retries to webhook delivery
   3  ● working  codex    wB:p1    ~/projects/website         Redesign the pricing page
 
