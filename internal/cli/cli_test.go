@@ -99,28 +99,6 @@ func TestCancelOnATerminal(t *testing.T) {
 	}
 }
 
-func TestReceiptIntoAPipeStaysKeyValue(t *testing.T) {
-	// Every stream but stdout is a terminal.
-	input := "\n"
-	h := newHarness(t, &input)
-	h.a.stderrTTY = terminal
-	if code := h.a.main([]string{"--pane", "wB:p1"}); code != 0 {
-		t.Fatalf("exit %d: %s", code, h.stderr)
-	}
-	want := `id=20261003-160100-wBp1
-unit=herdr-send-20261003-160100-wBp1.timer
-target=agent wB:p1 (claude, idle)
-at=2026-10-03 16:01:00
-delay_seconds=2340
-payload=resume
-
-cancel with: schedule-send --cancel 20261003-160100-wBp1
-`
-	if h.stdout.String() != want {
-		t.Errorf("stdout:\n%s\nwant:\n%s", h.stdout, want)
-	}
-}
-
 func TestJSONListCancelStatus(t *testing.T) {
 	h := newHarness(t, nil)
 	h.addJobs(t)

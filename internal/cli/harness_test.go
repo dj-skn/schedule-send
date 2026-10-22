@@ -150,3 +150,11 @@ func jsonObject(t *testing.T, b []byte) map[string]any {
 	}
 	return m
 }
+
+// dryRunRows is what the rail's end lists under a dry run's first line, for a
+// send with id from cwd, as the harness runs it.
+func (h *harness) dryRunRows(id, cwd string) string {
+	return "   cwd      " + cwd + "\n   if-busy  wait\n   recover  keys\n   grace    4s\n   persist  no\n" +
+		"   id       " + id + "\n   units    " + h.a.sys.Files(h.a.paths, id, false) + "\n" +
+		"   runs     /opt/schedule-send __fire " + id + "\n"
+}

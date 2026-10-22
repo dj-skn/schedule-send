@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -94,11 +95,16 @@ panes
   5  · zsh      wB:p5    ~/projects/shop-backend
 
 target [1]: 
-  ◷ claude wB:p1 hit its weekly limit
-    resets   Sat 16:00   in 38m
-    send     "resume"    1 min after
-
-  at [Sat 16:01]: `
+┌  Schedule a send · dry run                Ctrl-C cancels
+│
+│  claude · wB:p1 · ~/projects/shop-backend
+│  ◷ hit its weekly limit · resets Sat 16:00, in 38m
+│
+◆  When?
+│  Enter keeps Sat 16:01, 1 min after the reset
+│  › │
+└  · Dry run: would schedule "resume" for Sat 16:01, in 39m
+` + h.dryRunRows("20261003-160100-wBp1", "~/projects/shop-backend")
 	if h.tty.String() != want {
 		t.Errorf("terminal:\n%s\nwant:\n%s", h.tty, want)
 	}
@@ -125,11 +131,16 @@ panes
   4  · zsh      wA:p3    ~/projects/billing-api
 
 target [1]: 
-  ◷ claude wA:p1 hit its session limit
-    resets   Thu 16:00   in 2h 36m
-    send     "resume"    1 min after
-
-  at [Thu 16:01]: `
+┌  Schedule a send · dry run                Ctrl-C cancels
+│
+│  claude · wA:p1 · ~/projects/billing-api
+│  ◷ hit its session limit · resets Thu 16:00, in 2h 36m
+│
+◆  When?
+│  Enter keeps Thu 16:01, 1 min after the reset
+│  › │
+└  · Dry run: would schedule "resume" for Thu 16:01, in 2h 37m
+` + h.dryRunRows("20261015-160100-wAp1", "~/projects/billing-api")
 	if h.tty.String() != want {
 		t.Errorf("terminal:\n%s\nwant:\n%s", h.tty, want)
 	}
@@ -307,9 +318,10 @@ func TestConfirmUnconfirmedResetSaysTypeOneMinute(t *testing.T) {
 	if code := h.a.main([]string{"--pane", "wB:p1", "--dry-run"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.stderr)
 	}
-	want := "    note     the notice names no day; if it was shown before Sat 16:00, the limit is already over: type +1 min\n\n  at [Sun 16:01]: "
-	if !strings.HasSuffix(h.tty.String(), want) {
-		t.Errorf("terminal:\n%s\nwant it to end:\n%s", h.tty, want)
+	want := "│    the notice names no day; if it was shown before Sat 16:00, the limit is already over: type +1 min\n│\n" +
+		"◆  When?\n│  Enter keeps Sun 16:01, 1 min after the reset\n"
+	if !strings.Contains(h.tty.String(), want) {
+		t.Errorf("terminal:\n%s\nwant it to hold:\n%s", h.tty, want)
 	}
 }
 
@@ -320,8 +332,8 @@ func TestConfirmOverDefaultStaysAMinuteAhead(t *testing.T) {
 	if code := h.a.main([]string{"--pane", "wB:p1", "--dry-run"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.stderr)
 	}
-	if want := "    send     \"resume\"    1 min from now\n\n  at [Sat 16:17:40]: "; !strings.HasSuffix(h.tty.String(), want) {
-		t.Errorf("terminal:\n%s\nwant it to end:\n%s", h.tty, want)
+	if want := "│  Enter keeps Sat 16:17:40, 1 min from now\n"; !strings.Contains(h.tty.String(), want) {
+		t.Errorf("terminal:\n%s\nwant it to hold:\n%s", h.tty, want)
 	}
 	for _, want := range []string{"at=2026-10-03 16:19:40\n", "delay_seconds=60\n"} {
 		if !strings.Contains(h.stdout.String(), want) {
@@ -361,7 +373,7 @@ func TestConfirmJudgesAnswersWhenGiven(t *testing.T) {
 		if d := runAt - answered; d < 60 || d > 65 {
 			t.Fatalf("sends %d s after the answer, want about 60:\n%s", d, h.stdout)
 		}
-		if want := " in " + when.Delay(runAt-answered) + "\n"; !strings.Contains(h.tty.String(), want) {
+		if want := " · in " + when.Delay(runAt-answered) + " · Enter keeps it\n"; !strings.Contains(h.tty.String(), want) {
 			t.Errorf("terminal lacks %q:\n%s", want, h.tty)
 		}
 	})
@@ -372,7 +384,7 @@ func TestConfirmJudgesAnswersWhenGiven(t *testing.T) {
 		if code := h.a.main([]string{"--pane", "wB:p3", "--dry-run"}); code != 0 {
 			t.Fatalf("exit %d: %s", code, h.stderr)
 		}
-		for _, want := range []string{"    Sat 16:18 has already passed.\n", "    → Sat 16:20   in 2m\n"} {
+		for _, want := range []string{"│  ✗ Sat 16:18 has already passed.\n", "│  → Sat 16:20 · in 2m · Enter keeps it\n"} {
 			if !strings.Contains(h.tty.String(), want) {
 				t.Errorf("terminal lacks %q:\n%s", want, h.tty)
 			}
@@ -487,7 +499,8 @@ func TestJSONStillAsks(t *testing.T) {
 	if code := h.a.main([]string{"--dry-run", "--json"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.stderr)
 	}
-	if !strings.Contains(h.tty.String(), "  ◷ claude wB:p1 hit its weekly limit\n") || !strings.Contains(h.tty.String(), "  at [Sat 16:01]: ") {
+	if !strings.Contains(h.tty.String(), "│  ◷ hit its weekly limit · resets Sat 16:00, in 38m\n") ||
+		!strings.Contains(h.tty.String(), "│  Enter keeps Sat 16:01, 1 min after the reset\n") {
 		t.Errorf("terminal:\n%s", h.tty)
 	}
 	got := jsonObject(t, h.stdout.Bytes())
@@ -551,5 +564,74 @@ func TestPickerEOFDoesNotChooseTarget(t *testing.T) {
 	}
 	if !strings.Contains(h.stderr.String(), "Target selection cancelled") {
 		t.Fatalf("stderr %s", h.stderr)
+	}
+}
+
+func TestReceiptIntoAPipeStaysKeyValue(t *testing.T) {
+	// Every stream but stdout is a terminal.
+	input := "\n"
+	h := newHarness(t, &input)
+	h.a.stderrTTY = terminal
+	if code := h.a.main([]string{"--pane", "wB:p1"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	want := `id=20261003-160100-wBp1
+unit=` + h.a.sys.Name("20261003-160100-wBp1") + `
+target=agent wB:p1 (claude, idle)
+at=2026-10-03 16:01:00
+delay_seconds=2340
+payload=resume
+
+cancel with: schedule-send --cancel 20261003-160100-wBp1
+`
+	if h.stdout.String() != want {
+		t.Errorf("stdout:\n%s\nwant:\n%s", h.stdout, want)
+	}
+}
+
+func TestEndOfInputEndsTheRail(t *testing.T) {
+	input := ""
+	h := newHarness(t, &input)
+	if code := h.a.main([]string{"--pane", "wB:p1", "--dry-run"}); code != 1 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	if want := "│  › └  ✗ No send time given.\n"; !strings.HasSuffix(h.tty.String(), want) {
+		t.Errorf("terminal:\n%s\nwant it to end:\n%s", h.tty, want)
+	}
+	if h.stderr.Len() != 0 || h.stdout.Len() != 0 {
+		t.Errorf("stderr %q, stdout %q", h.stderr, h.stdout)
+	}
+}
+
+func TestRailEndTakesTheStyledReceiptsPlace(t *testing.T) {
+	// stdout is the terminal the rail is drawn on, so the receipt is not
+	// printed twice.
+	input := "\n"
+	h := newHarness(t, &input)
+	h.a.stdoutTTY = terminal
+	if code := h.a.main([]string{"--pane", "wB:p1"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	want := "└  ✓ Scheduled \"resume\" for Sat 16:01, in 39m\n   cancel   schedule-send --cancel 20261003-160100-wBp1\n"
+	if !strings.HasSuffix(h.tty.String(), want) {
+		t.Errorf("terminal:\n%s\nwant it to end:\n%s", h.tty, want)
+	}
+	if h.stdout.Len() != 0 {
+		t.Errorf("stdout %q", h.stdout)
+	}
+}
+
+func TestWarningsGoOnTheRail(t *testing.T) {
+	input := "\n"
+	h := newHarness(t, &input)
+	h.a.installedPath = func() (string, error) { return "", errors.New("not installed") }
+	if code := h.a.main([]string{"--pane", "wB:p1", "--dry-run"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	if want := "│  Warning: this build cannot arm jobs (not installed)"; !strings.Contains(h.tty.String(), want) {
+		t.Errorf("terminal:\n%s\nwant it to hold:\n%s", h.tty, want)
+	}
+	if h.stderr.Len() != 0 {
+		t.Errorf("stderr %q", h.stderr)
 	}
 }

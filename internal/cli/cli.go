@@ -85,6 +85,47 @@ type app struct {
 	now  int64 // when the run started; screens are judged at this moment
 
 	lim map[string]limit.Status // set by limits
+	ask *asker                  // set by asking, at the first question
+}
+
+// asker is the terminal a run asks its questions on, drawn as a rail. It is
+// opened at the first question and kept until the run ends, so every answer
+// comes from one stream, as typed, and the rail ends with how the run came
+// out.
+type asker struct {
+	tty  io.ReadWriteCloser
+	c    term.Colors
+	rail show.Rail
+}
+
+// say writes lines on the terminal.
+func (q *asker) say(lines ...string) {
+	for _, l := range lines {
+		fmt.Fprintln(q.tty, l)
+	}
+}
+
+// answer shows the place to type, and reads what was typed there. ok is false
+// at end of input.
+func (q *asker) answer() (string, bool) {
+	fmt.Fprint(q.tty, q.rail.Input())
+	return term.ReadLine(q.tty)
+}
+
+// asking is the run's terminal for questions, opened and given the rail's top
+// the first time.
+func (a *app) asking() (*asker, error) {
+	if a.ask != nil {
+		return a.ask, nil
+	}
+	tty, err := a.openTTY()
+	if err != nil {
+		return nil, err
+	}
+	c := term.ColorsFor(tty)
+	a.ask = &asker{tty: tty, c: c, rail: show.NewRail(c)}
+	a.ask.say("", a.ask.rail.Top(a.o.dryRun), a.ask.rail.Gap())
+	return a.ask, nil
 }
 
 // Main runs the command and returns its exit status.
@@ -120,6 +161,9 @@ func (a *app) main(args []string) int {
 		}
 	}
 	err := a.run(args)
+	if a.ask != nil {
+		defer a.ask.tty.Close()
+	}
 	var f failure
 	switch {
 	case err == nil:
@@ -128,19 +172,24 @@ func (a *app) main(args []string) int {
 		if f.code == 0 || f.msg == "" {
 			return f.code
 		}
-		if a.o.json {
-			a.writeError(f)
-		} else {
-			fmt.Fprintln(a.stderr, f.msg)
-		}
+		a.failed(f)
 		return f.code
 	default:
-		if a.o.json {
-			a.writeError(failure{msg: err.Error(), code: 1})
-		} else {
-			fmt.Fprintln(a.stderr, err)
-		}
+		a.failed(failure{msg: err.Error(), code: 1})
 		return 1
+	}
+}
+
+// failed says why the run stopped: as JSON under --json, as the rail's end
+// once a question was asked, and otherwise on stderr.
+func (a *app) failed(f failure) {
+	switch {
+	case a.o.json:
+		a.writeError(f)
+	case a.ask != nil:
+		a.ask.say(a.ask.rail.Fail(f.msg))
+	default:
+		fmt.Fprintln(a.stderr, f.msg)
 	}
 }
 
@@ -162,7 +211,8 @@ func emit(w io.Writer, v any) {
 }
 
 // note and warn are the asides on stderr. Under --json each is its own object,
-// so stderr stays something a script can read.
+// so stderr stays something a script can read. A warning given once a question
+// was asked goes on the rail instead, among the steps it is about.
 func (a *app) note(msg string) {
 	if a.o.json {
 		emit(a.stderr, struct {
@@ -178,6 +228,10 @@ func (a *app) warn(msg string) {
 		emit(a.stderr, struct {
 			Warning string `json:"warning"`
 		}{msg})
+		return
+	}
+	if a.ask != nil {
+		a.ask.say(a.ask.rail.Warning(msg))
 		return
 	}
 	fmt.Fprintln(a.stderr, msg)
@@ -430,7 +484,9 @@ func (a *app) run(args []string) (retErr error) {
 	if o.defaulted && !t.IsAgent() {
 		return die("Pane %s is a plain shell, where the default '%s' would run as a command. Pass --message.", t.Pane, resumeMessage)
 	}
-	if t.IsAgent() && t.Status == "blocked" && o.keys == "" {
+	// Asked on a terminal, the report on the rail says so itself.
+	ask := detect && !o.auto
+	if t.IsAgent() && t.Status == "blocked" && o.keys == "" && !ask {
 		a.warn(fmt.Sprintf("Warning: agent in %s is blocked on a prompt right now.", t.Pane))
 	}
 
@@ -545,8 +601,16 @@ func (a *app) run(args []string) (retErr error) {
 }
 
 // receipt prints the send armed, or the dry run, styled when stdout is a
-// terminal and as key=value lines for anything reading it.
+// terminal and as key=value lines for anything reading it. After questions it
+// is the rail's end, and stdout gets it only when that is not the same
+// terminal.
 func (a *app) receipt(s show.Scheduled, now int64) {
+	if a.ask != nil {
+		a.ask.say(s.RailEnd(a.ask.c, now))
+		if a.stdoutTTY() && !a.o.json {
+			return
+		}
+	}
 	if a.o.json {
 		var st limit.Status
 		note := ""
@@ -833,8 +897,9 @@ func (a *app) detectAt(now int64) (int64, error) {
 		proposed = st.Reset + limitMargin
 	}
 	report := show.Report{
-		Kind: a.tgt.Kind, Agent: a.tgt.Agent, Pane: a.tgt.Pane, Summary: target.Summary(a.tgt),
-		Limit: st, Message: a.o.message, Keys: a.o.keys, Margin: limitMargin, Auto: a.o.auto, Now: now,
+		Kind: a.tgt.Kind, Agent: a.tgt.Agent, Pane: a.tgt.Pane, Status: a.tgt.Status, Cwd: a.tgt.Cwd,
+		Summary: target.Summary(a.tgt), Limit: st, Message: a.o.message, Keys: a.o.keys,
+		Margin: limitMargin, Auto: a.o.auto, Now: now,
 	}
 
 	if a.o.auto {
@@ -850,33 +915,27 @@ func (a *app) detectAt(now int64) (int64, error) {
 		}
 		return proposed, nil
 	}
-	return a.confirmAt(proposed, fromNow, report)
-}
-
-// confirmAt asks on the terminal when to send, after showing the report,
-// offering def (an epoch, or 0 for no default). Enter takes the default; when
-// fromNow, def is limitMargin from the start of the run, and Enter keeps it at
-// least that far ahead of the moment it is pressed. Anything typed is
-// resolved, shown back, and becomes the new default, so a correction is
-// confirmed the same way the detected time is. Each answer is judged at the
-// time it is given.
-func (a *app) confirmAt(def int64, fromNow bool, report show.Report) (int64, error) {
-	tty, err := a.openTTY()
+	q, err := a.asking()
 	if err != nil {
 		return 0, die("Could not open /dev/tty to confirm the send time.")
 	}
-	defer tty.Close()
-	c := term.ColorsFor(tty)
-	fmt.Fprint(tty, "\n"+report.Styled(c)+"\n\n")
+	for _, line := range report.RailLines(q.c) {
+		q.say(q.rail.Line(line))
+	}
+	q.say(q.rail.Gap())
+	return a.confirmAt(q, proposed, fromNow, now)
+}
 
-	now := report.Now
+// confirmAt asks on the rail when to send, offering def (an epoch, or 0 for
+// no default). Enter takes the default; when fromNow, def is limitMargin from
+// the start of the run, and Enter keeps it at least that far ahead of the
+// moment it is pressed. Anything typed is resolved, shown back, and becomes
+// the new default, so a correction is confirmed the same way the detected time
+// is. Each answer is judged at the time it is given.
+func (a *app) confirmAt(q *asker, def int64, fromNow bool, now int64) (int64, error) {
+	q.say(q.rail.Step("When?"), q.rail.Hint(timeHint(def, fromNow, now)))
 	for {
-		if def != 0 {
-			fmt.Fprintf(tty, "  at [%s]: ", show.Time(def, now))
-		} else {
-			fmt.Fprint(tty, "  at: ")
-		}
-		input, ok := term.ReadLine(tty)
+		input, ok := q.answer()
 		if !ok {
 			return 0, die("No send time given.")
 		}
@@ -886,21 +945,35 @@ func (a *app) confirmAt(def int64, fromNow bool, report show.Report) (int64, err
 			case def == 0:
 				continue
 			case fromNow:
-				return max(def, now+limitMargin), nil
+				def = max(def, now+limitMargin)
 			}
+			q.say(q.rail.Gap())
 			return def, nil
 		}
 		epoch, parsed := when.Resolve(input, now)
 		switch {
 		case !parsed:
-			fmt.Fprintf(tty, "    %sCould not parse '%s'. Try 00:45, 12:45 AM, Sep 27 1am, or +30 min.%s\n", c.Red, input, c.Reset)
+			q.say(q.rail.Error(fmt.Sprintf("Could not read '%s'. Try 18:30, 6:30 PM, Sep 27 1am or +30 min.", input)))
 		case epoch <= now:
-			fmt.Fprintf(tty, "    %s%s has already passed.%s\n", c.Red, show.Time(epoch, now), c.Reset)
+			q.say(q.rail.Error(show.Time(epoch, now) + " has already passed."))
 		default:
-			fmt.Fprintf(tty, "    → %-11s %s\n", show.Time(epoch, now), c.Dim+"in "+when.Delay(epoch-now)+c.Reset)
+			q.say(q.rail.Resolved(show.Time(epoch, now), when.Delay(epoch-now)))
 			def, fromNow = epoch, false
 		}
 	}
+}
+
+// timeHint says what the time question takes: the time Enter keeps and why,
+// or, with none to keep, the ways a time can be typed.
+func timeHint(def int64, fromNow bool, now int64) string {
+	mins := limitMargin / 60
+	switch {
+	case def == 0:
+		return "Like 18:30, 6:30 PM, Sep 27 1am or +30 min"
+	case fromNow:
+		return fmt.Sprintf("Enter keeps %s, %d min from now", show.Time(def, now), mins)
+	}
+	return fmt.Sprintf("Enter keeps %s, %d min after the reset", show.Time(def, now), mins)
 }
 
 // ------------------------------------------------------------- subcommands
