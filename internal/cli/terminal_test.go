@@ -100,6 +100,9 @@ target [1]:
 │  claude · wB:p1 · ~/projects/shop-backend
 │  ◷ hit its weekly limit · resets Sat 16:00, in 38m
 │
+◆  What should it send?
+│  Enter keeps "resume"
+│  › │
 ◆  When?
 │  Enter keeps Sat 16:01, 1 min after the reset
 │  › │
@@ -136,6 +139,9 @@ target [1]:
 │  claude · wA:p1 · ~/projects/billing-api
 │  ◷ hit its session limit · resets Thu 16:00, in 2h 36m
 │
+◆  What should it send?
+│  Enter keeps "resume"
+│  › │
 ◆  When?
 │  Enter keeps Thu 16:01, 1 min after the reset
 │  › │
@@ -311,7 +317,7 @@ func TestAutoUnconfirmedResetSaysSo(t *testing.T) {
 }
 
 func TestConfirmUnconfirmedResetSaysTypeOneMinute(t *testing.T) {
-	input := "\n"
+	input := "\n\n"
 	h := newHarness(t, &input)
 	t.Setenv("HERDR_SCHEDULE_NOW_EPOCH", "1791037000") // 16:16:40
 	h.edit(t, "visible-wB-p1.txt", " week:0% (44m)", "")
@@ -319,14 +325,14 @@ func TestConfirmUnconfirmedResetSaysTypeOneMinute(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, h.stderr)
 	}
 	want := "│    the notice names no day; if it was shown before Sat 16:00, the limit is already over: type +1 min\n│\n" +
-		"◆  When?\n│  Enter keeps Sun 16:01, 1 min after the reset\n"
+		"◆  What should it send?\n│  Enter keeps \"resume\"\n│  › │\n◆  When?\n│  Enter keeps Sun 16:01, 1 min after the reset\n"
 	if !strings.Contains(h.tty.String(), want) {
 		t.Errorf("terminal:\n%s\nwant it to hold:\n%s", h.tty, want)
 	}
 }
 
 func TestConfirmOverDefaultStaysAMinuteAhead(t *testing.T) {
-	input := "\n"
+	input := "\n\n"
 	h := newHarness(t, &input)
 	h.a.clock = waiting(1791037000, 120) // 16:16:40, Enter at 16:18:40
 	if code := h.a.main([]string{"--pane", "wB:p1", "--dry-run"}); code != 0 {
@@ -343,7 +349,7 @@ func TestConfirmOverDefaultStaysAMinuteAhead(t *testing.T) {
 }
 
 func TestConfirmResetDefaultStaysAsShown(t *testing.T) {
-	input := "\n"
+	input := "\n\n"
 	h := newHarness(t, &input)
 	h.a.clock = waiting(1791033720, 120) // 15:22, Enter at 15:24
 	if code := h.a.main([]string{"--pane", "wB:p1", "--dry-run"}); code != 0 {
@@ -358,7 +364,7 @@ func TestConfirmResetDefaultStaysAsShown(t *testing.T) {
 
 func TestConfirmJudgesAnswersWhenGiven(t *testing.T) {
 	t.Run("typed +1 min", func(t *testing.T) {
-		input := "+1 min\n\n"
+		input := "\n+1 min\n\n"
 		h := newHarness(t, &input)
 		// date(1) resolves "+1 min" from the real clock, so the answer is
 		// given at the real time.
@@ -378,7 +384,7 @@ func TestConfirmJudgesAnswersWhenGiven(t *testing.T) {
 		}
 	})
 	t.Run("a time passed while the prompt waited", func(t *testing.T) {
-		input := "2026-10-03 16:18\n16:20\n\n"
+		input := "\n2026-10-03 16:18\n16:20\n\n"
 		h := newHarness(t, &input)
 		h.a.clock = waiting(1791037000, 120) // 16:16:40, answered at 16:18:40
 		if code := h.a.main([]string{"--pane", "wB:p3", "--dry-run"}); code != 0 {
@@ -569,7 +575,7 @@ func TestPickerEOFDoesNotChooseTarget(t *testing.T) {
 
 func TestReceiptIntoAPipeStaysKeyValue(t *testing.T) {
 	// Every stream but stdout is a terminal.
-	input := "\n"
+	input := "\n\n"
 	h := newHarness(t, &input)
 	h.a.stderrTTY = terminal
 	if code := h.a.main([]string{"--pane", "wB:p1"}); code != 0 {
@@ -590,7 +596,7 @@ cancel with: schedule-send --cancel 20261003-160100-wBp1
 }
 
 func TestEndOfInputEndsTheRail(t *testing.T) {
-	input := ""
+	input := "\n"
 	h := newHarness(t, &input)
 	if code := h.a.main([]string{"--pane", "wB:p1", "--dry-run"}); code != 1 {
 		t.Fatalf("exit %d: %s", code, h.stderr)
@@ -606,7 +612,7 @@ func TestEndOfInputEndsTheRail(t *testing.T) {
 func TestRailEndTakesTheStyledReceiptsPlace(t *testing.T) {
 	// stdout is the terminal the rail is drawn on, so the receipt is not
 	// printed twice.
-	input := "\n"
+	input := "\n\n"
 	h := newHarness(t, &input)
 	h.a.stdoutTTY = terminal
 	if code := h.a.main([]string{"--pane", "wB:p1"}); code != 0 {
@@ -622,7 +628,7 @@ func TestRailEndTakesTheStyledReceiptsPlace(t *testing.T) {
 }
 
 func TestWarningsGoOnTheRail(t *testing.T) {
-	input := "\n"
+	input := "\n\n"
 	h := newHarness(t, &input)
 	h.a.installedPath = func() (string, error) { return "", errors.New("not installed") }
 	if code := h.a.main([]string{"--pane", "wB:p1", "--dry-run"}); code != 0 {
@@ -634,4 +640,69 @@ func TestWarningsGoOnTheRail(t *testing.T) {
 	if h.stderr.Len() != 0 {
 		t.Errorf("stderr %q", h.stderr)
 	}
+}
+
+func TestMessageQuestion(t *testing.T) {
+	t.Run("typed on an agent", func(t *testing.T) {
+		input := "run the e2e suite\n\n"
+		h := newHarness(t, &input)
+		if code := h.a.main([]string{"--pane", "wB:p1", "--dry-run"}); code != 0 {
+			t.Fatalf("exit %d: %s", code, h.stderr)
+		}
+		if !strings.Contains(h.stdout.String(), "payload=run the e2e suite\n") {
+			t.Errorf("stdout:\n%s", h.stdout)
+		}
+		if want := `└  · Dry run: would schedule "run the e2e suite" for Sat 16:01`; !strings.Contains(h.tty.String(), want) {
+			t.Errorf("terminal:\n%s\nwant it to hold:\n%s", h.tty, want)
+		}
+	})
+	t.Run("a shell pane has to be told", func(t *testing.T) {
+		// Enter and blanks are asked again; then the time, which a pane has
+		// no notice to propose.
+		input := "\n  \nls -la\n17:00\n\n"
+		h := newHarness(t, &input)
+		if code := h.a.main([]string{"--pane", "wB:p5", "--dry-run"}); code != 0 {
+			t.Fatalf("exit %d: %s", code, h.stderr)
+		}
+		want := "│  pane wB:p5 · ~/projects/shop-backend\n│\n" +
+			"◆  What should it send?\n│  It's a shell, so this runs as a command\n│  › │  › │  › │\n" +
+			"◆  When?\n│  Like 18:30, 6:30 PM, Sep 27 1am or +30 min\n│  › │  → Sat 17:00 · in 1h 38m · Enter keeps it\n│  › │\n"
+		if !strings.Contains(h.tty.String(), want) {
+			t.Errorf("terminal:\n%s\nwant it to hold:\n%s", h.tty, want)
+		}
+		if !strings.Contains(h.stdout.String(), "payload=ls -la\n") {
+			t.Errorf("stdout:\n%s", h.stdout)
+		}
+	})
+	t.Run("end of input", func(t *testing.T) {
+		input := ""
+		h := newHarness(t, &input)
+		if code := h.a.main([]string{"--pane", "wB:p1", "--dry-run"}); code != 1 {
+			t.Fatalf("exit %d: %s", code, h.stderr)
+		}
+		if want := "│  › └  ✗ No message given.\n"; !strings.HasSuffix(h.tty.String(), want) {
+			t.Errorf("terminal:\n%s\nwant it to end:\n%s", h.tty, want)
+		}
+	})
+	t.Run("not asked when given", func(t *testing.T) {
+		for _, args := range [][]string{{"--message", "hi"}, {"--keys", "esc"}} {
+			input := "\n"
+			h := newHarness(t, &input)
+			if code := h.a.main(append([]string{"--pane", "wB:p1", "--dry-run"}, args...)); code != 0 {
+				t.Fatalf("%v: exit %d: %s", args, code, h.stderr)
+			}
+			if strings.Contains(h.tty.String(), "What should it send?") {
+				t.Errorf("%v asked:\n%s", args, h.tty)
+			}
+		}
+	})
+	t.Run("a shell pane under --auto is still refused", func(t *testing.T) {
+		h := newHarness(t, nil)
+		if code := h.a.main([]string{"--pane", "wB:p5", "--auto", "--dry-run"}); code != 1 {
+			t.Fatalf("exit %d: %s", code, h.stderr)
+		}
+		if want := "Pane wB:p5 is a plain shell, where the default 'resume' would run as a command. Pass --message.\n"; h.stderr.String() != want {
+			t.Errorf("stderr %q, want %q", h.stderr, want)
+		}
+	})
 }

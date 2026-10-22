@@ -481,11 +481,12 @@ func (a *app) run(args []string) (retErr error) {
 	if t.Pane == a.selfPane && !o.allowSelf {
 		return die("Refusing to target the pane this command runs in. Pass --allow-self to override.")
 	}
-	if o.defaulted && !t.IsAgent() {
+	// Asked on a terminal, the rail asks for the message a shell pane needs,
+	// and its report says when an agent is blocked.
+	ask := detect && !o.auto
+	if o.defaulted && !t.IsAgent() && !ask {
 		return die("Pane %s is a plain shell, where the default '%s' would run as a command. Pass --message.", t.Pane, resumeMessage)
 	}
-	// Asked on a terminal, the report on the rail says so itself.
-	ask := detect && !o.auto
 	if t.IsAgent() && t.Status == "blocked" && o.keys == "" && !ask {
 		a.warn(fmt.Sprintf("Warning: agent in %s is blocked on a prompt right now.", t.Pane))
 	}
@@ -923,7 +924,39 @@ func (a *app) detectAt(now int64) (int64, error) {
 		q.say(q.rail.Line(line))
 	}
 	q.say(q.rail.Gap())
+	if a.o.defaulted {
+		if err := a.askMessage(q, a.tgt.IsAgent()); err != nil {
+			return 0, err
+		}
+	}
 	return a.confirmAt(q, proposed, fromNow, now)
+}
+
+// askMessage asks what to send when no message was given. Enter keeps
+// "resume" on an agent; a shell pane, where the text runs as a command, has
+// to be told.
+func (a *app) askMessage(q *asker, agent bool) error {
+	hint := `Enter keeps "` + resumeMessage + `"`
+	if !agent {
+		hint = "It's a shell, so this runs as a command"
+	}
+	q.say(q.rail.Step("What should it send?"), q.rail.Hint(hint))
+	for {
+		input, ok := q.answer()
+		if !ok {
+			return die("No message given.")
+		}
+		switch {
+		case strings.TrimSpace(input) != "":
+			a.o.message = input
+		case agent:
+			a.o.message = resumeMessage
+		default:
+			continue
+		}
+		q.say(q.rail.Gap())
+		return nil
+	}
 }
 
 // confirmAt asks on the rail when to send, offering def (an epoch, or 0 for
