@@ -10,8 +10,8 @@ as well, fast-forwarded from `ss-3-p4` after the same confirmation. P5 is comple
 check in their Herdr. P6 is complete in `ss-3`, fast-forwarded from `ss-3-p6`
 after a rehearsal on the private repository. P7 is complete in `ss-3`,
 fast-forwarded from `ss-3-p7` after the owner's Mac run; its plugin
-screenshot moved to P7.1. P7.1, which reworks the overlay's prompt, is agreed
-in outline and not started. P8 is not started.
+screenshot moved to P7.1. P7.1, which reworks the overlay's prompt, is
+recorded and being built on `ss-3-p7.1`. P8 is not started.
 `ss-3-p3` to `ss-3-p7` were pushed to the private repository for those runs,
 on the owner's word; nothing else is pushed, merged into `main`, installed, or published.
 
@@ -120,7 +120,7 @@ Stated in the walkthrough; the owner did not object.
 | P5 | The Herdr plugin | `ss-3-p5` | complete in ss-3 |
 | P6 | CI and release automation | `ss-3-p6` | complete in ss-3 |
 | P7 | README and visuals | `ss-3-p7` | complete in ss-3 |
-| P7.1 | The overlay's prompt, and the plugin screenshot | `ss-3-p7.1` | agreed in outline; not started |
+| P7.1 | The overlay's prompt, and the plugin screenshot | `ss-3-p7.1` | being built |
 | P8 | Publication | `ss-3-p8` | not started |
 
 Each phase starts with a fresh source check and an owner walkthrough. Build
@@ -1210,6 +1210,81 @@ the program's own terminal prompt, gets clearer text and layout and asks
 what to send, so the overlay can send something other than "resume" and
 works on a shell pane. The plugin screenshot then goes into the README. A
 full-screen form was left out as too large for this story.
+
+#### Code check — 2026-10-22
+
+- The overlay runs `schedule-send --pane <pane>` with the options file, so
+  everything it shows is the program's terminal prompt: the usage-limit
+  report and the time question in `internal/cli`, drawn by `internal/show`.
+- Without `--message`, a run without `--at` sets "resume" before anything is
+  asked, and refuses a shell pane outright, since there the text would run
+  as a command.
+- The prompt reads whole lines from the terminal. Esc cannot cancel; Ctrl-C
+  ends the program. Nothing is written to disk before the last answer, so a
+  cancel during the questions leaves nothing behind.
+- Piped, `--json`, and `--auto` runs print the plain or JSON forms, which
+  scripts read; only what goes to the terminal is in scope.
+- The Go tests in `internal/cli` and `internal/show` pin the prompt's text,
+  including `TestDemoScenario`, which pins the hero recording. Six of the
+  seven interactive parity cases run without a message, so their terminal
+  output changes; parity runs on Linux only.
+- The widest demo picker row is 112 columns, and the hero window holds about
+  115 (estimated from the frame).
+
+#### Decisions settled 2026-10-22
+
+The owner chose from previews and instructed build.
+
+1. **Look.** Guided steps: a line down the left (`┌ │ └`) with a marker at
+   each question (`◆`), labels and hints dim, nothing new in bold. A quiet
+   aligned form and plain sentences were the other two previews.
+2. **The message question** is asked wherever the program asks its other
+   questions and no message was given, in the overlay and in a terminal
+   alike. Enter keeps "resume" on an agent.
+3. **Bold.** The picker's `agents` and `panes` headings stay bold.
+4. **Parity** runs in a clean Ubuntu container on the owner's Mac, as in P6.
+5. **The picker** becomes the first step on the rail. Not answered
+   separately: the owner instructed build after it was recommended, which is
+   read as accepting it.
+
+Assumptions the owner did not object to: a step keeps its `◆` once answered,
+since redrawing printed lines needs cursor control; no terminal-width
+detection, so long text wraps; a typed message is one line, with
+`--message-file` for more and `--keys` still flag-only; a dry run still ends
+with its detail rows, under the rail's end; the story continues on the
+owner's Mac.
+
+#### Steps
+
+1. This record; `ss-3-p7.1` from `ss-3`.
+   → verify: committed on `ss-3`.
+2. The rail's pieces, and the target and limit lines for every limit state,
+   used only on a terminal.
+   → verify: `internal/show` tests with and without colour; every limit
+   state read.
+3. The message question: Enter keeps "resume" on an agent; a shell pane needs
+   an answer; runs with `--message`, `--keys`, `--at`, `--auto`, or without a
+   terminal ask nothing new.
+   → verify: `internal/cli` tests for each case, including end of input.
+4. The time question and the end: hint, the resolved time, errors, and the
+   receipt as the rail's end.
+   → verify: `internal/cli` tests; `TestDemoScenario` updated.
+5. The picker as the first step.
+   → verify: picker tests; the widest demo row measured on the rail.
+6. The overlay: Ctrl-C during the questions says nothing was scheduled, and
+   the pane still waits for Enter.
+   → verify: `tools/plugin-smoke` with an interrupted run.
+7. `docs/usage.md` and the README text; both GIFs re-recorded.
+   → verify: every last frame read.
+8. Parity in an Ubuntu container, with the changed cases documented.
+   → verify: no unexpected differences.
+9. The owner runs the overlay with `--dry-run` on an agent and on a shell
+   pane; the screenshot goes into the README.
+   → verify: links and anchors checked by script.
+10. Full gate, As built, fast-forward into `ss-3`.
+
+Not included: Esc to cancel, redrawing answered steps, multi-line messages in
+the overlay, a full-screen form, and a split pane in place of the overlay.
 
 ### P8 — Publication
 
