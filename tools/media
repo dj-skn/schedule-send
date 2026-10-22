@@ -48,7 +48,7 @@ export PATH=/work/bin:$PATH HOME=/home/dev TZ=UTC
 export HERDR_BIN_OVERRIDE=/work/standin/herdr HERDR_STANDIN_DIR=/work/scenario HERDR_PANE_ID=wC:p1
 export HERDR_SCHEDULE_NOW_EPOCH=1792070640 SYSTEMCTL_STANDIN_ACTIVE='herdr-send-*'
 export XDG_STATE_HOME=/work/state XDG_CONFIG_HOME=/work/config
-PS1='\[\e[38;2;137;180;250m\]❯\[\e[0m\] '
+PS1='\[\e[36m\]❯\[\e[0m\] '
 EOF
 
 for name in "$@"; do

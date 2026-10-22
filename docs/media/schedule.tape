@@ -8,11 +8,11 @@ Set FontSize 20
 Set Width 1500
 Set Height 460
 Set Padding 24
-Set Theme "Catppuccin Mocha"
+Set Theme { "name": "Claude Dark", "background": "#262626", "foreground": "#f8f8f6", "selection": "#1f4569", "cursor": "#f8f8f6", "cursorAccent": "#262626", "black": "#373734", "red": "#ff3a30", "green": "#32d74b", "yellow": "#ffd014", "blue": "#0099ff", "magenta": "#ff2c56", "cyan": "#ffb454", "white": "#c3c2b7", "brightBlack": "#6e6c68", "brightRed": "#ff5047", "brightGreen": "#6fe28a", "brightYellow": "#ffd942", "brightBlue": "#42b4ff", "brightMagenta": "#ff6184", "brightCyan": "#ffb454", "brightWhite": "#fdfdfc" }
 Set WindowBar Colorful
 Set BorderRadius 10
 Set Margin 24
-Set MarginFill "#45475a"
+Set MarginFill "#373734"
 Set TypingSpeed 45ms
 
 Hide
