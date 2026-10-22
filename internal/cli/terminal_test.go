@@ -754,7 +754,13 @@ func TestShortOffsetAndStrayKeyCodes(t *testing.T) {
 	if code := h.a.main([]string{"--pane", "wB:p3", "--dry-run"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.stderr)
 	}
-	if want := " · in 30m · Enter keeps it\n"; !strings.Contains(h.tty.String(), want) {
+	_, rest, _ := strings.Cut(h.stdout.String(), "run_at_epoch=")
+	line, _, _ := strings.Cut(rest, "\n")
+	runAt, _ := strconv.ParseInt(line, 10, 64)
+	if d := runAt - answered; d < 1800 || d > 1805 {
+		t.Fatalf("sends %d s after the answer, want about 1800:\n%s", d, h.stdout)
+	}
+	if want := " · in " + when.Delay(runAt-answered) + " · Enter keeps it\n"; !strings.Contains(h.tty.String(), want) {
 		t.Errorf("terminal lacks %q:\n%s", want, h.tty)
 	}
 	if strings.Contains(h.tty.String(), "\x1b") || strings.Contains(h.tty.String(), "Could not read") {
