@@ -10,8 +10,9 @@ as well, fast-forwarded from `ss-3-p4` after the same confirmation. P5 is comple
 check in their Herdr. P6 is complete in `ss-3`, fast-forwarded from `ss-3-p6`
 after a rehearsal on the private repository. P7 is complete in `ss-3`,
 fast-forwarded from `ss-3-p7` after the owner's Mac run; its plugin
-screenshot moved to P7.1. P7.1, which reworks the overlay's prompt, is
-recorded and being built on `ss-3-p7.1`. P8 is not started.
+screenshot moved to P7.1. P7.1, which reworks the overlay's prompt, is built
+through step 7 on `ss-3-p7.1` and waits for the Linux run on the owner's
+homelab server and the owner's plugin screenshot. P8 is not started.
 `ss-3-p3` to `ss-3-p7` were pushed to the private repository for those runs,
 on the owner's word; nothing else is pushed, merged into `main`, installed, or published.
 
@@ -120,7 +121,7 @@ Stated in the walkthrough; the owner did not object.
 | P5 | The Herdr plugin | `ss-3-p5` | complete in ss-3 |
 | P6 | CI and release automation | `ss-3-p6` | complete in ss-3 |
 | P7 | README and visuals | `ss-3-p7` | complete in ss-3 |
-| P7.1 | The overlay's prompt, and the plugin screenshot | `ss-3-p7.1` | being built |
+| P7.1 | The overlay's prompt, and the plugin screenshot | `ss-3-p7.1` | built through step 7; waits for the homelab and the owner |
 | P8 | Publication | `ss-3-p8` | not started |
 
 Each phase starts with a fresh source check and an owner walkthrough. Build
@@ -1285,6 +1286,80 @@ owner's Mac.
 
 Not included: Esc to cancel, redrawing answered steps, multi-line messages in
 the overlay, a full-screen form, and a split pane in place of the overlay.
+
+#### Decision 4 revised — 2026-10-22
+
+During the build the owner asked for the terminal tests to run on the Mac,
+where the work is done, and for the full Linux suite to run on their homelab
+server once the code is pushed. The Ubuntu container was built and removed
+again. Step 8, parity, and the Linux-only Go tests run on the homelab after
+the push.
+
+#### As built — 2026-10-22, steps 1 to 7
+
+- `internal/show/rail.go` draws the rail: a top line saying what the run does,
+  "dry run" when it is one, and that Ctrl-C cancels; gaps; a `◆` at each
+  question in the cyan slot; hints; the answer line; a typed time shown back;
+  errors and warnings; and an end for a failure or a cancel. The report gives
+  the target's place and every limit state, and a blocked agent, as rail
+  lines; the receipt becomes the rail's end, with a dry run's detail rows
+  under it. The terminal colours gained cyan.
+- `internal/cli` opens the terminal once, at the first question, and keeps it
+  to the end, so the picker, the message, and the time read one stream, and
+  the rail ends with the receipt, a failure, or a cancel. A warning given once
+  the rail is open goes on it. stdout gets the plain or JSON receipt as
+  before, and the styled one only when it is not the terminal the rail is on.
+- The questions, in order: "Which agent or pane?", the picker with its list
+  beside the rail; "What should it send?", asked only when a run is asking
+  and no message, file, or keys were given, where Enter keeps "resume" on an
+  agent and a shell pane needs an answer; "When?", where Enter keeps the
+  proposal and the hint says why, and a typed time is shown back and
+  confirmed with Enter, as before. `--auto` still refuses a shell pane.
+- Ctrl-C while the run asks ends the rail with "Cancelled. Nothing was
+  scheduled." and exit 130; the handler is removed before anything is
+  written. `plugin/prompt.sh` traps Ctrl-C, so the pane still waits for
+  Enter, and says "Press Enter to close." in line with the rail.
+- The cli test harness and the 28 tests that do not depend on systemd moved
+  out of the Linux-only `cli_test.go` into untagged files, with the
+  launchctl stand-in on PATH so no test reaches launchd. New tests cover the
+  rail's pieces, every limit state on the rail, both ends, the message
+  question, wrong picker answers, failures, warnings, and Ctrl-C, the last
+  with a real SIGINT to the test process.
+- The README's quick start and plugin section, `docs/usage.md`, and the
+  changelog describe the questions. The hero is re-recorded at 1560 × 960 px,
+  13.1 s, 120 KB; the second recording asks nothing and is unchanged.
+
+Measured on the Mac:
+
+- `tools/check` exit 0, with 254 tests and subtests passing on macOS, 50 of
+  them in `internal/cli`; before this phase 200 ran there, none of them from
+  `internal/cli`'s prompt tests.
+- `tools/plugin-smoke` passes, with the new Ctrl-C check under `sh` (bash
+  3.2) and `dash`. With the trap removed, the `dash` check failed.
+- The built program in a pseudo-terminal, against the stand-ins: Ctrl-C at
+  the message question and at the time question each ended with "Cancelled.
+  Nothing was scheduled." and exit 130, and nothing was written to its home.
+- The widest demo picker row is 115 columns on the rail (112 before) and ends
+  near 1462 px; a 1500 px window leaves 1452 px, so the hero grew to 1560 px.
+  The hero's middle and last frames were read.
+
+Found while building:
+
+- **None of `internal/cli`'s tests ran on macOS.** Every cli test file was
+  Linux-only, so the Mac gate never ran a picker or prompt test. The
+  terminal tests now run on both; arming, listing, cancelling, status, and
+  lifecycle tests stay Linux-only.
+- **The rail adds three columns, not one** as the walkthrough said: the
+  picker's rows keep their own indent beside the rail.
+- **`dash` dies of Ctrl-C without running its exit trap**, so on Linux the
+  overlay closed at once after Ctrl-C; bash, which is `sh` on macOS, ran it.
+- **A typed time still needs Enter to confirm it.** The preview showed it
+  taken at once; the confirmation was kept.
+- **Herdr on the Mac updated itself to 0.9.5** during the session; the
+  manifest still asks for 0.9.3.
+
+Still to do: step 8 on the homelab after a push, the owner's live check and
+screenshot (step 9), then the full gate, As built, and the fast-forward.
 
 ### P8 — Publication
 
