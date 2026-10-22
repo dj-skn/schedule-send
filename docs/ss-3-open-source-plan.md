@@ -11,9 +11,9 @@ check in their Herdr. P6 is complete in `ss-3`, fast-forwarded from `ss-3-p6`
 after a rehearsal on the private repository. P7 is complete in `ss-3`,
 fast-forwarded from `ss-3-p7` after the owner's Mac run; its plugin
 screenshot moved to P7.1. P7.1, which reworks the overlay's prompt, is built
-through step 7 on `ss-3-p7.1` and waits for the Linux run on the owner's
-homelab server and the owner's plugin screenshot. P8 is not started.
-`ss-3-p3` to `ss-3-p7` were pushed to the private repository for those runs,
+through step 9 on `ss-3-p7.1` and waits for a Linux run of its last commits
+on the owner's homelab server before its fast-forward. P8 is not started.
+`ss-3-p3` to `ss-3-p7.1` were pushed to the private repository for those runs,
 on the owner's word; nothing else is pushed, merged into `main`, installed, or published.
 
 The owner settled the story's decisions on 2026-10-12 and asked for this plan.
@@ -121,7 +121,7 @@ Stated in the walkthrough; the owner did not object.
 | P5 | The Herdr plugin | `ss-3-p5` | complete in ss-3 |
 | P6 | CI and release automation | `ss-3-p6` | complete in ss-3 |
 | P7 | README and visuals | `ss-3-p7` | complete in ss-3 |
-| P7.1 | The overlay's prompt, and the plugin screenshot | `ss-3-p7.1` | built through step 7; waits for the homelab and the owner |
+| P7.1 | The overlay's prompt, and the plugin screenshot | `ss-3-p7.1` | built through step 9; waits for the homelab |
 | P8 | Publication | `ss-3-p8` | not started |
 
 Each phase starts with a fresh source check and an owner walkthrough. Build
@@ -1358,8 +1358,58 @@ Found while building:
 - **Herdr on the Mac updated itself to 0.9.5** during the session; the
   manifest still asks for 0.9.3.
 
-Still to do: step 8 on the homelab after a push, the owner's live check and
-screenshot (step 9), then the full gate, As built, and the fast-forward.
+#### As built — 2026-10-22, steps 8 and 9
+
+- Step 8, on the owner's homelab server, at the pushed `ss-3-p7.1` with the
+  steps above, in a worktree so its main checkout stayed on `main`:
+  `tools/check` passed; `tools/parity` 41 identical, 37 known differences,
+  0 unexpected, the seven interactive cases each naming P7.1;
+  `tools/plugin-smoke` 15 of 15, both Ctrl-C checks included, with Herdr
+  0.9.3 accepting the manifest; `tools/install-smoke` 13 of 13.
+- Step 9, the owner's live check in Herdr on the Mac, with `--dry-run`: the
+  overlay opened on an agent with the rail. It showed two faults, both fixed
+  on the branch since:
+  - The answer was read with the terminal's own echo, so the arrow keys
+    arrived as escape codes, showed as `^[[A^[[C`, could not move the
+    cursor, and, repeated in the error line, moved it for real and scrambled
+    the rail. On a terminal an answer is now read key by key and edited by
+    the program: Left, Right, Home, End, Backspace, Delete, and Ctrl-U work,
+    other keys do nothing, and Ctrl-C ends the run as cancelled with exit
+    130. Anything that is not a terminal is still read a line at a time,
+    with escape codes and control characters left out.
+  - `+30` was refused; `+30`, `+30m`, and `+2h` now read as offsets, for
+    `--at` too.
+- After the fixes the owner checked the overlay again and took the
+  screenshot, cropped to the overlay and Herdr's bar, without the window
+  title, the pointer, or the dry run's paths, and placed in the README as
+  `docs/media/plugin.png`, 1226 × 636 px, 64 KB.
+
+Measured on the Mac after the fixes:
+
+- `tools/check` exit 0 with 263 tests and subtests passing; `tools/plugin-smoke`
+  passes.
+- The built program in a pseudo-terminal: "run the tsts", Left three times,
+  "e" gave "run the tests"; Up and Right changed nothing on screen; `+30`
+  read as 30 minutes; Ctrl-C while typing ended with "Cancelled. Nothing was
+  scheduled." and exit 130. The hero recorded again with the editor came out
+  the same, so it was not replaced.
+- A script checked the 27 relative links, images, and anchors in the
+  Markdown files, none broken, and caught three broken ones seeded into a
+  probe file. The private-term list is kept off this machine, so that scan
+  was not run; this phase's changes were searched by hand for the owner's
+  names, host, and paths, with no hits.
+
+Found while building:
+
+- **The new `+30` test failed once in the gate.** It expected "in 30m", but
+  `date(1)` reads the offset a moment after the test notes the time; it now
+  expects the delay drawn from the resolved instant, as the `+1 min` test
+  does.
+- **A relative time keeps its seconds**, so the screenshot shows
+  `Thu 22:32:54`. Left as it is: `+30` means thirty minutes from the answer.
+
+Still to do: a Linux run on the homelab of the commits after `8106de2`, which
+add Linux-specific terminal code, then the fast-forward into `ss-3`.
 
 ### P8 — Publication
 
