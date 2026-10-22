@@ -8,10 +8,11 @@ from `ss-3-p3`, after the owner's Mac confirmed it. P4 is complete in `ss-3`
 as well, fast-forwarded from `ss-3-p4` after the same confirmation. P5 is complete in
 `ss-3` too, fast-forwarded from `ss-3-p5` after the owner's Mac run and a live
 check in their Herdr. P6 is complete in `ss-3`, fast-forwarded from `ss-3-p6`
-after a rehearsal on the private repository. P7 is built through step 4 on
-`ss-3-p7` and waits for the owner's Mac run and plugin screenshot before its
-fast-forward. P8 is not started.
-`ss-3-p3` to `ss-3-p6` were pushed to the private repository for those runs,
+after a rehearsal on the private repository. P7 is complete in `ss-3`,
+fast-forwarded from `ss-3-p7` after the owner's Mac run; its plugin
+screenshot moved to P7.1. P7.1, which reworks the overlay's prompt, is agreed
+in outline and not started. P8 is not started.
+`ss-3-p3` to `ss-3-p7` were pushed to the private repository for those runs,
 on the owner's word; nothing else is pushed, merged into `main`, installed, or published.
 
 The owner settled the story's decisions on 2026-10-12 and asked for this plan.
@@ -118,7 +119,8 @@ Stated in the walkthrough; the owner did not object.
 | P4 | Versions, release binaries, the curl script, the formula | `ss-3-p4` | complete in ss-3 |
 | P5 | The Herdr plugin | `ss-3-p5` | complete in ss-3 |
 | P6 | CI and release automation | `ss-3-p6` | complete in ss-3 |
-| P7 | README and visuals | `ss-3-p7` | built through step 4; waits for the owner's Mac |
+| P7 | README and visuals | `ss-3-p7` | complete in ss-3 |
+| P7.1 | The overlay's prompt, and the plugin screenshot | `ss-3-p7.1` | agreed in outline; not started |
 | P8 | Publication | `ss-3-p8` | not started |
 
 Each phase starts with a fresh source check and an owner walkthrough. Build
@@ -1171,6 +1173,43 @@ their Herdr, and takes the plugin screenshot, which then goes into the README.
 
 For P8: the CI, release, and Go badges show "repo not found" until the public
 repository has run CI on `main` and published a release.
+
+#### As built — 2026-10-22, step 5 on the owner's Mac, and closed
+
+- `tools/media` ran on the owner's Apple Silicon Mac under OrbStack. The
+  first run, which downloads and builds the image, took 3 min 54 s in all.
+  The same two GIFs came out: the hero's last frame matched the Linux
+  recording, and only its length differed (11.8 s against 12.3 s), because
+  VHS captures in real time.
+- At the owner's request the recordings now use the Claude Dark palette of
+  the owner's terminal theme instead of Catppuccin Mocha. The tapes carry the
+  16 colours, background, foreground, selection, and cursor as a JSON theme;
+  the window frame is the palette's darkest grey; the prompt arrow asks for
+  the cyan slot, which that palette shows as amber. The program prints only
+  the 16 standard colours, so no program code changed. The hero is now
+  94 KB and the second GIF 95 KB.
+- `tools/check` exit 0 on the Mac, with 200 tests and subtests passing on
+  macOS. The Linux count (397) is from 2026-10-19 and was not re-run; nor was
+  parity, which runs on Linux only and covers nothing that changed.
+- In the owner's live Herdr 0.9.3, with the plugin linked and `--dry-run` in
+  its options file, the README's `prefix+alt+s` binding opened the overlay
+  on an agent pane. It is the first time the binding was tried live; Herdr
+  reloaded the config with no diagnostics.
+- On an agent with no limit notice the overlay showed one line, "no
+  usage-limit notice for claude" and the pane, then a bare `at:`. The owner
+  judged that too plain for the README, so the screenshot moved to P7.1,
+  which reworks that prompt. P7 closes with the README's plugin section in
+  text only.
+
+### P7.1 — The overlay's prompt
+
+Inserted on 2026-10-22 after P7's live check. Of four options (clearer text
+only; clearer text and a question for the message; a full-screen form; or
+nothing), the owner chose the second: the prompt the overlay shows, which is
+the program's own terminal prompt, gets clearer text and layout and asks
+what to send, so the overlay can send something other than "resume" and
+works on a shell pane. The plugin screenshot then goes into the README. A
+full-screen form was left out as too large for this story.
 
 ### P8 — Publication
 
