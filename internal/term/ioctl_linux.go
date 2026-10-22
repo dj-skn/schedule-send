@@ -2,5 +2,9 @@ package term
 
 import "syscall"
 
-// ioctlGetTermios is the request that reads a terminal's settings.
-const ioctlGetTermios = syscall.TCGETS
+// ioctlGetTermios and ioctlSetTermios are the requests that read and change a
+// terminal's settings.
+const (
+	ioctlGetTermios = syscall.TCGETS
+	ioctlSetTermios = syscall.TCSETS
+)

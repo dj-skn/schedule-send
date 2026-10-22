@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/dj-skn/schedule-send/internal/limit"
+	"github.com/dj-skn/schedule-send/internal/show"
+	"github.com/dj-skn/schedule-send/internal/term"
 	"github.com/dj-skn/schedule-send/internal/when"
 )
 
@@ -737,5 +739,41 @@ func TestPickerAsksAgainOnTheRail(t *testing.T) {
 	}
 	if !strings.Contains(h.stdout.String(), "target=agent wB:p3 (codex, idle)\n") {
 		t.Errorf("stdout:\n%s", h.stdout)
+	}
+}
+
+func TestShortOffsetAndStrayKeyCodes(t *testing.T) {
+	// The arrow keys' codes come through a terminal that reads whole lines,
+	// and are left out of the answer; "+30" is thirty minutes.
+	input := "\n\x1b[A\x1b[C+30\n\n"
+	h := newHarness(t, &input)
+	// date(1) resolves "+30" from the real clock, so the answer is given at
+	// the real time.
+	answered := time.Now().Unix()
+	h.a.clock = waiting(answered-120, 120)
+	if code := h.a.main([]string{"--pane", "wB:p3", "--dry-run"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	if want := " · in 30m · Enter keeps it\n"; !strings.Contains(h.tty.String(), want) {
+		t.Errorf("terminal lacks %q:\n%s", want, h.tty)
+	}
+	if strings.Contains(h.tty.String(), "\x1b") || strings.Contains(h.tty.String(), "Could not read") {
+		t.Errorf("terminal:\n%q", h.tty)
+	}
+}
+
+func TestCancelledEndsTheRail(t *testing.T) {
+	h := newHarness(t, nil)
+	h.a.ask = &asker{tty: fakeTTY{strings.NewReader(""), h.tty}, rail: show.NewRail(term.Colors{})}
+	var f failure
+	if !errors.As(cancelled(), &f) || f.code != 130 {
+		t.Fatalf("cancelled() = %#v", cancelled())
+	}
+	h.a.failed(f)
+	if want := "└  Cancelled. Nothing was scheduled.\n"; h.tty.String() != want {
+		t.Errorf("terminal %q, want %q", h.tty, want)
+	}
+	if h.stderr.Len() != 0 {
+		t.Errorf("stderr %q", h.stderr)
 	}
 }

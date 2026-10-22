@@ -108,11 +108,24 @@ func (q *asker) say(lines ...string) {
 	}
 }
 
-// answer shows the place to type, and reads what was typed there. ok is false
-// at end of input.
-func (q *asker) answer() (string, bool) {
-	fmt.Fprint(q.tty, q.rail.Input())
-	return term.ReadLine(q.tty)
+// answer shows the place to type, and reads what was typed there, edited key
+// by key on a real terminal. ok is false at the end of the input; Ctrl-C while
+// typing ends the run as cancelled.
+func (q *asker) answer() (line string, ok bool, err error) {
+	line, outcome := term.Answer(q.tty, q.rail.Input())
+	switch outcome {
+	case term.Cancelled:
+		return "", false, cancelled()
+	case term.Ended:
+		return line, false, nil
+	}
+	return line, true, nil
+}
+
+// cancelled is a run stopped with Ctrl-C while it asked, before anything was
+// written.
+func cancelled() error {
+	return failure{msg: "Cancelled. Nothing was scheduled.", code: 130, kind: "cancelled"}
 }
 
 // asking is the run's terminal for questions, opened and given the rail's top
@@ -222,6 +235,8 @@ func (a *app) failed(f failure) {
 	switch {
 	case a.o.json:
 		a.writeError(f)
+	case a.ask != nil && f.kind == "cancelled":
+		a.ask.say(a.ask.rail.Cancelled())
 	case a.ask != nil:
 		a.ask.say(a.ask.rail.Fail(f.msg))
 	default:
@@ -780,7 +795,10 @@ func (a *app) chooseTarget() (target.Row, error) {
 	}
 	q.say(q.rail.Gap(), q.rail.Hint("Enter takes 1, or type its number"))
 	for {
-		choice, ok := q.answer()
+		choice, ok, err := q.answer()
+		if err != nil {
+			return target.Row{}, err
+		}
 		if !ok {
 			return target.Row{}, die("Target selection cancelled: no input received.")
 		}
@@ -985,7 +1003,10 @@ func (a *app) askMessage(q *asker, agent bool) error {
 	}
 	q.say(q.rail.Step("What should it send?"), q.rail.Hint(hint))
 	for {
-		input, ok := q.answer()
+		input, ok, err := q.answer()
+		if err != nil {
+			return err
+		}
 		if !ok {
 			return die("No message given.")
 		}
@@ -1011,7 +1032,10 @@ func (a *app) askMessage(q *asker, agent bool) error {
 func (a *app) confirmAt(q *asker, def int64, fromNow bool, now int64) (int64, error) {
 	q.say(q.rail.Step("When?"), q.rail.Hint(timeHint(def, fromNow, now)))
 	for {
-		input, ok := q.answer()
+		input, ok, err := q.answer()
+		if err != nil {
+			return 0, err
+		}
 		if !ok {
 			return 0, die("No send time given.")
 		}
