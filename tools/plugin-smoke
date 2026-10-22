@@ -73,6 +73,17 @@ prompt SCHEDULE_SEND_TARGET=wA:p1 || true
 check "looks in ~/.local/bin by default" grep -q -x 'home: --pane wA:p1' "$work/runs"
 rm -rf "$work/home/.local"
 
+# Ctrl-C reaches the script and the program alike; this program ends the way
+# the real one does, and signals only the script so the check runs alone.
+mkdir -p "$work/places/int"
+printf '#!/bin/sh\necho cancelled\nkill -INT $PPID\nexit 130\n' > "$work/places/int/schedule-send"
+chmod +x "$work/places/int/schedule-send"
+for shell in sh dash; do
+  command -v "$shell" > /dev/null || continue
+  printf '\n' | env HOME="$work/home" PATH="$bare" SCHEDULE_SEND_PLUGIN_PLACES="$work/places/int" "$shell" plugin/prompt.sh > "$work/out" 2>&1 || true
+  check "still waits for Enter after Ctrl-C, under $shell" sh -c "grep -q cancelled '$work/out' && grep -q 'Press Enter to close' '$work/out'"
+done
+
 status=0
 prompt SCHEDULE_SEND_PLUGIN_PLACES="$work/empty" || status=$?
 check "says how to install when the program is missing" sh -c "[ $status -ne 0 ] && grep -q 'brew install dj-skn/tap/schedule-send' '$work/out' && grep -q 'install.sh | sh' '$work/out' && grep -q 'Press Enter to close' '$work/out'"

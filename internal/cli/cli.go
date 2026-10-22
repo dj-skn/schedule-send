@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -78,6 +79,7 @@ type app struct {
 	h              herdr.Client
 	selfPane       string                 // HERDR_PANE_ID
 	installedPath  func() (string, error) // private injection for isolated tests
+	exit           func(code int)         // os.Exit; tests catch it
 	statusTimeouts statusTimeouts         // private deadlines for isolated tests
 
 	rows []target.Row
@@ -96,6 +98,7 @@ type asker struct {
 	tty  io.ReadWriteCloser
 	c    term.Colors
 	rail show.Rail
+	stop func() // hands Ctrl-C back; nil once it has
 }
 
 // say writes lines on the terminal.
@@ -125,7 +128,38 @@ func (a *app) asking() (*asker, error) {
 	c := term.ColorsFor(tty)
 	a.ask = &asker{tty: tty, c: c, rail: show.NewRail(c)}
 	a.ask.say("", a.ask.rail.Top(a.o.dryRun), a.ask.rail.Gap())
+	a.ask.stop = a.cancelOnInterrupt(a.ask)
 	return a.ask, nil
+}
+
+// cancelOnInterrupt makes Ctrl-C while the run asks end the rail saying
+// nothing was scheduled, which holds because nothing is written before the
+// last answer. The function it returns hands Ctrl-C back.
+func (a *app) cancelOnInterrupt(q *asker) func() {
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-signals:
+			q.say("", q.rail.Cancelled())
+			a.exit(130)
+		case <-done:
+		}
+	}()
+	return func() {
+		signal.Stop(signals)
+		close(done)
+	}
+}
+
+// doneAsking hands Ctrl-C back once the last answer is in, before anything
+// is written, so an interrupted write ends the way it always has.
+func (a *app) doneAsking() {
+	if a.ask != nil && a.ask.stop != nil {
+		a.ask.stop()
+		a.ask.stop = nil
+	}
 }
 
 // Main runs the command and returns its exit status.
@@ -141,6 +175,7 @@ func Main(args []string) int {
 		},
 		paths:    job.DefaultPaths(),
 		selfPane: os.Getenv("HERDR_PANE_ID"),
+		exit:     os.Exit,
 	}
 	return a.main(args)
 }
@@ -162,6 +197,7 @@ func (a *app) main(args []string) int {
 	}
 	err := a.run(args)
 	if a.ask != nil {
+		a.doneAsking()
 		defer a.ask.tty.Close()
 	}
 	var f failure
@@ -508,6 +544,7 @@ func (a *app) run(args []string) (retErr error) {
 	if runAt <= now {
 		return die("Target time has already passed: %s", when.Format(runAt, when.Calendar))
 	}
+	a.doneAsking()
 	if !detect && t.IsAgent() && o.keys == "" {
 		a.warnBeforeReset(runAt)
 	}

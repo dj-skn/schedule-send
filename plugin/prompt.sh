@@ -7,10 +7,15 @@ set -u
 . "$(dirname "$0")/find.sh"
 
 finish() {
-  printf '\nPress Enter to close.'
+  printf '\n   Press Enter to close.'
   read -r _ || true
 }
 trap finish EXIT
+# Ctrl-C reaches this script as well as the program. Untrapped, dash, which
+# is sh on most Linux systems, dies of it without running finish, and the
+# pane closes before the program's "Cancelled" can be read. A trap, unlike
+# ignoring the signal, leaves the program its own Ctrl-C.
+trap : INT
 
 bin="$(find_schedule_send)"
 if [ -z "$bin" ]; then
