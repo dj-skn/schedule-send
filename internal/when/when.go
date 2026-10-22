@@ -58,6 +58,7 @@ var (
 	clock24  = regexp.MustCompile(`^[0-9]{1,2}:[0-9]{2}(:[0-9]{2})?$`)
 	clock12  = regexp.MustCompile(`^[0-9]{1,2}(:[0-9]{2}(:[0-9]{2})?)? ?[AaPp][Mm]$`)
 	yearless = regexp.MustCompile(`^([A-Z][a-z]{2} [0-9]{1,2}) ([0-9]{1,2}(:[0-9]{2})? ?[AaPp][Mm])$`)
+	short    = regexp.MustCompile(`^\+ *([0-9]+) *([mh]?)$`)
 	dateTool = DateTool
 )
 
@@ -180,6 +181,15 @@ func isClock(at string) bool { return clock24.MatchString(at) || clock12.MatchSt
 // normalise rewrites at into a form date(1) accepts, with a bracketed zone
 // split off.
 func normalise(at string) (string, string) {
+	// "+30" and "+30m" are minutes and "+2h" hours: the short ways of writing
+	// an offset, which date(1) does not read.
+	if m := short.FindStringSubmatch(strings.TrimSpace(at)); m != nil {
+		unit := " min"
+		if m[2] == "h" {
+			unit = " hour"
+		}
+		return "+" + m[1] + unit, ""
+	}
 	// Only an ISO timestamp has its T separator swapped out; anywhere else a
 	// capital T is part of the text, as in "Tue 3pm".
 	if isoT.MatchString(at) {
