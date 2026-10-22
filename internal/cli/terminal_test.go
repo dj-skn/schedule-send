@@ -79,24 +79,26 @@ func TestPickBestWithoutAtTakesTheLimitedAgent(t *testing.T) {
 
 func TestPickerAndConfirmOnTerminal(t *testing.T) {
 	// Without --at the limited agent comes first, so Enter takes it.
-	input := "\n\n"
+	input := "\n\n\n"
 	h := newHarness(t, &input)
 	if code := h.a.main([]string{"--dry-run"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.stderr)
 	}
 	want := `
-agents
-  1  ◷ limited  claude   wB:p1    ~/projects/shop-backend    checkout-webhook-migration  resets 16:00 (weekly)
-  2  ○ idle     claude   wA:p1    ~/projects/analytics       Analytics backend rewrite
-  3  ○ idle     codex    wB:p3    ~/projects/shop-backend    Implement SB-42 phase 3.1 | shop-backend
-  4  ● working  cursor   wE:p1    ~/src/schedule-send        Tidy schedule-send UI
-
-panes
-  5  · zsh      wB:p5    ~/projects/shop-backend
-
-target [1]: 
 ┌  Schedule a send · dry run                Ctrl-C cancels
 │
+◆  Which agent or pane?
+│  agents
+│    1  ◷ limited  claude   wB:p1    ~/projects/shop-backend    checkout-webhook-migration  resets 16:00 (weekly)
+│    2  ○ idle     claude   wA:p1    ~/projects/analytics       Analytics backend rewrite
+│    3  ○ idle     codex    wB:p3    ~/projects/shop-backend    Implement SB-42 phase 3.1 | shop-backend
+│    4  ● working  cursor   wE:p1    ~/src/schedule-send        Tidy schedule-send UI
+│
+│  panes
+│    5  · zsh      wB:p5    ~/projects/shop-backend
+│
+│  Enter takes 1, or type its number
+│  › │
 │  claude · wB:p1 · ~/projects/shop-backend
 │  ◷ hit its weekly limit · resets Sat 16:00, in 38m
 │
@@ -118,24 +120,26 @@ target [1]:
 
 func TestDemoScenario(t *testing.T) {
 	// What the README's recording shows. When this changes, run tools/media.
-	input := "\n\n"
+	input := "\n\n\n"
 	h := newHarness(t, &input)
 	h.useDemo(t)
 	if code := h.a.main([]string{"--dry-run"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.stderr)
 	}
 	want := `
-agents
-  1  ◷ limited  claude   wA:p1    ~/projects/billing-api     Move invoices to the ledger  resets 16:00 (session)
-  2  ○ idle     codex    wA:p2    ~/projects/billing-api     Add retries to webhook delivery
-  3  ● working  codex    wB:p1    ~/projects/website         Redesign the pricing page
-
-panes
-  4  · zsh      wA:p3    ~/projects/billing-api
-
-target [1]: 
 ┌  Schedule a send · dry run                Ctrl-C cancels
 │
+◆  Which agent or pane?
+│  agents
+│    1  ◷ limited  claude   wA:p1    ~/projects/billing-api     Move invoices to the ledger  resets 16:00 (session)
+│    2  ○ idle     codex    wA:p2    ~/projects/billing-api     Add retries to webhook delivery
+│    3  ● working  codex    wB:p1    ~/projects/website         Redesign the pricing page
+│
+│  panes
+│    4  · zsh      wA:p3    ~/projects/billing-api
+│
+│  Enter takes 1, or type its number
+│  › │
 │  claude · wA:p1 · ~/projects/billing-api
 │  ◷ hit its session limit · resets Thu 16:00, in 2h 36m
 │
@@ -161,14 +165,25 @@ func TestPickerWithAtKeepsOrderAndMarks(t *testing.T) {
 	if code := h.a.main([]string{"--at", "23:59", "--message", "x", "--dry-run"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.stderr)
 	}
+	// The picker is the only question, so the receipt follows it.
 	want := `
-agents
-  1  ○ idle     claude   wA:p1    ~/projects/analytics       Analytics backend rewrite
-  2  ◷ limited  claude   wB:p1    ~/projects/shop-backend    checkout-webhook-migration  resets 16:00 (weekly)
-  3  ○ idle     codex    wB:p3    ~/projects/shop-backend    Implement SB-42 phase 3.1 | shop-backend
-  4  ● working  cursor   wE:p1    ~/src/schedule-send        Tidy schedule-send UI
-`
-	if !strings.HasPrefix(h.tty.String(), want) {
+┌  Schedule a send · dry run                Ctrl-C cancels
+│
+◆  Which agent or pane?
+│  agents
+│    1  ○ idle     claude   wA:p1    ~/projects/analytics       Analytics backend rewrite
+│    2  ◷ limited  claude   wB:p1    ~/projects/shop-backend    checkout-webhook-migration  resets 16:00 (weekly)
+│    3  ○ idle     codex    wB:p3    ~/projects/shop-backend    Implement SB-42 phase 3.1 | shop-backend
+│    4  ● working  cursor   wE:p1    ~/src/schedule-send        Tidy schedule-send UI
+│
+│  panes
+│    5  · zsh      wB:p5    ~/projects/shop-backend
+│
+│  Enter takes 1, or type its number
+│  › │
+└  · Dry run: would schedule "x" for Sat 23:59, in 8h 37m
+` + h.dryRunRows("20261003-235900-wAp1", "~/projects/analytics")
+	if h.tty.String() != want {
 		t.Errorf("terminal:\n%s\nwant:\n%s", h.tty, want)
 	}
 	if !strings.Contains(h.stdout.String(), "target=agent wA:p1 (claude, idle)\n") {
@@ -177,17 +192,20 @@ agents
 }
 
 func TestPickerMarksAccountLimitedInPlace(t *testing.T) {
-	input := "\n\n"
+	input := "\n\n\n"
 	h := newHarness(t, &input)
 	h.edit(t, "visible-wA-p1.txt", " week:11% (1h58m)", "")
 	if code := h.a.main([]string{"--dry-run"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.stderr)
 	}
 	want := `
-agents
-  1  ◷ limited  claude   wB:p1    ~/projects/shop-backend    checkout-webhook-migration  resets 16:00 (weekly)
-  2  ○ idle     claude   wA:p1    ~/projects/analytics       Analytics backend rewrite  account limited
-  3  ○ idle     codex    wB:p3    ~/projects/shop-backend    Implement SB-42 phase 3.1 | shop-backend
+┌  Schedule a send · dry run                Ctrl-C cancels
+│
+◆  Which agent or pane?
+│  agents
+│    1  ◷ limited  claude   wB:p1    ~/projects/shop-backend    checkout-webhook-migration  resets 16:00 (weekly)
+│    2  ○ idle     claude   wA:p1    ~/projects/analytics       Analytics backend rewrite  account limited
+│    3  ○ idle     codex    wB:p3    ~/projects/shop-backend    Implement SB-42 phase 3.1 | shop-backend
 `
 	if !strings.HasPrefix(h.tty.String(), want) {
 		t.Errorf("terminal:\n%s\nwant:\n%s", h.tty, want)
@@ -195,7 +213,7 @@ agents
 }
 
 func TestPickerReadsEachAgentScreenOnce(t *testing.T) {
-	input := "\n\n"
+	input := "\n\n\n"
 	h := newHarness(t, &input)
 	if code := h.a.main([]string{"--dry-run"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.stderr)
@@ -500,7 +518,7 @@ func TestJSONDryRunAndNote(t *testing.T) {
 }
 
 func TestJSONStillAsks(t *testing.T) {
-	input := "\n\n"
+	input := "\n\n\n"
 	h := newHarness(t, &input)
 	if code := h.a.main([]string{"--dry-run", "--json"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.stderr)
@@ -705,4 +723,19 @@ func TestMessageQuestion(t *testing.T) {
 			t.Errorf("stderr %q, want %q", h.stderr, want)
 		}
 	})
+}
+
+func TestPickerAsksAgainOnTheRail(t *testing.T) {
+	input := "9\nx\n3\n"
+	h := newHarness(t, &input)
+	if code := h.a.main([]string{"--at", "23:59", "--message", "x", "--dry-run"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	want := "│  › │  ✗ Enter a number from 1 to 5.\n│  › │  ✗ Enter a number from 1 to 5.\n│  › │\n└  · Dry run: would schedule \"x\""
+	if !strings.Contains(h.tty.String(), want) {
+		t.Errorf("terminal:\n%s\nwant it to hold:\n%s", h.tty, want)
+	}
+	if !strings.Contains(h.stdout.String(), "target=agent wB:p3 (codex, idle)\n") {
+		t.Errorf("stdout:\n%s", h.stdout)
+	}
 }

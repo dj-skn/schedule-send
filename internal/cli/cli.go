@@ -730,15 +730,20 @@ func (a *app) chooseTarget() (target.Row, error) {
 		return target.Row{}, failure{code: 1}
 	}
 
-	tty, err := a.openTTY()
+	// The picker is the rail's first step, its list beside the rail.
+	q, err := a.asking()
 	if err != nil {
 		return target.Row{}, die("Could not open /dev/tty for target selection.")
 	}
-	defer tty.Close()
-	target.Render(tty, rows, marks, term.ColorsFor(tty), a.selfPane, a.h.ProcName)
+	var list bytes.Buffer
+	target.Render(&list, rows, marks, q.c, a.selfPane, a.h.ProcName)
+	q.say(q.rail.Step("Which agent or pane?"))
+	for _, line := range strings.Split(strings.Trim(list.String(), "\n"), "\n") {
+		q.say(q.rail.Line(line))
+	}
+	q.say(q.rail.Gap(), q.rail.Hint("Enter takes 1, or type its number"))
 	for {
-		fmt.Fprint(tty, "target [1]: ")
-		choice, ok := term.ReadLine(tty)
+		choice, ok := q.answer()
 		if !ok {
 			return target.Row{}, die("Target selection cancelled: no input received.")
 		}
@@ -746,9 +751,10 @@ func (a *app) chooseTarget() (target.Row, error) {
 			choice = "1"
 		}
 		if n, err := strconv.Atoi(choice); err == nil && digits.MatchString(choice) && n >= 1 && n <= len(rows) {
+			q.say(q.rail.Gap())
 			return rows[n-1], nil
 		}
-		fmt.Fprintf(tty, "Enter a number from 1 to %d.\n", len(rows))
+		q.say(q.rail.Error(fmt.Sprintf("Enter a number from 1 to %d.", len(rows))))
 	}
 }
 
