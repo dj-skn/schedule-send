@@ -99,8 +99,12 @@ description = "schedule a send"
 
 Focus an agent or a shell pane and press it. An overlay opens over it and
 asks what to send and when, proposing a minute after the reset if a limit
-holds the agent, then shows the receipt until you press Enter. Options for every send from the plugin, such
-as `--dry-run`, go in an [`args` file](docs/usage.md#the-herdr-plugin).
+holds the agent, then shows the receipt until you press Enter.
+
+![The plugin's overlay in Herdr over a Claude agent, asking what to send and when, and showing the time it read from "+30 min"](docs/media/plugin.png)
+
+Options for every send from the plugin, such as `--dry-run`, go in an
+[`args` file](docs/usage.md#the-herdr-plugin).
 
 ## How it works
 
