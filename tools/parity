@@ -228,8 +228,10 @@ _case() {
     bin=$work/ref.zsh
     [[ $impl == go ]] && bin=$work/go-bin
     if [[ $how == tty ]]; then
+      # A run that waits for input that never comes is stopped, and fails
+      # the case even when it is a known difference.
       (cd $run && eval "$setup" || exit
-       printf "$input" | script -qe -E never \
+       printf "$input" | timeout 60 script -qe -E never \
         -c "${(j: :)${(q)bin}} ${(j: :)${(q)@}}" /dev/null >$run/stdout 2>$run/stderr
        print -r -- $? > $run/exit)
     else
@@ -240,6 +242,11 @@ _case() {
     if [[ ! -f $run/exit ]]; then
       fail=$(( fail + 1 ))
       print -r -- "SETUP $name: the setup failed"
+      return
+    fi
+    if [[ $how == tty && $(<$run/exit) == 124 ]]; then
+      fail=$(( fail + 1 ))
+      print -r -- "HUNG  $name: the $impl run was stopped after 60 s"
       return
     fi
     capture $name $work/out/$name/$impl
