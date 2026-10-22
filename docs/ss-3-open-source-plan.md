@@ -10,9 +10,9 @@ as well, fast-forwarded from `ss-3-p4` after the same confirmation. P5 is comple
 check in their Herdr. P6 is complete in `ss-3`, fast-forwarded from `ss-3-p6`
 after a rehearsal on the private repository. P7 is complete in `ss-3`,
 fast-forwarded from `ss-3-p7` after the owner's Mac run; its plugin
-screenshot moved to P7.1. P7.1, which reworks the overlay's prompt, is built
-through step 9 on `ss-3-p7.1` and waits for a Linux run of its last commits
-on the owner's homelab server before its fast-forward. P8 is not started.
+screenshot moved to P7.1. P7.1, which reworks the overlay's prompt, is
+complete in `ss-3`, fast-forwarded from `ss-3-p7.1` after a Linux run on the
+owner's homelab server and their live check in Herdr. P8 is not started.
 `ss-3-p3` to `ss-3-p7.1` were pushed to the private repository for those runs,
 on the owner's word; nothing else is pushed, merged into `main`, installed, or published.
 
@@ -121,7 +121,7 @@ Stated in the walkthrough; the owner did not object.
 | P5 | The Herdr plugin | `ss-3-p5` | complete in ss-3 |
 | P6 | CI and release automation | `ss-3-p6` | complete in ss-3 |
 | P7 | README and visuals | `ss-3-p7` | complete in ss-3 |
-| P7.1 | The overlay's prompt, and the plugin screenshot | `ss-3-p7.1` | built through step 9; waits for the homelab |
+| P7.1 | The overlay's prompt, and the plugin screenshot | `ss-3-p7.1` | complete in ss-3 |
 | P8 | Publication | `ss-3-p8` | not started |
 
 Each phase starts with a fresh source check and an owner walkthrough. Build
@@ -1408,8 +1408,39 @@ Found while building:
 - **A relative time keeps its seconds**, so the screenshot shows
   `Thu 22:32:54`. Left as it is: `+30` means thirty minutes from the answer.
 
-Still to do: a Linux run on the homelab of the commits after `8106de2`, which
-add Linux-specific terminal code, then the fast-forward into `ss-3`.
+#### As built — 2026-10-22, the Linux run of the fixes
+
+The first homelab run of the fixes found two faults and a gap:
+
+- **The `+30` test failed**, as it had once on the Mac, because the fix
+  above was not yet pushed.
+- **`tools/parity` hung in `confirm-eof`** for about 9 minutes, until the
+  run was stopped. The case feeds the program no input. `script` passes that
+  on as an end of input while the terminal still reads lines, and Linux
+  keeps it as a NUL byte, which it hands over once keys are read one by one.
+  The editor ignored the NUL and waited for good. macOS hands over Ctrl-D
+  itself, so the Mac never showed it. A NUL on an empty answer now ends the
+  run as Ctrl-D does, and a new test sends an end of input to a real
+  pseudo-terminal before the answer is read.
+- **Parity had no limit on a terminal case**, and a known difference passes
+  on any difference, so a hung case could have counted as known. Each
+  terminal case is now stopped after 60 s and fails, printed as `HUNG`.
+
+The second run, on the owner's homelab server at the pushed `ss-3-p7.1`
+with those fixes: `tools/check` passed; `tools/parity` 41 identical,
+37 known differences, 0 unexpected, none hung, in 71 s; `tools/plugin-smoke`
+15 of 15; `tools/install-smoke` 13 of 13. The `+30` test passed 50 runs in a
+row there, and the terminal tests 10. On the Mac, `tools/check` passes.
+
+Found while building:
+
+- **Ctrl-Space also sends a NUL** in a real terminal, so on an empty answer
+  it now ends the run as Ctrl-D does, scheduling nothing; with text typed it
+  does nothing. Left as it is: telling it from a kept end of input would
+  need the terminal's queue read before the switch.
+
+For P8: the private-term scan was not run on this phase's changes, as the
+list is kept off the Mac; it is due before the tree is published.
 
 ### P8 — Publication
 
