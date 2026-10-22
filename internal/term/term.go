@@ -20,7 +20,7 @@ func IsTerminal(fd uintptr) bool {
 // Colors holds the escape codes for one output, all empty when it is not a
 // terminal or NO_COLOR is set.
 type Colors struct {
-	Reset, Dim, Red, Green, Yellow, Bold string
+	Reset, Dim, Red, Green, Yellow, Cyan, Bold string
 }
 
 // ColorsFor returns the colours for w: on only for a terminal, and never
@@ -32,7 +32,7 @@ func ColorsFor(w io.Writer) Colors {
 	}
 	return Colors{
 		Reset: "\x1b[0m", Dim: "\x1b[2m", Red: "\x1b[31m",
-		Green: "\x1b[32m", Yellow: "\x1b[33m", Bold: "\x1b[1m",
+		Green: "\x1b[32m", Yellow: "\x1b[33m", Cyan: "\x1b[36m", Bold: "\x1b[1m",
 	}
 }
 

@@ -118,6 +118,7 @@ func (s Scheduled) Styled(w io.Writer, c term.Colors, now int64) {
 // send time is confirmed on the terminal, or on stderr under --auto.
 type Report struct {
 	Kind, Agent, Pane string       // the target
+	Status, Cwd       string       // the target's, as target.Row has them
 	Summary           string       // target.Summary of the target
 	Limit             limit.Status // the target's; None for a plain pane
 	Message, Keys     string       // what is sent: the keys when set, else the message
@@ -349,6 +350,7 @@ func (p palette) dim(s string) span    { return p.paint(p.Dim, s) }
 func (p palette) yellow(s string) span { return p.paint(p.Yellow, s) }
 func (p palette) green(s string) span  { return p.paint(p.Green, s) }
 func (p palette) red(s string) span    { return p.paint(p.Red, s) }
+func (p palette) cyan(s string) span   { return p.paint(p.Cyan, s) }
 
 // row is a line under a headline: a dim label, then value, then a dim second
 // part, lined up with the rows around it, when there is one.
