@@ -179,7 +179,11 @@ func (k keyReader) next() (key, rune, bool) {
 		return keyEnter, 0, true
 	case b == 0x03:
 		return keyCancel, 0, true
-	case b == 0x04:
+	// Linux keeps an end of input that came while the terminal still read
+	// lines as a NUL byte, and hands that over once keys are read one by one.
+	// Taking it for Ctrl-D ends a run fed no more input, which would
+	// otherwise wait for good.
+	case b == 0x04 || b == 0x00:
 		return keyEOF, 0, true
 	case b == 0x7f || b == 0x08:
 		return keyBackspace, 0, true

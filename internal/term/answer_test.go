@@ -6,6 +6,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestEdit(t *testing.T) {
@@ -29,6 +30,8 @@ func TestEdit(t *testing.T) {
 		{"Ctrl-C", "ab\x03more\r", "ab", Cancelled},
 		{"Ctrl-D on an empty line", "\x04", "", Ended},
 		{"Ctrl-D with text does nothing", "ab\x04\r", "ab", Entered},
+		{"a NUL on an empty line, as Linux hands over an earlier end of input", "\x00", "", Ended},
+		{"a NUL with text does nothing", "ab\x00\r", "ab", Entered},
 		{"the end of the input", "abc", "abc", Ended},
 	} {
 		in := strings.NewReader(c.keys)
@@ -113,5 +116,34 @@ func TestAnswerReadsLinesFromAnythingElse(t *testing.T) {
 	}
 	if out.String() != "> " {
 		t.Errorf("drew %q", out.String())
+	}
+}
+
+func TestEndOfInputBeforeKeyByKey(t *testing.T) {
+	// script(1) sends an end of input as soon as its own input runs out,
+	// which for a run fed nothing is before the first question switches the
+	// terminal to keys. It must still end the answer, not leave it waiting.
+	master, slave := openPtyPair(t)
+	var tios syscall.Termios
+	if err := termios(slave.Fd(), ioctlGetTermios, &tios); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := master.Write([]byte{tios.Cc[syscall.VEOF]}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond) // the terminal takes it while reading lines
+	done := make(chan Outcome, 1)
+	go func() {
+		_, outcome := Answer(slave, "> ")
+		done <- outcome
+	}()
+	select {
+	case outcome := <-done:
+		if outcome != Ended {
+			t.Errorf("outcome %v, want Ended", outcome)
+		}
+	case <-time.After(5 * time.Second):
+		master.Write([]byte("\r")) // let the reader go
+		t.Fatal("the answer still waits after the end of input")
 	}
 }
