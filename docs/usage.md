@@ -54,9 +54,12 @@ Omit `--at` to read the selected agent's limit notice. The default message is
 schedule-send --cwd ~/projects/my-project
 ```
 
-Enter confirms the proposal. A replacement such as `00:45`, `3pm`,
-`Sep 28 1am`, or `+30 min` is shown back and becomes the new default;
-press Enter again to confirm it. `--message` overrides `resume`.
+On a terminal the run asks its questions as guided steps. First what to send:
+Enter keeps `resume`, or type another message. Then when: Enter confirms the
+proposal, and a replacement such as `00:45`, `3pm`, `Sep 28 1am`, or
+`+30 min` is shown back and becomes the new default; press Enter again to
+confirm it. `--message` or `--keys` skips the first question. Ctrl-C while
+it asks cancels, and nothing is written before the last answer.
 
 For unattended use, accept the detected proposal with `--auto`:
 
@@ -66,8 +69,9 @@ schedule-send --cwd ~/projects/my-project --auto --dry-run
 ```
 
 Without a terminal, omitting `--at` requires `--auto`. Automatic scheduling
-fails when there is no usable proposal. A plain pane needs an explicit time
-and payload because `resume` would otherwise run as a shell command.
+fails when there is no usable proposal. A plain pane under `--auto` needs a
+payload, because `resume` would otherwise run as a shell command; on a
+terminal it is asked for, with no default.
 
 Supported notices include Codex's `try again at Sep 27th, 2026 12:27 AM` and
 Claude's `resets 3pm` or `resets Sep 28, 3:30pm`, optionally followed by a
@@ -86,7 +90,8 @@ A notice without a reset time requires a manually supplied time.
 ## Target selection
 
 With one matching target, selection is automatic and reported on stderr.
-Otherwise a terminal gets a picker; Enter accepts its default and EOF cancels.
+Otherwise a terminal gets a picker as the first step; Enter takes the first
+row and EOF cancels.
 Without a terminal, an ambiguous match fails unless `--pick best` is given.
 
 | Option | Effect |
@@ -235,10 +240,10 @@ The internal worker's journal output remains plain text.
 
 The plugin, `dj-skn.schedule-send`, has one action, `schedule`, which opens an
 overlay over the focused pane and runs `schedule-send --pane <that pane>` in
-it. On an agent held by a usage limit it proposes the reset time; on any other
-agent it asks for a time. A plain shell pane needs `--message`, which the
-overlay has no way to add, so the action is meant for agent panes. The overlay
-stays open until Enter is pressed, so the receipt can be read.
+it. It asks what to send, where Enter keeps `resume` on an agent and a shell
+pane needs an answer, then when: on an agent held by a usage limit Enter takes
+a minute after the reset, and otherwise a time is typed. Ctrl-C cancels. The
+overlay stays open until Enter is pressed, so the receipt can be read.
 
 Options for every send from the plugin go in a file named `args` in the
 plugin's configuration directory, one or more per line, with `#` starting a

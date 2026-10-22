@@ -17,6 +17,9 @@ The first public release.
   notice and propose sending `resume` one minute later.
 - Choose the target with a picker, or by pane, working directory, or agent
   kind, with agents held by a limit ranked first.
+- On a terminal, ask as guided steps: which target, what to send (Enter
+  keeps `resume`; a shell pane has to be told), and when. Ctrl-C cancels
+  before anything is written.
 - Recheck the target before delivery, confirm that an agent took the prompt,
   and retry Enter only on fresh evidence of a stuck draft.
 - List, inspect, and cancel jobs, with `--json` for scripts and `--dry-run`
@@ -28,4 +31,5 @@ The first public release.
   which downloads a checked release binary to `~/.local/bin`.
 - `--version`.
 - A Herdr plugin, `dj-skn.schedule-send`, with one action that opens the
-  scheduling prompt for the focused agent in an overlay. It needs Herdr 0.9.3.
+  scheduling questions for the focused agent or shell pane in an overlay. It
+  needs Herdr 0.9.3.

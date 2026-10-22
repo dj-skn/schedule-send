@@ -50,10 +50,11 @@ outlive a logout only with
 
 ## Quick start
 
-Resume an agent that hit its limit. Run it with no options: the picker lists
-the agents with the limited ones first, and Enter takes the first. Enter again
-accepts the proposed time, or type another, such as `16:30` or `+30 min`, and
-confirm it with Enter.
+Resume an agent that hit its limit. Run it with no options and it asks three
+things, each with Enter for the usual answer: which agent, with the limited
+ones first; what to send, `resume` by default; and when, a minute after the
+reset, or type another time, such as `16:30` or `+30 min`, and confirm it
+with Enter.
 
 ```sh
 schedule-send
@@ -96,9 +97,9 @@ command = "dj-skn.schedule-send.schedule"
 description = "schedule a send"
 ```
 
-Focus an agent and press it. An overlay opens over the agent, proposes the
-reset time if it is held by a limit or asks for a time if not, and shows the
-receipt until you press Enter. Options for every send from the plugin, such
+Focus an agent or a shell pane and press it. An overlay opens over it and
+asks what to send and when, proposing a minute after the reset if a limit
+holds the agent, then shows the receipt until you press Enter. Options for every send from the plugin, such
 as `--dry-run`, go in an [`args` file](docs/usage.md#the-herdr-plugin).
 
 ## How it works
