@@ -18,8 +18,9 @@ The first public release.
 - Choose the target with a picker, or by pane, working directory, or agent
   kind, with agents held by a limit ranked first.
 - On a terminal, ask as guided steps: which target, what to send (Enter
-  keeps `resume`; a shell pane has to be told), and when. Ctrl-C cancels
-  before anything is written.
+  keeps `resume`; a shell pane has to be told), and when. Answers can be
+  edited with the arrow keys, and Ctrl-C cancels before anything is written.
+- `+30`, `+30m` and `+2h` as short forms of `+30 min` and `+2 hours`.
 - Recheck the target before delivery, confirm that an agent took the prompt,
   and retry Enter only on fresh evidence of a stuck draft.
 - List, inspect, and cancel jobs, with `--json` for scripts and `--dry-run`

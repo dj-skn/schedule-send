@@ -57,9 +57,11 @@ schedule-send --cwd ~/projects/my-project
 On a terminal the run asks its questions as guided steps. First what to send:
 Enter keeps `resume`, or type another message. Then when: Enter confirms the
 proposal, and a replacement such as `00:45`, `3pm`, `Sep 28 1am`, or
-`+30 min` is shown back and becomes the new default; press Enter again to
-confirm it. `--message` or `--keys` skips the first question. Ctrl-C while
-it asks cancels, and nothing is written before the last answer.
+`+30` is shown back and becomes the new default; press Enter again to confirm
+it. An answer can be edited before Enter with Left, Right, Home, End,
+Backspace, Delete, and Ctrl-U. `--message` or `--keys` skips the first
+question. Ctrl-C while it asks cancels, and nothing is written before the last
+answer.
 
 For unattended use, accept the detected proposal with `--auto`:
 
@@ -111,9 +113,10 @@ The calling pane is excluded unless `--allow-self` is set.
 ## Times and payloads
 
 `--at` accepts local `HH:MM[:SS]`, `H[:MM]am/pm`, full timestamps, and GNU date
-expressions such as `+30 min`. Clock-only values already passed today roll to
-tomorrow using calendar days. Explicit past timestamps are rejected. Timers
-store the resolved instant in UTC; receipts show local time.
+expressions such as `+30 min`, with `+30` or `+30m` for minutes and `+2h` for
+hours. Clock-only values already passed today roll to tomorrow using calendar
+days. Explicit past timestamps are rejected. Timers store the resolved instant
+in UTC; receipts show local time.
 
 Choose one payload:
 
