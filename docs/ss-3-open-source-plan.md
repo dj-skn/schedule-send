@@ -12,11 +12,13 @@ after a rehearsal on the private repository. P7 is complete in `ss-3`,
 fast-forwarded from `ss-3-p7` after the owner's Mac run; its plugin
 screenshot moved to P7.1. P7.1, which reworks the overlay's prompt, is
 complete in `ss-3`, fast-forwarded from `ss-3-p7.1` after a Linux run on the
-owner's homelab server and their live check in Herdr. P8 is in progress: its
-record is on `ss-3`, and on 2026-10-23 it revised the story's decisions on the
-history and the earlier plans. `ss-3-p3` to `ss-3-p7.1` were pushed to the
-private repository for those runs, on the owner's word; nothing else is
-pushed, merged into `main`, installed, or published.
+owner's homelab server and their live check in Herdr. `ss-3-p3` to
+`ss-3-p7.1` were pushed to the private repository for those runs, on the
+owner's word. P8 is in progress: on 2026-10-23 it revised the story's
+decisions on the history and the earlier plans, merged `ss-3` into `main`,
+and pushed the cleaned history to the new repository, still private, which
+this checkout now tracks. P7.2, inserted before P8 makes the repository
+public, rewrites the README and the usage reference.
 
 The owner settled the story's decisions on 2026-10-12 and asked for this plan.
 That is not a build instruction: every phase still gets its own source check,
@@ -127,6 +129,7 @@ Stated in the walkthrough; the owner did not object.
 | P6 | CI and release automation | `ss-3-p6` | complete in ss-3 |
 | P7 | README and visuals | `ss-3-p7` | complete in ss-3 |
 | P7.1 | The overlay's prompt, and the plugin screenshot | `ss-3-p7.1` | complete in ss-3 |
+| P7.2 | The README and the usage reference rewritten | `ss-3-p7.2` | in progress |
 | P8 | Publication | `ss-3-p8` | in progress |
 
 Each phase starts with a fresh source check and an owner walkthrough. Build
@@ -1446,6 +1449,73 @@ Found while building:
 
 For P8: the private-term scan was not run on this phase's changes, as the
 list is kept off the Mac; it is due before the tree is published.
+
+### P7.2 — README and usage rewrite
+
+Inserted on 2026-10-23, before P8 makes the repository public. Reading the
+private repository on GitHub, the owner found the How it works picture out of
+place and the README repetitive and padded, and asked for it to be rewritten
+after research into how good READMEs are written.
+
+#### Code check — 2026-10-23
+
+- Four researchers read the READMEs of 17 well-regarded command-line tools,
+  among them ripgrep, fzf, zoxide, bat, fd, atuin, uv, direnv, gum, vhs, and
+  git-absorb; the established guidance (Art of README, standard-readme,
+  Diátaxis, GitHub's README guidance, Google's developer documentation style
+  guide, and Write the Docs); and the README line by line.
+- None of the 17 explains its internals with a drawing. Where they explain
+  them at all, it takes a few short paragraphs or a list: about 110 words in
+  direnv and 130 in git-absorb. Every image they show is real output.
+- The README is 755 words. It states "a minute after the reset" five times
+  and the delivery promise (recheck, wait, send once, confirm) four times, in
+  the introduction, the picture, its alt text, and the paragraph under it. The
+  quick start is one 55-word sentence, and the terms drift: "send" and "job",
+  "terminal pane" and "shell pane", and an undefined "receipt".
+- The picture uses GitHub's status colours, so its steps read as info,
+  warning, and success. Its text renders at 11 to 12 px beside 16 px body
+  text, and at about 5 px on a phone.
+- `docs/usage.md` has about 1,730 words of prose; 19 of its 104 sentences run
+  over 26 words, the longest 51. Nine details in the README already live there;
+  the key binding lives only in the README.
+- Only the README and `AGENTS.md` link into `docs/usage.md`.
+  `CONTRIBUTING.md` describes the two SVG files.
+
+#### Decisions settled 2026-10-23
+
+The owner chose from previews and instructed build.
+
+1. **How it works.** A three-step numbered list (schedule, wait, deliver) and
+   one line on missed jobs. Both SVG files are deleted.
+2. **Headline.** One line that names general scheduling and the resume case,
+   so the tool does not read as resume-only. The repository description
+   matches it.
+3. **Scope.** The README and `docs/usage.md`.
+
+Assumptions the owner did not object to: the badges are CI, release, licence,
+and Herdr plugin; Install stays before Quick start; the terms are agent, shell
+pane, job, timer, and usage limit throughout; second person, present tense,
+one idea per sentence and at most 26 words; `docs/usage.md` keeps its sections
+and drops nothing from the reference.
+
+#### Steps
+
+1. This record, on `ss-3-p7.2` from `main`, since the story branch is merged.
+   → verify: zero private-term hits.
+2. The README.
+   → verify: about 480 words; each key fact once, by script; every link and
+   anchor resolves.
+3. `docs/usage.md`, with the key binding.
+   → verify: no sentence over 26 words; every option in `--help` documented;
+   every anchor other files link to still exists.
+4. Both rendered in GitHub's styles, light, dark, and phone.
+   → verify: the screenshots read.
+5. Full gate, As built; merge into `main` and push to the private repository
+   on the owner's word.
+   → verify: the owner reads both on GitHub before P8 publishes.
+
+Not included: new recordings, and the contributing guide, security policy,
+and changelog beyond what the deleted picture touches.
 
 ### P8 — Publication
 
