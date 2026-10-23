@@ -123,10 +123,6 @@ program's output fails the checks until the test is updated; record the GIFs
 again in the same change. Each run gives slightly different bytes, so commit
 the GIFs only when what they show has changed.
 
-The diagram is two hand-written SVGs, `how-it-works-light.svg` and
-`how-it-works-dark.svg`, in GitHub's light and dark colours. They are the same
-drawing; change both.
-
 The first run pulls the VHS image and builds a small one on top of it, about
 3 GB together. To remove them afterwards:
 
