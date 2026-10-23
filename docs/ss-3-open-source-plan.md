@@ -1470,7 +1470,7 @@ can be seen.
 - The history is 146 commits. 145 carry a personal address as author and
   committer; one carries GitHub's noreply address. 87 of its 472 file
   versions hold private names (658 lines), 229 lines hold the developer's home
-  directory, and 9 versions of the test screens, listings, and job files are
+  directory, and 8 versions of the test screens, listings, and job files are
   the original captures. No commit message holds a private term, and 16 end
   with a link to a private Claude Code session. gitleaks found no leaks in the
   history.
