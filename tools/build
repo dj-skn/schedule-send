@@ -1,12 +1,26 @@
 #!/bin/sh
 # Build with the final installation location, without publishing or linking it.
 # tools/install uses its main-checkout path; tests use isolated temporary paths.
+# GOOS and GOARCH select another system, and SCHEDULE_SEND_LDFLAGS adds linker
+# flags, as a release does.
 set -eu
-[ "$#" -eq 2 ] || { echo 'Usage: tools/build OUTPUT INSTALLED_PATH' >&2; exit 1; }
+[ "$#" -eq 2 ] || [ "$#" -eq 3 ] || { echo 'Usage: tools/build OUTPUT INSTALLED_PATH [VERSION]' >&2; exit 1; }
 # OUTPUT is relative to the caller, not to the repository root.
 case "$1" in /*) output=$1 ;; *) output=$PWD/$1 ;; esac
 cd "$(dirname "$0")/.."
-# The installed path is checked with the same rules arming uses.
-go run ./internal/installpath/check "$2"
-encoded="$(printf '%s' "$2" | base64 -w 0)"
-go build -trimpath -ldflags "-X schedule-send/internal/installpath.Encoded=$encoded" -o "$output" ./cmd/schedule-send
+# The installed path is checked with the same rules arming uses. The check
+# runs on this machine, whatever system the build is for.
+GOOS= GOARCH= go run ./internal/installpath/check "$2"
+# BSD base64 has no -w; both wrap only long input, so strip the newlines.
+encoded="$(printf '%s' "$2" | base64 | tr -d '\n')"
+# A release names its version. A checkout build is described by Git, and a
+# tree with neither is "dev".
+version="${3:-$(git describe --tags --match 'v[0-9]*' --dirty 2> /dev/null | sed 's/^v//')}"
+[ -n "$version" ] || version=dev
+case "$version" in
+  *[!A-Za-z0-9._+-]*) echo "Invalid version: $version" >&2; exit 1 ;;
+esac
+module=github.com/dj-skn/schedule-send
+ldflags="-X $module/internal/installpath.Encoded=$encoded -X $module/internal/cli.Version=$version"
+[ -z "${SCHEDULE_SEND_LDFLAGS:-}" ] || ldflags="$SCHEDULE_SEND_LDFLAGS $ldflags"
+go build -trimpath -ldflags "$ldflags" -o "$output" ./cmd/schedule-send

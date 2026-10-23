@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"schedule-send/internal/herdr"
-	"schedule-send/internal/job"
-	"schedule-send/internal/target"
+	"github.com/dj-skn/schedule-send/internal/herdr"
+	"github.com/dj-skn/schedule-send/internal/job"
+	"github.com/dj-skn/schedule-send/internal/target"
 )
 
 const (
@@ -53,7 +53,7 @@ func (realClock) Sleep(d time.Duration) { time.Sleep(d) }
 type Worker struct {
 	ID    string
 	Paths job.Paths
-	Sys   job.Systemctl
+	Sys   job.Scheduler
 	Out   io.Writer
 	Err   io.Writer
 	Clock Clock
@@ -95,6 +95,15 @@ func (w *Worker) Run() int {
 	if err := st.Validate(w.ID); err != nil {
 		return w.refuse(st, "Invalid state file for %s: %v", w.ID, err)
 	}
+	// A scheduler that cannot start a job exactly on time holds it here, or
+	// says that this start is not the one to deliver on.
+	switch verdict, why := w.Sys.Await(st.RunAt, w.Clock.Now, w.Clock.Sleep); verdict {
+	case job.StandDown:
+		fmt.Fprintf(w.Out, "Job %s %s.\n", w.ID, why)
+		return 0
+	case job.Drop:
+		return w.missed(st, why)
+	}
 	if w.fire(st) != nil {
 		return 1
 	}
@@ -105,6 +114,32 @@ func (w *Worker) Run() int {
 	return 0
 }
 
+// missed reports a job that was started too late to deliver and removes it.
+func (w *Worker) missed(st job.State, why string) int {
+	msg := fmt.Sprintf("Scheduled send %s to %s was not delivered: %s", w.ID, st.PaneID, why)
+	fmt.Fprintln(w.Err, msg+".")
+	w.announce(st, msg+".")
+	if err := w.Paths.Cleanup(w.Sys, w.ID); err != nil {
+		fmt.Fprintf(w.Err, "Job %s cleanup failed: %v\n", w.ID, err)
+	}
+	return 1
+}
+
+// announce raises a Herdr notification for a job that never reached
+// delivery, through its stored herdr or the one on PATH, unless it is quiet.
+func (w *Worker) announce(st job.State, body string) {
+	if st.Quiet == 1 {
+		return
+	}
+	bin := st.HerdrBin
+	if !executable(bin) {
+		bin, _ = exec.LookPath("herdr")
+	}
+	if executable(bin) {
+		w.Connect(bin).Notify("Scheduled send failed", body)
+	}
+}
+
 // refuse reports a job whose state cannot be trusted and keeps its files for
 // inspection. Its timer has elapsed and will not fire again, so a Herdr
 // notification is the only notice the user gets. Herdr is used for nothing
@@ -113,16 +148,7 @@ func (w *Worker) Run() int {
 func (w *Worker) refuse(st job.State, format string, args ...any) int {
 	msg := fmt.Sprintf(format, args...)
 	fmt.Fprintln(w.Err, msg)
-	if st.Quiet == 1 {
-		return 1
-	}
-	bin := st.HerdrBin
-	if !executable(bin) {
-		bin, _ = exec.LookPath("herdr")
-	}
-	if executable(bin) {
-		w.Connect(bin).Notify("Scheduled send failed", fmt.Sprintf("%s. The job is kept; inspect it with schedule-send --status %s.", msg, w.ID))
-	}
+	w.announce(st, fmt.Sprintf("%s. The job is kept; inspect it with schedule-send --status %s.", msg, w.ID))
 	return 1
 }
 

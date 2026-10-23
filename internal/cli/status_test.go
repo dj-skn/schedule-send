@@ -1,3 +1,5 @@
+//go:build linux
+
 package cli
 
 import (
@@ -149,12 +151,15 @@ func TestStatusInspection(t *testing.T) {
 	}
 }
 
+// The budgets leave each fixture command about 250 ms to start and print
+// before its deadline, so a busy machine does not turn a partial result into
+// a missing one. The sleeps that must outlast a budget are far longer than it.
 func TestStatusDeadlines(t *testing.T) {
 	cases := []struct{ name, timer, journal, source, code string }{
-		{"timer deadline", "echo timer-partial; exec /bin/sleep 2", "echo journal-partial", "timer", "timeout"},
-		{"journal deadline", "echo timer-partial", "echo journal-partial; exec /bin/sleep 2", "journal", "timeout"},
-		{"shared timer budget", "if [ \"$2\" = status ]; then echo timer-partial; /bin/sleep 0.04; exit 3; fi\n/bin/sleep 0.06; printf 'LoadState=loaded\\nActiveState=inactive\\nSubState=dead\\n'", "echo journal-partial", "unit_state", "timeout"},
-		{"pipe drain", "echo timer-partial", "echo journal-partial; /bin/sleep 0.2 &", "journal", "pipe_timeout"},
+		{"timer deadline", "echo timer-partial; exec /bin/sleep 10", "echo journal-partial", "timer", "timeout"},
+		{"journal deadline", "echo timer-partial", "echo journal-partial; exec /bin/sleep 10", "journal", "timeout"},
+		{"shared timer budget", "if [ \"$2\" = status ]; then echo timer-partial; /bin/sleep 0.2; exit 3; fi\n/bin/sleep 0.6; printf 'LoadState=loaded\\nActiveState=inactive\\nSubState=dead\\n'", "echo journal-partial", "unit_state", "timeout"},
+		{"pipe drain", "echo timer-partial", "echo journal-partial; /bin/sleep 1 &", "journal", "pipe_timeout"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -163,13 +168,13 @@ func TestStatusDeadlines(t *testing.T) {
 			t.Setenv("PATH", filepath.Join(h.dir, "path"))
 			statusFixture(t, h, "systemctl", tc.timer)
 			statusFixture(t, h, "journalctl", tc.journal)
-			h.a.statusTimeouts = statusTimeouts{timer: 80 * time.Millisecond, journal: 80 * time.Millisecond, drain: 20 * time.Millisecond}
+			h.a.statusTimeouts = statusTimeouts{timer: 500 * time.Millisecond, journal: 500 * time.Millisecond, drain: 100 * time.Millisecond}
 			start := time.Now()
 			if code := h.a.main([]string{"--status", statusID, "--json"}); code != 1 {
 				t.Fatalf("exit %d: %s", code, h.stderr)
 			}
 			elapsed := time.Since(start)
-			if elapsed > time.Second {
+			if elapsed > 3*time.Second {
 				t.Fatalf("inspection took %v", elapsed)
 			}
 			var result statusResult

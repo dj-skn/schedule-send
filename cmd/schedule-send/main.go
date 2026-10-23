@@ -5,7 +5,7 @@ package main
 import (
 	"os"
 
-	"schedule-send/internal/cli"
+	"github.com/dj-skn/schedule-send/internal/cli"
 )
 
 func main() {

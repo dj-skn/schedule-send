@@ -1,0 +1,87 @@
+#!/bin/sh
+# Install the Homebrew formula from a temporary local tap, built from this
+# checkout's last commit, and check what it installs: one command from an
+# untrusted tap, the version, the path jobs would run from, and that an
+# upgrade keeps that path. It uninstalls and untaps on any exit. Whatever
+# Homebrew adds to build it (Go, and coreutils on macOS) stays installed.
+set -eu
+cd "$(dirname "$0")/.."
+root="$(pwd -P)"
+for tool in brew git jq; do
+  command -v "$tool" > /dev/null || { echo "tools/brew-smoke needs $tool." >&2; exit 1; }
+done
+tap=schedule-send-smoke/tap
+formula=$tap/schedule-send
+if brew list --formula schedule-send > /dev/null 2>&1; then
+  echo "schedule-send is already installed with Homebrew; uninstall it before running this." >&2
+  exit 1
+fi
+export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_ENV_HINTS=1 HOMEBREW_NO_ANALYTICS=1
+
+work="$(mktemp -d)"
+prefix="$(brew --prefix)"
+installed=$prefix/bin/schedule-send
+stable=$prefix/opt/schedule-send/bin/schedule-send
+failures=0
+
+cleanup() {
+  status=$?
+  trap - EXIT
+  brew uninstall --force "$formula" > /dev/null 2>&1 || true
+  brew untap "$tap" > /dev/null 2>&1 || true
+  brew untrust --formula "$formula" > /dev/null 2>&1 || true
+  rm -rf "$work"
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
+check() { # description, then a command that must succeed
+  what="$1"; shift
+  if "$@"; then echo "  ok    $what"; else echo "  FAIL  $what"; failures=$((failures + 1)); fi
+}
+sha() { if command -v sha256sum > /dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
+
+publish() { # version: put that version of the formula in the local tap
+  git archive --format=tar.gz --prefix="schedule-send-$1/" -o "$work/schedule-send-$1.tar.gz" HEAD
+  sed -e "s|^  url .*|  url \"file://$work/schedule-send-$1.tar.gz\"|" \
+      -e "s|^  sha256 .*|  sha256 \"$(sha "$work/schedule-send-$1.tar.gz")\"|" \
+      packaging/homebrew/schedule-send.rb > "$work/tap/Formula/schedule-send.rb"
+  git -C "$work/tap" add -A
+  git -C "$work/tap" -c user.name=smoke -c user.email=smoke@example.invalid commit -qm "schedule-send $1"
+}
+
+mkdir -p "$work/tap/Formula" "$work/scenario" "$work/path"
+git -C "$work/tap" init -q
+cp testdata/fixtures/2026-10-03/* "$work/scenario/"
+# A dry run asks the scheduler whether it is there. A Linux container has no
+# systemd, so the stand-ins answer; on macOS the real launchctl does.
+if [ "$(uname -s)" = Linux ]; then
+  ln -s "$root/testdata/standin/systemctl" "$root/testdata/standin/journalctl" "$work/path/"
+fi
+would_run() { # the program a job armed now would run
+  PATH="$work/path:$PATH" HERDR_BIN_OVERRIDE="$root/testdata/standin/herdr" HERDR_STANDIN_DIR="$work/scenario" \
+    HERDR_PANE_ID=wB:p2 XDG_STATE_HOME="$work/state" XDG_CONFIG_HOME="$work/config" \
+    "$installed" --pane wB:p3 --at '+10 min' --message hello --dry-run --json 2> "$work/dry.err" | jq -r '.would_run' | cut -d' ' -f1
+}
+
+publish 0.0.1
+brew tap "$tap" "$work/tap" > "$work/tap.log" 2>&1 || { cat "$work/tap.log" >&2; exit 1; }
+echo "Installing $formula (Homebrew builds it from source)"
+check "one fully qualified command installs it from an untrusted tap" brew install "$formula"
+check "it reports the formula's version" sh -c "[ \"\$('$installed' --version)\" = 'schedule-send 0.0.1' ]"
+check "a job would run from the path that survives upgrades" sh -c "[ \"\$1\" = '$stable' ]" _ "$(would_run)"
+[ ! -s "$work/dry.err" ] || sed 's/^/        | /' "$work/dry.err"
+check "brew test passes" brew test "$formula"
+
+publish 0.0.2
+git -C "$(brew --repository "$tap")" pull -q
+check "an upgrade installs" brew upgrade "$formula"
+check "the same path now runs the new version" sh -c "[ \"\$('$stable' --version)\" = 'schedule-send 0.0.2' ]"
+check "a job would still run from that path" sh -c "[ \"\$1\" = '$stable' ]" _ "$(would_run)"
+
+echo "Formula style:"
+brew style "$work/tap/Formula/schedule-send.rb" 2>&1 | tail -4 | sed 's/^/        /' || true
+
+echo
+if [ "$failures" -eq 0 ]; then echo "brew-smoke: ok"; else echo "brew-smoke: $failures check(s) failed"; exit 1; fi

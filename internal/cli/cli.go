@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -17,15 +17,15 @@ import (
 	"strings"
 	"time"
 
-	"schedule-send/internal/herdr"
-	"schedule-send/internal/installpath"
-	"schedule-send/internal/job"
-	"schedule-send/internal/limit"
-	"schedule-send/internal/show"
-	"schedule-send/internal/target"
-	"schedule-send/internal/term"
-	"schedule-send/internal/when"
-	"schedule-send/internal/worker"
+	"github.com/dj-skn/schedule-send/internal/herdr"
+	"github.com/dj-skn/schedule-send/internal/installpath"
+	"github.com/dj-skn/schedule-send/internal/job"
+	"github.com/dj-skn/schedule-send/internal/limit"
+	"github.com/dj-skn/schedule-send/internal/show"
+	"github.com/dj-skn/schedule-send/internal/target"
+	"github.com/dj-skn/schedule-send/internal/term"
+	"github.com/dj-skn/schedule-send/internal/when"
+	"github.com/dj-skn/schedule-send/internal/worker"
 )
 
 // failure ends the command: msg goes to stderr, code is the exit status.
@@ -48,7 +48,7 @@ func fail(kind, format string, a ...any) error {
 const resumeMessage = "resume"
 
 // installHint is how to get a build that can arm jobs.
-const installHint = "Run tools/install from the main checkout, then invoke the installed schedule-send."
+const installHint = "Install it again with Homebrew, the install script, or tools/install from a checkout, then run the installed schedule-send."
 
 // A notice names its reset to the minute, and the reset lands somewhere inside
 // that minute — a notice reading 12:27 AM was for a reset at 00:27:52 — so the
@@ -75,10 +75,11 @@ type app struct {
 	openTTY        func() (io.ReadWriteCloser, error)
 	clock          func() int64 // the time now, as an epoch; run sets it when nil
 	paths          job.Paths
-	sys            job.Systemctl
+	sys            job.Scheduler
 	h              herdr.Client
 	selfPane       string                 // HERDR_PANE_ID
 	installedPath  func() (string, error) // private injection for isolated tests
+	exit           func(code int)         // os.Exit; tests catch it
 	statusTimeouts statusTimeouts         // private deadlines for isolated tests
 
 	rows []target.Row
@@ -86,6 +87,92 @@ type app struct {
 	now  int64 // when the run started; screens are judged at this moment
 
 	lim map[string]limit.Status // set by limits
+	ask *asker                  // set by asking, at the first question
+}
+
+// asker is the terminal a run asks its questions on, drawn as a rail. It is
+// opened at the first question and kept until the run ends, so every answer
+// comes from one stream, as typed, and the rail ends with how the run came
+// out.
+type asker struct {
+	tty  io.ReadWriteCloser
+	c    term.Colors
+	rail show.Rail
+	stop func() // hands Ctrl-C back; nil once it has
+}
+
+// say writes lines on the terminal.
+func (q *asker) say(lines ...string) {
+	for _, l := range lines {
+		fmt.Fprintln(q.tty, l)
+	}
+}
+
+// answer shows the place to type, and reads what was typed there, edited key
+// by key on a real terminal. ok is false at the end of the input; Ctrl-C while
+// typing ends the run as cancelled.
+func (q *asker) answer() (line string, ok bool, err error) {
+	line, outcome := term.Answer(q.tty, q.rail.Input())
+	switch outcome {
+	case term.Cancelled:
+		return "", false, cancelled()
+	case term.Ended:
+		return line, false, nil
+	}
+	return line, true, nil
+}
+
+// cancelled is a run stopped with Ctrl-C while it asked, before anything was
+// written.
+func cancelled() error {
+	return failure{msg: "Cancelled. Nothing was scheduled.", code: 130, kind: "cancelled"}
+}
+
+// asking is the run's terminal for questions, opened and given the rail's top
+// the first time.
+func (a *app) asking() (*asker, error) {
+	if a.ask != nil {
+		return a.ask, nil
+	}
+	tty, err := a.openTTY()
+	if err != nil {
+		return nil, err
+	}
+	c := term.ColorsFor(tty)
+	a.ask = &asker{tty: tty, c: c, rail: show.NewRail(c)}
+	a.ask.say("", a.ask.rail.Top(a.o.dryRun), a.ask.rail.Gap())
+	a.ask.stop = a.cancelOnInterrupt(a.ask)
+	return a.ask, nil
+}
+
+// cancelOnInterrupt makes Ctrl-C while the run asks end the rail saying
+// nothing was scheduled, which holds because nothing is written before the
+// last answer. The function it returns hands Ctrl-C back.
+func (a *app) cancelOnInterrupt(q *asker) func() {
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-signals:
+			q.say("", q.rail.Cancelled())
+			a.exit(130)
+		case <-done:
+		}
+	}()
+	return func() {
+		signal.Stop(signals)
+		close(done)
+	}
+}
+
+// doneAsking hands Ctrl-C back once the last answer is in, before anything
+// is written, so an interrupted write ends the way it always has.
+func (a *app) doneAsking() {
+	if a.ask != nil && a.ask.stop != nil {
+		a.ask.stop()
+		a.ask.stop = nil
+	}
 }
 
 // Main runs the command and returns its exit status.
@@ -101,6 +188,7 @@ func Main(args []string) int {
 		},
 		paths:    job.DefaultPaths(),
 		selfPane: os.Getenv("HERDR_PANE_ID"),
+		exit:     os.Exit,
 	}
 	return a.main(args)
 }
@@ -121,6 +209,10 @@ func (a *app) main(args []string) int {
 		}
 	}
 	err := a.run(args)
+	if a.ask != nil {
+		a.doneAsking()
+		defer a.ask.tty.Close()
+	}
 	var f failure
 	switch {
 	case err == nil:
@@ -129,19 +221,26 @@ func (a *app) main(args []string) int {
 		if f.code == 0 || f.msg == "" {
 			return f.code
 		}
-		if a.o.json {
-			a.writeError(f)
-		} else {
-			fmt.Fprintln(a.stderr, f.msg)
-		}
+		a.failed(f)
 		return f.code
 	default:
-		if a.o.json {
-			a.writeError(failure{msg: err.Error(), code: 1})
-		} else {
-			fmt.Fprintln(a.stderr, err)
-		}
+		a.failed(failure{msg: err.Error(), code: 1})
 		return 1
+	}
+}
+
+// failed says why the run stopped: as JSON under --json, as the rail's end
+// once a question was asked, and otherwise on stderr.
+func (a *app) failed(f failure) {
+	switch {
+	case a.o.json:
+		a.writeError(f)
+	case a.ask != nil && f.kind == "cancelled":
+		a.ask.say(a.ask.rail.Cancelled())
+	case a.ask != nil:
+		a.ask.say(a.ask.rail.Fail(f.msg))
+	default:
+		fmt.Fprintln(a.stderr, f.msg)
 	}
 }
 
@@ -163,7 +262,8 @@ func emit(w io.Writer, v any) {
 }
 
 // note and warn are the asides on stderr. Under --json each is its own object,
-// so stderr stays something a script can read.
+// so stderr stays something a script can read. A warning given once a question
+// was asked goes on the rail instead, among the steps it is about.
 func (a *app) note(msg string) {
 	if a.o.json {
 		emit(a.stderr, struct {
@@ -179,6 +279,10 @@ func (a *app) warn(msg string) {
 		emit(a.stderr, struct {
 			Warning string `json:"warning"`
 		}{msg})
+		return
+	}
+	if a.ask != nil {
+		a.ask.say(a.ask.rail.Warning(msg))
 		return
 	}
 	fmt.Fprintln(a.stderr, msg)
@@ -198,7 +302,7 @@ func (a *app) parse(args []string) error {
 	for i := 0; i < len(args); {
 		flag := args[i]
 		switch flag {
-		case "--json", "--targets", "--list", "--cancel", "--status", "--help", "-h":
+		case "--json", "--targets", "--list", "--cancel", "--status", "--help", "-h", "--version":
 		default:
 			scheduling = true
 		}
@@ -274,6 +378,9 @@ func (a *app) parse(args []string) error {
 		case "-h", "--help":
 			err = operation("--help")
 			i++
+		case "--version":
+			err = operation(flag)
+			i++
 		default:
 			if a.o.json {
 				return failure{code: 2, kind: "usage", msg: "Unknown argument: " + flag}
@@ -310,6 +417,15 @@ func (a *app) run(args []string) (retErr error) {
 		return a.status(a.o.operationID)
 	case "--help":
 		fmt.Fprint(a.stdout, usage)
+		return nil
+	case "--version":
+		if a.o.json {
+			emit(a.stdout, struct {
+				Version string `json:"version"`
+			}{Version})
+			return nil
+		}
+		fmt.Fprintln(a.stdout, "schedule-send", Version)
 		return nil
 	}
 	o := &a.o
@@ -370,24 +486,11 @@ func (a *app) run(args []string) (retErr error) {
 		resolve = installpath.Resolve
 	}
 	installed, installErr := resolve()
-	if !o.dryRun {
-		if installErr != nil {
-			return die("Cannot arm a job: %v. %s", installErr, installHint)
-		}
-		fi, err := os.Stat("/usr/bin/env")
-		if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm()&0111 == 0 {
-			return die("/usr/bin/env is required to execute scheduled jobs (GNU coreutils).")
-		}
+	if !o.dryRun && installErr != nil {
+		return die("Cannot arm a job: %v. %s", installErr, installHint)
 	}
-
-	if _, err := exec.LookPath("systemctl"); err != nil {
-		return die("systemctl is required.")
-	}
-	// is-system-running exits non-zero for "degraded", which merely means some
-	// unrelated unit failed earlier. Only a manager we cannot talk to at all is
-	// a real blocker, and that prints nothing.
-	if a.sys.Output("is-system-running") == "" {
-		return die("systemd --user is not available for this account.")
+	if err := a.sys.Available(!o.dryRun); err != nil {
+		return die("%v", err)
 	}
 	if err := a.locateHerdr(); err != nil {
 		return err
@@ -429,10 +532,13 @@ func (a *app) run(args []string) (retErr error) {
 	if t.Pane == a.selfPane && !o.allowSelf {
 		return die("Refusing to target the pane this command runs in. Pass --allow-self to override.")
 	}
-	if o.defaulted && !t.IsAgent() {
+	// Asked on a terminal, the rail asks for the message a shell pane needs,
+	// and its report says when an agent is blocked.
+	ask := detect && !o.auto
+	if o.defaulted && !t.IsAgent() && !ask {
 		return die("Pane %s is a plain shell, where the default '%s' would run as a command. Pass --message.", t.Pane, resumeMessage)
 	}
-	if t.IsAgent() && t.Status == "blocked" && o.keys == "" {
+	if t.IsAgent() && t.Status == "blocked" && o.keys == "" && !ask {
 		a.warn(fmt.Sprintf("Warning: agent in %s is blocked on a prompt right now.", t.Pane))
 	}
 
@@ -453,6 +559,7 @@ func (a *app) run(args []string) (retErr error) {
 	if runAt <= now {
 		return die("Target time has already passed: %s", when.Format(runAt, when.Calendar))
 	}
+	a.doneAsking()
 	if !detect && t.IsAgent() && o.keys == "" {
 		a.warnBeforeReset(runAt)
 	}
@@ -476,12 +583,12 @@ func (a *app) run(args []string) (retErr error) {
 		mode, payload = "keys", "keys: "+o.keys
 	}
 	sched := show.Scheduled{
-		DryRun: o.dryRun, ID: id, Unit: unit,
+		DryRun: o.dryRun, ID: id, Unit: a.sys.Name(id),
 		Kind: t.Kind, Pane: t.Pane, Agent: t.Agent, Status: t.Status, Cwd: t.Cwd,
 		At: calendar, RunAt: runAt, Delay: delay,
 		Mode: mode, Payload: payload, Message: o.message, Keys: o.keys,
 		Persistent: o.persistent, IfBusy: o.ifBusy, Recover: o.recover, Grace: o.grace,
-		UnitFiles: a.paths.UnitDir + "/" + unit + ".{service,timer}",
+		UnitFiles: a.sys.Files(a.paths, id, o.persistent),
 	}
 	// The program and arguments the timer runs; the unit wraps them in
 	// /usr/bin/env with systemd escaping.
@@ -497,7 +604,7 @@ func (a *app) run(args []string) (retErr error) {
 		return nil
 	}
 
-	serviceText, err := job.ServiceUnit(t.Pane, calendar, installed, id)
+	trigger, err := a.sys.Render(t.Pane, calendar, installed, id, runAt, o.persistent)
 	if err != nil {
 		return die("Could not render the service: %v", err)
 	}
@@ -536,24 +643,8 @@ func (a *app) run(args []string) (retErr error) {
 		}
 	}()
 
-	// Unit files live on disk rather than being transient, because transient
-	// units are written to /run and would be lost on reboot.
-	if err := os.MkdirAll(a.paths.UnitDir, 0o777); err != nil {
-		return die("Could not create %s: %v", a.paths.UnitDir, err)
-	}
-	service, timer := a.paths.UnitPath(id, "service"), a.paths.UnitPath(id, "timer")
-	if err := job.AtomicWrite(service, []byte(serviceText), 0o644); err != nil {
-		return die("Could not write %s: %v", service, err)
-	}
-	if err := job.AtomicWrite(timer, []byte(job.TimerUnit(id, time.Unix(runAt, 0).UTC().Format(when.Calendar)+" UTC", o.persistent)), 0o644); err != nil {
-		return die("Could not write %s: %v", timer, err)
-	}
-	if err := a.sys.Quiet("daemon-reload"); err != nil {
-		return die("systemctl daemon-reload failed: %v", err)
-	}
-	activationAttempted = true
-	if err := a.sys.Quiet("enable", "--now", unit+".timer"); err != nil {
-		return die("Could not arm %s.timer: %v", unit, err)
+	if activationAttempted, err = a.sys.Arm(a.paths, trigger); err != nil {
+		return die("%v", err)
 	}
 	// Rendering may read panes again; release the reservation once arming is
 	// settled, before an immediately firing worker needs to clean up.
@@ -563,8 +654,16 @@ func (a *app) run(args []string) (retErr error) {
 }
 
 // receipt prints the send armed, or the dry run, styled when stdout is a
-// terminal and as key=value lines for anything reading it.
+// terminal and as key=value lines for anything reading it. After questions it
+// is the rail's end, and stdout gets it only when that is not the same
+// terminal.
 func (a *app) receipt(s show.Scheduled, now int64) {
+	if a.ask != nil {
+		a.ask.say(s.RailEnd(a.ask.c, now))
+		if a.stdoutTTY() && !a.o.json {
+			return
+		}
+	}
 	if a.o.json {
 		var st limit.Status
 		note := ""
@@ -683,15 +782,23 @@ func (a *app) chooseTarget() (target.Row, error) {
 		return target.Row{}, failure{code: 1}
 	}
 
-	tty, err := a.openTTY()
+	// The picker is the rail's first step, its list beside the rail.
+	q, err := a.asking()
 	if err != nil {
 		return target.Row{}, die("Could not open /dev/tty for target selection.")
 	}
-	defer tty.Close()
-	target.Render(tty, rows, marks, term.ColorsFor(tty), a.selfPane, a.h.ProcName)
+	var list bytes.Buffer
+	target.Render(&list, rows, marks, q.c, a.selfPane, a.h.ProcName)
+	q.say(q.rail.Step("Which agent or pane?"))
+	for _, line := range strings.Split(strings.Trim(list.String(), "\n"), "\n") {
+		q.say(q.rail.Line(line))
+	}
+	q.say(q.rail.Gap(), q.rail.Hint("Enter takes 1, or type its number"))
 	for {
-		fmt.Fprint(tty, "target [1]: ")
-		choice, ok := term.ReadLine(tty)
+		choice, ok, err := q.answer()
+		if err != nil {
+			return target.Row{}, err
+		}
 		if !ok {
 			return target.Row{}, die("Target selection cancelled: no input received.")
 		}
@@ -699,9 +806,10 @@ func (a *app) chooseTarget() (target.Row, error) {
 			choice = "1"
 		}
 		if n, err := strconv.Atoi(choice); err == nil && digits.MatchString(choice) && n >= 1 && n <= len(rows) {
+			q.say(q.rail.Gap())
 			return rows[n-1], nil
 		}
-		fmt.Fprintf(tty, "Enter a number from 1 to %d.\n", len(rows))
+		q.say(q.rail.Error(fmt.Sprintf("Enter a number from 1 to %d.", len(rows))))
 	}
 }
 
@@ -851,8 +959,9 @@ func (a *app) detectAt(now int64) (int64, error) {
 		proposed = st.Reset + limitMargin
 	}
 	report := show.Report{
-		Kind: a.tgt.Kind, Agent: a.tgt.Agent, Pane: a.tgt.Pane, Summary: target.Summary(a.tgt),
-		Limit: st, Message: a.o.message, Keys: a.o.keys, Margin: limitMargin, Auto: a.o.auto, Now: now,
+		Kind: a.tgt.Kind, Agent: a.tgt.Agent, Pane: a.tgt.Pane, Status: a.tgt.Status, Cwd: a.tgt.Cwd,
+		Summary: target.Summary(a.tgt), Limit: st, Message: a.o.message, Keys: a.o.keys,
+		Margin: limitMargin, Auto: a.o.auto, Now: now,
 	}
 
 	if a.o.auto {
@@ -868,33 +977,65 @@ func (a *app) detectAt(now int64) (int64, error) {
 		}
 		return proposed, nil
 	}
-	return a.confirmAt(proposed, fromNow, report)
-}
-
-// confirmAt asks on the terminal when to send, after showing the report,
-// offering def (an epoch, or 0 for no default). Enter takes the default; when
-// fromNow, def is limitMargin from the start of the run, and Enter keeps it at
-// least that far ahead of the moment it is pressed. Anything typed is
-// resolved, shown back, and becomes the new default, so a correction is
-// confirmed the same way the detected time is. Each answer is judged at the
-// time it is given.
-func (a *app) confirmAt(def int64, fromNow bool, report show.Report) (int64, error) {
-	tty, err := a.openTTY()
+	q, err := a.asking()
 	if err != nil {
 		return 0, die("Could not open /dev/tty to confirm the send time.")
 	}
-	defer tty.Close()
-	c := term.ColorsFor(tty)
-	fmt.Fprint(tty, "\n"+report.Styled(c)+"\n\n")
-
-	now := report.Now
-	for {
-		if def != 0 {
-			fmt.Fprintf(tty, "  at [%s]: ", show.Time(def, now))
-		} else {
-			fmt.Fprint(tty, "  at: ")
+	for _, line := range report.RailLines(q.c) {
+		q.say(q.rail.Line(line))
+	}
+	q.say(q.rail.Gap())
+	if a.o.defaulted {
+		if err := a.askMessage(q, a.tgt.IsAgent()); err != nil {
+			return 0, err
 		}
-		input, ok := term.ReadLine(tty)
+	}
+	return a.confirmAt(q, proposed, fromNow, now)
+}
+
+// askMessage asks what to send when no message was given. Enter keeps
+// "resume" on an agent; a shell pane, where the text runs as a command, has
+// to be told.
+func (a *app) askMessage(q *asker, agent bool) error {
+	hint := `Enter keeps "` + resumeMessage + `"`
+	if !agent {
+		hint = "It's a shell, so this runs as a command"
+	}
+	q.say(q.rail.Step("What should it send?"), q.rail.Hint(hint))
+	for {
+		input, ok, err := q.answer()
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return die("No message given.")
+		}
+		switch {
+		case strings.TrimSpace(input) != "":
+			a.o.message = input
+		case agent:
+			a.o.message = resumeMessage
+		default:
+			continue
+		}
+		q.say(q.rail.Gap())
+		return nil
+	}
+}
+
+// confirmAt asks on the rail when to send, offering def (an epoch, or 0 for
+// no default). Enter takes the default; when fromNow, def is limitMargin from
+// the start of the run, and Enter keeps it at least that far ahead of the
+// moment it is pressed. Anything typed is resolved, shown back, and becomes
+// the new default, so a correction is confirmed the same way the detected time
+// is. Each answer is judged at the time it is given.
+func (a *app) confirmAt(q *asker, def int64, fromNow bool, now int64) (int64, error) {
+	q.say(q.rail.Step("When?"), q.rail.Hint(timeHint(def, fromNow, now)))
+	for {
+		input, ok, err := q.answer()
+		if err != nil {
+			return 0, err
+		}
 		if !ok {
 			return 0, die("No send time given.")
 		}
@@ -904,21 +1045,35 @@ func (a *app) confirmAt(def int64, fromNow bool, report show.Report) (int64, err
 			case def == 0:
 				continue
 			case fromNow:
-				return max(def, now+limitMargin), nil
+				def = max(def, now+limitMargin)
 			}
+			q.say(q.rail.Gap())
 			return def, nil
 		}
 		epoch, parsed := when.Resolve(input, now)
 		switch {
 		case !parsed:
-			fmt.Fprintf(tty, "    %sCould not parse '%s'. Try 00:45, 12:45 AM, Sep 27 1am, or +30 min.%s\n", c.Red, input, c.Reset)
+			q.say(q.rail.Error(fmt.Sprintf("Could not read '%s'. Try 18:30, 6:30 PM, Sep 27 1am or +30 min.", input)))
 		case epoch <= now:
-			fmt.Fprintf(tty, "    %s%s has already passed.%s\n", c.Red, show.Time(epoch, now), c.Reset)
+			q.say(q.rail.Error(show.Time(epoch, now) + " has already passed."))
 		default:
-			fmt.Fprintf(tty, "    → %-11s %s\n", show.Time(epoch, now), c.Dim+"in "+when.Delay(epoch-now)+c.Reset)
+			q.say(q.rail.Resolved(show.Time(epoch, now), when.Delay(epoch-now)))
 			def, fromNow = epoch, false
 		}
 	}
+}
+
+// timeHint says what the time question takes: the time Enter keeps and why,
+// or, with none to keep, the ways a time can be typed.
+func timeHint(def int64, fromNow bool, now int64) string {
+	mins := limitMargin / 60
+	switch {
+	case def == 0:
+		return "Like 18:30, 6:30 PM, Sep 27 1am or +30 min"
+	case fromNow:
+		return fmt.Sprintf("Enter keeps %s, %d min from now", show.Time(def, now), mins)
+	}
+	return fmt.Sprintf("Enter keeps %s, %d min after the reset", show.Time(def, now), mins)
 }
 
 // ------------------------------------------------------------- subcommands
@@ -939,7 +1094,7 @@ func (a *app) list() {
 			// Listed rather than skipped: its timer will refuse it, and it
 			// stays until cancelled.
 			j.State, j.Error = "invalid", err.Error()
-		} else if j.State = a.sys.Output("is-active", job.UnitPrefix+"-"+id+".timer"); j.State == "" {
+		} else if j.State = a.sys.Armed(id); j.State == "" {
 			j.State = "gone"
 		}
 		if s.Mode == "keys" {

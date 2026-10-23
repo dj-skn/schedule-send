@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"schedule-send/internal/notice"
-	"schedule-send/internal/screen"
-	"schedule-send/internal/when"
+	"github.com/dj-skn/schedule-send/internal/notice"
+	"github.com/dj-skn/schedule-send/internal/screen"
+	"github.com/dj-skn/schedule-send/internal/when"
 )
 
 // Gauge is one usage gauge from an agent's footer.

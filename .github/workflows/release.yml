@@ -1,0 +1,130 @@
+name: Release
+
+# Make a release with tools/release, then push the commit and the tag it
+# prints. A tag such as v1.2.3-rc.1 makes a pre-release, which is never sent
+# to the Homebrew tap.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+      # The tag, the changelog and the plugin manifest must agree.
+      - id: check
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          tools/release-check "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          case "$version" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+  checks:
+    name: Checks
+    needs: version
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Publish
+    needs: [version, checks]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build the archives
+        run: tools/dist "$VERSION" dist
+      - name: Create the release
+        run: |
+          tools/release-check "$VERSION" > "$RUNNER_TEMP/notes.md"
+          if [ "${{ needs.version.outputs.prerelease }}" = true ]; then kind=--prerelease; else kind=--latest; fi
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag "$kind" \
+            --title "schedule-send $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
+
+  installed:
+    name: Install on ${{ matrix.runner }}
+    needs: [version, publish]
+    strategy:
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      # From the public repository, install.sh downloads the release the way
+      # a user's would. Any other repository's assets need a token, so they
+      # are fetched first and installed from disk.
+      - name: Install with install.sh
+        run: |
+          if [ "$GITHUB_REPOSITORY" = dj-skn/schedule-send ]; then
+            SCHEDULE_SEND_VERSION="$VERSION" sh install.sh
+          else
+            gh release download "$GITHUB_REF_NAME" --dir "$RUNNER_TEMP/assets"
+            SCHEDULE_SEND_DOWNLOAD="file://$RUNNER_TEMP/assets" sh install.sh
+          fi
+      - name: Check the installed version
+        run: test "$("$HOME/.local/bin/schedule-send" --version)" = "schedule-send $VERSION"
+
+  tap:
+    name: Bump the Homebrew tap
+    needs: [version, installed]
+    if: github.repository == 'dj-skn/schedule-send' && needs.version.outputs.prerelease == 'false'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check for the tap token
+        env:
+          TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::HOMEBREW_TAP_TOKEN is not set, so the formula was not bumped. The release itself is published."
+            exit 1
+          fi
+      - uses: mislav/bump-homebrew-formula-action@v4
+        with:
+          formula-name: schedule-send
+          formula-path: Formula/schedule-send.rb
+          homebrew-tap: dj-skn/homebrew-tap
+        env:
+          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+  brew:
+    name: Install from the tap
+    needs: [version, tap]
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      # The command a user types, from the tap the previous job just bumped.
+      - name: Install with Homebrew
+        run: |
+          brew update > /dev/null
+          brew install dj-skn/tap/schedule-send
+      - name: Check the installed version
+        run: test "$(schedule-send --version)" = "schedule-send $VERSION"
+      - name: brew test and audit
+        run: |
+          brew test dj-skn/tap/schedule-send
+          brew audit --strict --online dj-skn/tap/schedule-send

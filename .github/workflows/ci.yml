@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  # The release workflow runs these same checks before it publishes anything.
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # The gate and parity are zsh scripts; the stand-ins need jq.
+      - name: Install zsh and jq
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh jq
+
+      # The plugin test checks the manifest with the current Herdr release.
+      - name: Install Herdr
+        run: |
+          curl -fsSL https://herdr.dev/install.sh | HERDR_INSTALL_DIR="$RUNNER_TEMP/herdr" sh
+          echo "$RUNNER_TEMP/herdr" >> "$GITHUB_PATH"
+
+      - name: Gate
+        run: tools/check
+      - name: Parity with the zsh version
+        run: tools/parity
+      - name: Install script
+        run: tools/install-smoke
+      - name: Herdr plugin
+        run: tools/plugin-smoke
+
+  linux-arm:
+    name: Linux ARM
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install jq
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
+      - name: Tests
+        run: go test -count=1 ./...
+      # Builds both archives and installs the one for this machine, so the
+      # ARM binary is run, not only built.
+      - name: Install script
+        run: tools/install-smoke
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # A runner's Homebrew can be older than the tap rules users will meet.
+      - name: Update Homebrew and install GNU date and jq
+        run: |
+          brew update > /dev/null
+          brew --version
+          brew install coreutils jq
+      - name: Install Herdr
+        run: |
+          curl -fsSL https://herdr.dev/install.sh | HERDR_INSTALL_DIR="$RUNNER_TEMP/herdr" sh
+          echo "$RUNNER_TEMP/herdr" >> "$GITHUB_PATH"
+
+      - name: Vet
+        run: go vet ./...
+      - name: Tests
+        run: go test -count=1 ./...
+      - name: Herdr plugin
+        run: tools/plugin-smoke
+      # These two arm real jobs and install with Homebrew, on the runner only.
+      - name: Homebrew formula
+        run: tools/brew-smoke
+      - name: Real launchd jobs
+        run: tools/launchd-smoke
+        env:
+          LAUNCHD_SMOKE_RECORDS: "1"

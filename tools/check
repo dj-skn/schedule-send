@@ -9,11 +9,14 @@ if [ -n "$unformatted" ]; then
   echo "$unformatted" >&2
   exit 1
 fi
-go vet ./...
+# Each system's scheduler is its own file, so vet both; only one can run here.
+GOOS=linux go vet ./...
+GOOS=darwin go vet ./...
 go test -count=1 ./...
 zsh -n schedule-send.zsh
-for script in tools/build tools/install tools/main-checkout tools/setup-hooks tools/source-id tools/auto-install tools/test-hooks .githooks/*; do
+for script in tools/build tools/install tools/main-checkout tools/setup-hooks tools/source-id tools/auto-install tools/test-hooks tools/launchd-smoke tools/dist tools/install-smoke tools/brew-smoke tools/plugin-smoke tools/release tools/release-check tools/test-release tools/media plugin/find.sh plugin/schedule.sh plugin/prompt.sh plugin/setup.sh install.sh testdata/standin/launchctl .githooks/*; do
   sh -n "$script"
 done
 tools/test-hooks
+tools/test-release
 echo "check: ok"

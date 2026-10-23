@@ -187,3 +187,22 @@ func TestDateSubprocessTimeout(t *testing.T) {
 		t.Fatalf("date took %s; timeout should bound it", elapsed)
 	}
 }
+
+func TestResolveShortOffsets(t *testing.T) {
+	warsaw(t)
+	for in, d := range map[string]time.Duration{
+		"+30": 30 * time.Minute, "+30m": 30 * time.Minute, "+ 30": 30 * time.Minute,
+		"+45 m": 45 * time.Minute, "+2h": 2 * time.Hour, " +1h ": time.Hour,
+	} {
+		got, ok := Resolve(in, 0)
+		want := time.Now().Add(d).Unix()
+		if !ok || got < want-5 || got > want+5 {
+			t.Errorf("Resolve(%q) = %d, %v; want about %d", in, got, ok, want)
+		}
+	}
+	for _, in := range []string{"+30x", "30m", "+-5"} {
+		if _, ok := Resolve(in, 0); ok {
+			t.Errorf("Resolve(%q) was read", in)
+		}
+	}
+}

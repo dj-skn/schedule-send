@@ -9,11 +9,16 @@
 #   tools/parity NAME...    only these
 set -uo pipefail
 root=${0:A:h:h}
-ref_commit=${PARITY_REF:-zsh-baseline}
 work=$(mktemp -d)
 trap 'rm -rf $work' EXIT
 
-git -C $root show "${ref_commit}:schedule-send.zsh" > $work/ref.zsh || exit 1
+# The zsh script is kept as a file, so parity needs no tag or history.
+# PARITY_REF compares against the script at a Git revision instead.
+if [[ -n ${PARITY_REF:-} ]]; then
+  git -C $root show "${PARITY_REF}:schedule-send.zsh" > $work/ref.zsh || exit 1
+else
+  cp $root/testdata/baseline/schedule-send.zsh $work/ref.zsh || exit 1
+fi
 chmod +x $work/ref.zsh
 (cd $root && tools/build $work/go-bin $work/go-bin) || exit 1
 
@@ -47,18 +52,18 @@ typeset -A known=(
 # Behaviour SS-1 P2 changed: limits are read for every agent before the picker.
 known+=(
   ambiguous "the listing marks wB:p1 as limited, with its reset"
-  picker-retry "with --at the order is kept, and wB:p1 is marked as limited; on the terminal the dry run is styled too (P3)"
-  picker-default "without --at the limited wB:p1 ranks first, so Enter takes it, with its own notice; on the terminal the report, prompt and dry run are styled too (P3)"
-  picker-no-color "picker-default without colour, in the same styled layout (P3)"
-  picker-choose "row 2 is now wA:p1, whose own footer shows usage left, so there is no notice, no default, and the run ends at EOF; on the terminal the report and prompt are styled too (P3)"
+  picker-retry "with --at the order is kept, and wB:p1 is marked as limited; on the terminal the dry run is styled too (P3); P7.1 draws the picker on the rail"
+  picker-default "without --at the limited wB:p1 ranks first, so Enter takes it, with its own notice; on the terminal the report, prompt and dry run are styled too (P3); P7.1 asks on the rail, with the message question before the time"
+  picker-no-color "picker-default without colour, in the same styled layout (P3), on the rail since P7.1"
+  picker-choose "row 2 is now wA:p1, whose own footer shows usage left, so there is no notice, no default, and the run ends at EOF; on the terminal the report and prompt are styled too (P3); since P7.1 the answer after the pick is the message, Enter keeping resume"
   auto-per-account "wA:p1's own footer shows week:11%, a different account, so wB:p1's reset is not borrowed and --auto fails"
   auto-stale "at 16:16 the 4pm notice reads as over, so it proposes one minute from now rather than tomorrow's 4pm"
 )
 # Behaviour SS-1 P3 changed: output going to a terminal is styled.
 known+=(
-  confirm-typed "on the terminal the report, prompt, answers and dry run are styled"
-  confirm-no-notice "on the terminal the report, prompt, answer and dry run are styled"
-  confirm-eof "on the terminal the report and prompt are styled"
+  confirm-typed "on the terminal the report, prompt, answers and dry run are styled; since P7.1 the first answer, garbage, is the message, so the payload differs too"
+  confirm-no-notice "on the terminal the report, prompt, answer and dry run are styled; since P7.1 the first Enter keeps resume as the message rather than asking for the time again"
+  confirm-eof "on the terminal the report and prompt are styled; since P7.1 the run ends at the message question, on the rail"
 )
 # Behaviour SS-1 P4 changed: the usage text documents the new flags.
 known+=(
@@ -223,8 +228,10 @@ _case() {
     bin=$work/ref.zsh
     [[ $impl == go ]] && bin=$work/go-bin
     if [[ $how == tty ]]; then
+      # A run that waits for input that never comes is stopped, and fails
+      # the case even when it is a known difference.
       (cd $run && eval "$setup" || exit
-       printf "$input" | script -qe -E never \
+       printf "$input" | timeout 60 script -qe -E never \
         -c "${(j: :)${(q)bin}} ${(j: :)${(q)@}}" /dev/null >$run/stdout 2>$run/stderr
        print -r -- $? > $run/exit)
     else
@@ -235,6 +242,11 @@ _case() {
     if [[ ! -f $run/exit ]]; then
       fail=$(( fail + 1 ))
       print -r -- "SETUP $name: the setup failed"
+      return
+    fi
+    if [[ $how == tty && $(<$run/exit) == 124 ]]; then
+      fail=$(( fail + 1 ))
+      print -r -- "HUNG  $name: the $impl run was stopped after 60 s"
       return
     fi
     capture $name $work/out/$name/$impl

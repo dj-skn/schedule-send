@@ -1,0 +1,20 @@
+id = "dj-skn.schedule-send"
+name = "Schedule Send"
+version = "0.1.0"
+min_herdr_version = "0.9.3"
+description = "Schedule a message to the focused agent, or resume it when its usage limit resets."
+platforms = ["linux", "macos"]
+
+[[build]]
+command = ["sh", "plugin/setup.sh"]
+
+[[actions]]
+id = "schedule"
+title = "Schedule a send to this agent"
+command = ["sh", "plugin/schedule.sh"]
+
+[[panes]]
+id = "prompt"
+title = "Schedule Send"
+placement = "overlay"
+command = ["sh", "plugin/prompt.sh"]

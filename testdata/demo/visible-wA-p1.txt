@@ -1,0 +1,21 @@
+● The ledger client now writes every new invoice, and the old table is kept
+  as a read-only fallback until the backfill finishes. Next I'll run the
+  invoice tests and then the backfill against the staging copy.
+
+● Bash(npm test -- invoices)
+  ⎿  PASS  src/invoices/writer.test.ts (38 tests)
+     PASS  src/invoices/ledger-client.test.ts (21 tests)
+     PASS  src/invoices/fallback.test.ts (9 tests)
+
+● Update(src/invoices/backfill.ts)
+  ⎿  Updated src/invoices/backfill.ts with 24 additions and 7 removals
+
+  ⎿  You've hit your session limit · resets 4pm
+     /upgrade to increase your usage limit.
+
+✻ Worked for 46m 12s
+
+──────────────────────────────────────────────────────────────────────────────
+❯ 
+──────────────────────────────────────────────────────────────────────────────
+  ? for shortcuts

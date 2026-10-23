@@ -66,6 +66,48 @@ func TestResolveInstallationIdentity(t *testing.T) {
 	}
 }
 
+func TestResolveUnderTheUsersHome(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed := filepath.Join(home, ".local/bin/schedule-send")
+	elsewhere := filepath.Join(home, "Downloads/schedule-send")
+	for _, path := range []string{installed, elsewhere} {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("binary"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recorded := base64.StdEncoding.EncodeToString([]byte("~/.local/bin/schedule-send"))
+	t.Setenv("HOME", home)
+	if got, err := resolve(recorded, installed); err != nil || got != installed {
+		t.Fatalf("installed under home: got %q, %v; want %q", got, err, installed)
+	}
+	if _, err := resolve(recorded, elsewhere); err == nil || !strings.Contains(err.Error(), "outside") {
+		t.Fatalf("a copy elsewhere under home: %v", err)
+	}
+	other := t.TempDir()
+	t.Setenv("HOME", other)
+	if _, err := resolve(recorded, installed); err == nil || !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("another user's home: %v", err)
+	}
+	for name, home := range map[string]string{"unset": "", "relative": "home", "with an equals sign": other + "/a=b"} {
+		t.Setenv("HOME", home)
+		if _, err := resolve(recorded, installed); err == nil {
+			t.Errorf("accepted a home that is %s", name)
+		}
+	}
+	for _, bad := range []string{"~/", "~/../bin/x", "~/a//b", "~/a\nb", "~/a=b", "~user/bin/x"} {
+		t.Setenv("HOME", filepath.Dir(installed))
+		if _, err := resolve(base64.StdEncoding.EncodeToString([]byte(bad)), installed); err == nil {
+			t.Errorf("accepted recorded path %q", bad)
+		}
+	}
+}
+
 func TestBuildHelperEncodesFinalPath(t *testing.T) {
 	realGo, err := exec.LookPath("go")
 	if err != nil {
@@ -91,18 +133,35 @@ func TestBuildHelperEncodesFinalPath(t *testing.T) {
 		{"relative output", "relative output", dir, filepath.Join(dir, "relative output")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cmd := exec.Command(helper, tc.output, final)
+			cmd := exec.Command(helper, tc.output, final, "9.9.9-rc.1")
 			cmd.Dir = tc.cwd
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				t.Fatalf("build helper: %v: %s", err, out)
 			}
 			args := strings.Split(strings.TrimSpace(string(out)), "\n")
-			want := []string{"build", "-trimpath", "-ldflags", "-X schedule-send/internal/installpath.Encoded=" + base64.StdEncoding.EncodeToString([]byte(final)), "-o", tc.want, "./cmd/schedule-send"}
+			want := []string{"build", "-trimpath", "-ldflags", "-X github.com/dj-skn/schedule-send/internal/installpath.Encoded=" + base64.StdEncoding.EncodeToString([]byte(final)) + " -X github.com/dj-skn/schedule-send/internal/cli.Version=9.9.9-rc.1", "-o", tc.want, "./cmd/schedule-send"}
 			if strings.Join(args, "\n") != strings.Join(want, "\n") {
 				t.Fatalf("arguments %q, want %q", args, want)
 			}
 		})
+	}
+	// A release records a path under whichever home it is installed in.
+	out, err := exec.Command(helper, filepath.Join(dir, "output"), "~/.local/bin/schedule-send", "1.0.0").CombinedOutput()
+	if want := base64.StdEncoding.EncodeToString([]byte("~/.local/bin/schedule-send")); err != nil || !strings.Contains(string(out), "Encoded="+want+" ") {
+		t.Fatalf("home-relative path: %v: %s", err, out)
+	}
+	for _, invalid := range []string{"~/", "~/../x", "~/a//b", "~/a=b"} {
+		out, err := exec.Command(helper, filepath.Join(dir, "output"), invalid).CombinedOutput()
+		if err == nil || strings.Contains(string(out), "-trimpath") {
+			t.Fatalf("accepted %q: %s", invalid, out)
+		}
+	}
+	for _, version := range []string{"1.0 0", "1.0;x", "$(id)"} {
+		out, err := exec.Command(helper, filepath.Join(dir, "output"), final, version).CombinedOutput()
+		if err == nil || strings.Contains(string(out), "-trimpath") {
+			t.Fatalf("accepted version %q: %s", version, out)
+		}
 	}
 	for _, invalid := range []string{
 		"relative", dir + "/bad\npath", dir + "/bad\tpath", dir + "/bad\x7fpath",

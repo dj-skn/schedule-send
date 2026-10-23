@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"schedule-send/internal/screen"
+	"github.com/dj-skn/schedule-send/internal/screen"
 )
 
 // Transcript is a pane's recent output, line by line, with each line also

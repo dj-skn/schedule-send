@@ -1,0 +1,43 @@
+#!/bin/sh
+# Prepare a release: give the changelog's Unreleased entries a version
+# heading dated today, set the Herdr plugin's version, commit, and make the
+# tag. Nothing is pushed; the last line says how to publish it.
+#
+#   tools/release 1.2.3        (or 1.2.3-rc.1 for a pre-release)
+set -eu
+[ "$#" -eq 1 ] || { echo 'Usage: tools/release VERSION' >&2; exit 1; }
+version="${1#v}"
+tag="v$version"
+cd "$(dirname "$0")/.."
+die() {
+  echo "release: $*" >&2
+  exit 1
+}
+
+printf '%s\n' "$version" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?' ||
+  die "$version is not a version such as 1.2.3 or 1.2.3-rc.1."
+[ -z "$(git status --porcelain)" ] || die "the working tree has changes; commit or stash them first."
+branch="$(git symbolic-ref --quiet --short HEAD)" || die "HEAD is detached; check out the branch to release from."
+if git rev-parse --quiet --verify "refs/tags/$tag" > /dev/null; then
+  die "tag $tag already exists."
+fi
+grep -qx '## \[Unreleased\]' CHANGELOG.md || die "CHANGELOG.md has no \"## [Unreleased]\" section."
+awk '/^## \[/ { if (on) exit; if ($0 == "## [Unreleased]") on = 1; next } on && NF { found = 1 } END { exit !found }' CHANGELOG.md ||
+  die "nothing is listed under Unreleased in CHANGELOG.md."
+
+# Undo the edits if anything below fails before the commit.
+trap 'git checkout -- CHANGELOG.md herdr-plugin.toml 2> /dev/null || true' EXIT
+work="$(mktemp)"
+awk -v heading="## [$version] - $(date -u +%Y-%m-%d)" \
+  '{ print } $0 == "## [Unreleased]" && !done { print ""; print heading; done = 1 }' CHANGELOG.md > "$work"
+cat "$work" > CHANGELOG.md
+awk -v v="$version" '/^version = "/ && !done { print "version = \"" v "\""; done = 1; next } { print }' herdr-plugin.toml > "$work"
+cat "$work" > herdr-plugin.toml
+rm -f "$work"
+tools/release-check "$version" > /dev/null
+
+git commit -q -m "chore: release $tag" -- CHANGELOG.md herdr-plugin.toml
+trap - EXIT
+git tag -a "$tag" -m "schedule-send $version"
+echo "Committed and tagged $tag on $branch. Publish it with:"
+echo "  git push --atomic origin $branch $tag"

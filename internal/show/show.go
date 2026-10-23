@@ -12,17 +12,17 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"schedule-send/internal/limit"
-	"schedule-send/internal/target"
-	"schedule-send/internal/term"
-	"schedule-send/internal/when"
+	"github.com/dj-skn/schedule-send/internal/limit"
+	"github.com/dj-skn/schedule-send/internal/target"
+	"github.com/dj-skn/schedule-send/internal/term"
+	"github.com/dj-skn/schedule-send/internal/when"
 )
 
 // Scheduled is one send, as armed or as a dry run would arm it.
 type Scheduled struct {
 	DryRun bool
 	ID     string
-	Unit   string // the timer's and service's name, without the suffix
+	Unit   string // the timer's name as the platform's scheduler shows it
 
 	// The target, as target.Row has it.
 	Kind, Pane, Agent, Status, Cwd string
@@ -61,7 +61,7 @@ func (s Scheduled) Plain(w io.Writer) {
 		fmt.Fprintf(w, "mode=%s\n", s.Mode)
 		fmt.Fprintf(w, "payload=%s\n", s.Payload)
 		fmt.Fprintf(w, "id=%s\n", s.ID)
-		fmt.Fprintf(w, "unit=%s.timer\n", s.Unit)
+		fmt.Fprintf(w, "unit=%s\n", s.Unit)
 		fmt.Fprintf(w, "persistent=%d\n", persistent)
 		fmt.Fprintf(w, "if_busy=%s\n", s.IfBusy)
 		fmt.Fprintf(w, "recover=%s\n", s.Recover)
@@ -71,7 +71,7 @@ func (s Scheduled) Plain(w io.Writer) {
 		return
 	}
 	fmt.Fprintf(w, "id=%s\n", s.ID)
-	fmt.Fprintf(w, "unit=%s.timer\n", s.Unit)
+	fmt.Fprintf(w, "unit=%s\n", s.Unit)
 	fmt.Fprintf(w, "target=%s\n", tgt)
 	fmt.Fprintf(w, "at=%s\n", s.At)
 	fmt.Fprintf(w, "delay_seconds=%d\n", s.Delay)
@@ -118,6 +118,7 @@ func (s Scheduled) Styled(w io.Writer, c term.Colors, now int64) {
 // send time is confirmed on the terminal, or on stderr under --auto.
 type Report struct {
 	Kind, Agent, Pane string       // the target
+	Status, Cwd       string       // the target's, as target.Row has them
 	Summary           string       // target.Summary of the target
 	Limit             limit.Status // the target's; None for a plain pane
 	Message, Keys     string       // what is sent: the keys when set, else the message
@@ -349,6 +350,7 @@ func (p palette) dim(s string) span    { return p.paint(p.Dim, s) }
 func (p palette) yellow(s string) span { return p.paint(p.Yellow, s) }
 func (p palette) green(s string) span  { return p.paint(p.Green, s) }
 func (p palette) red(s string) span    { return p.paint(p.Red, s) }
+func (p palette) cyan(s string) span   { return p.paint(p.Cyan, s) }
 
 // row is a line under a headline: a dim label, then value, then a dim second
 // part, lined up with the rows around it, when there is one.
@@ -387,12 +389,8 @@ func (p palette) sent(message, keys string) span {
 // JSON writes s as one object. st is the target's usage limit; a None state is
 // left out. note is the picker's short description of it.
 func (s Scheduled) JSON(w io.Writer, st limit.Status, note string) {
-	unit := s.Unit
-	if !strings.HasSuffix(unit, ".timer") {
-		unit += ".timer"
-	}
 	out := scheduledJSON{
-		DryRun: s.DryRun, ID: s.ID, Unit: unit,
+		DryRun: s.DryRun, ID: s.ID, Unit: s.Unit,
 		At: s.At, RunAt: s.RunAt, Delay: s.Delay,
 		Mode: s.Mode, Payload: s.Payload, Persistent: s.Persistent,
 		IfBusy: s.IfBusy, Recover: s.Recover, Grace: s.Grace,

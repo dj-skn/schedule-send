@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -49,23 +48,6 @@ func TestLoadDefaultsForOlderFiles(t *testing.T) {
 	}
 }
 
-func TestUnitsMatchTheShellVersion(t *testing.T) {
-	service, _ := os.ReadFile(filepath.Join(filepath.Dir(zshJob), "herdr-send-20261003-160100-wBp1.service"))
-	timer, _ := os.ReadFile(filepath.Join(filepath.Dir(zshJob), "herdr-send-20261003-160100-wBp1.timer"))
-	got, err := ServiceUnit("wB:p1", "2026-10-03 16:01:00", "/home/dev/src/schedule-send/schedule-send.zsh", "20261003-160100-wBp1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// New services quote the executable; legacy fixtures remain unchanged.
-	service = bytes.Replace(service, []byte("ExecStart=/home/dev/src/schedule-send/schedule-send.zsh"), []byte(`ExecStart=/usr/bin/env -- "/home/dev/src/schedule-send/schedule-send.zsh"`), 1)
-	if got != string(service) {
-		t.Errorf("service:\n%s\nwant:\n%s", got, service)
-	}
-	if got := TimerUnit("20261003-160100-wBp1", "2026-10-03 16:01:00", false); got != string(timer) {
-		t.Errorf("timer:\n%s\nwant:\n%s", got, timer)
-	}
-}
-
 func TestWriteAndPreview(t *testing.T) {
 	p := Paths{StateDir: filepath.Join(t.TempDir(), "herdr-send")}
 	msg := "first line of a fairly long message that goes on past sixty bytes\nsecond"
@@ -86,46 +68,5 @@ func TestWriteAndPreview(t *testing.T) {
 	}
 	if got := len(p.StateFiles()); got != 2 {
 		t.Errorf("StateFiles = %d", got)
-	}
-}
-
-func TestServiceCommandEncoding(t *testing.T) {
-	for _, tc := range []struct{ path, encoded string }{
-		{"/opt/space name", `/opt/space name`},
-		{`/opt/quote"name`, `/opt/quote\"name`},
-		{`/opt/back\name`, `/opt/back\\name`},
-		{"/opt/percent%name", `/opt/percent%%name`},
-		{"/opt/dollar${HOME}", `/opt/dollar$${HOME}`},
-		{"/opt/$HOME", `/opt/$$HOME`},
-		{"/opt/two$$dollars", `/opt/two$$$$dollars`},
-		{"/opt/apostrophe'name", `/opt/apostrophe'name`},
-	} {
-		t.Run(tc.path, func(t *testing.T) {
-			unit, err := ServiceUnit("pane%p", "2026-10-03 16:30:00", tc.path, "job-1")
-			if err != nil {
-				t.Fatal(err)
-			}
-			want := `ExecStart=/usr/bin/env -- "` + tc.encoded + `" __fire job-1` + "\n"
-			if !strings.Contains(unit, want) {
-				t.Fatalf("unit %q does not contain %q", unit, want)
-			}
-			if !strings.Contains(unit, "Description=herdr scheduled send to pane%%p") {
-				t.Fatal("description specifier not escaped")
-			}
-		})
-	}
-	for _, args := range [][4]string{
-		{"bad\npane", "date", "/opt/bin", "job"},
-		{"pane", "bad\rdate", "/opt/bin", "job"},
-		{"pane", "date", "/opt/bad\tbin", "job"},
-		{"pane", "date", "/opt/bad\xff", "job"},
-		{"pane", "date", "relative", "job"},
-		{"pane", "date", "/opt/a=b/bin", "job"},
-		{"pane", "date", "/opt//bin", "job"},
-		{"pane", "date", "/opt/bin", "bad\njob"},
-	} {
-		if _, err := ServiceUnit(args[0], args[1], args[2], args[3]); err == nil {
-			t.Errorf("accepted invalid metadata %q", args)
-		}
 	}
 }

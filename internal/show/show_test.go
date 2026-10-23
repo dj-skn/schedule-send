@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"schedule-send/internal/limit"
-	"schedule-send/internal/term"
-	"schedule-send/internal/when"
+	"github.com/dj-skn/schedule-send/internal/limit"
+	"github.com/dj-skn/schedule-send/internal/term"
+	"github.com/dj-skn/schedule-send/internal/when"
 )
 
 func warsaw(t *testing.T) *time.Location {
@@ -31,13 +31,13 @@ const (
 )
 
 // markers stand in for the colour codes, so a test can see where each goes.
-var markers = term.Colors{Reset: "</>", Dim: "<dim>", Yellow: "<y>", Green: "<g>", Red: "<r>"}
+var markers = term.Colors{Reset: "</>", Dim: "<dim>", Yellow: "<y>", Green: "<g>", Red: "<r>", Cyan: "<c>"}
 
 // Sends as tools/parity arms them, run at 15:22: auto-own-notice, arm-text,
 // arm-keys and enter-only.
 var (
 	resume = Scheduled{
-		ID: "20261003-160100-wBp1", Unit: "herdr-send-20261003-160100-wBp1",
+		ID: "20261003-160100-wBp1", Unit: "herdr-send-20261003-160100-wBp1.timer",
 		Kind: "agent", Pane: "wB:p1", Agent: "claude", Status: "idle", Cwd: "/home/dev/projects/shop-backend",
 		At: "2026-10-03 16:01:00", RunAt: 1791036060, Delay: 2340,
 		Mode: "text", Payload: "resume", Message: "resume",
@@ -46,7 +46,7 @@ var (
 		WouldRun:  "/opt/schedule-send __fire 20261003-160100-wBp1",
 	}
 	twoLines = Scheduled{
-		ID: "20261003-163000-wBp3", Unit: "herdr-send-20261003-163000-wBp3",
+		ID: "20261003-163000-wBp3", Unit: "herdr-send-20261003-163000-wBp3.timer",
 		Kind: "agent", Pane: "wB:p3", Agent: "codex", Status: "idle", Cwd: "/home/dev/projects/shop-backend",
 		At: "2026-10-03 16:30:00", RunAt: 1791037800, Delay: 4080,
 		Mode: "text", Payload: "two", Message: "two\nlines",
@@ -55,7 +55,7 @@ var (
 		WouldRun:  "/opt/schedule-send __fire 20261003-163000-wBp3",
 	}
 	paneKeys = Scheduled{
-		ID: "20261004-090000-wBp5", Unit: "herdr-send-20261004-090000-wBp5",
+		ID: "20261004-090000-wBp5", Unit: "herdr-send-20261004-090000-wBp5.timer",
 		Kind: "pane", Pane: "wB:p5", Agent: "-", Status: "-", Cwd: "/home/dev/projects/shop-backend",
 		At: "2026-10-04 09:00:00", RunAt: 1791097200, Delay: 63480,
 		Mode: "keys", Payload: "keys: ctrl+c", Keys: "ctrl+c",
@@ -64,7 +64,7 @@ var (
 		WouldRun:  "/opt/schedule-send __fire 20261004-090000-wBp5",
 	}
 	enterOnly = Scheduled{
-		DryRun: true, ID: "20261004-090000-wBp3", Unit: "herdr-send-20261004-090000-wBp3",
+		DryRun: true, ID: "20261004-090000-wBp3", Unit: "herdr-send-20261004-090000-wBp3.timer",
 		Kind: "agent", Pane: "wB:p3", Agent: "codex", Status: "idle", Cwd: "/home/dev/projects/shop-backend",
 		At: "2026-10-04 09:00:00", RunAt: 1791097200, Delay: 63480,
 		Mode: "keys", Payload: "keys: enter", Keys: "enter",
@@ -199,8 +199,9 @@ func reportCases() []reportCase {
 	over.State = limit.Over
 	report := func(st limit.Status, now int64) Report {
 		return Report{
-			Kind: "agent", Agent: "claude", Pane: "wB:p1", Summary: "claude in wB:p1 (idle, ~/projects/shop-backend)",
-			Limit: st, Message: "resume", Margin: 60, Now: now,
+			Kind: "agent", Agent: "claude", Pane: "wB:p1", Status: "idle", Cwd: "/home/dev/projects/shop-backend",
+			Summary: "claude in wB:p1 (idle, ~/projects/shop-backend)",
+			Limit:   st, Message: "resume", Margin: 60, Now: now,
 		}
 	}
 	with := func(r Report, edit func(*Report)) Report { edit(&r); return r }
@@ -208,7 +209,7 @@ func reportCases() []reportCase {
 	return []reportCase{
 		{"own", report(weekly, at1522)},
 		{"account", with(report(account, at1522), func(r *Report) {
-			r.Pane, r.Summary = "wA:p1", "claude in wA:p1 (idle, ~/projects/analytics)"
+			r.Pane, r.Cwd, r.Summary = "wA:p1", "/home/dev/projects/analytics", "claude in wA:p1 (idle, ~/projects/analytics)"
 		})},
 		{"over with a reset", report(over, at161640)},
 		{"over without one", report(limit.Status{State: limit.Over, Window: "session", Quote: "You've hit your session limit", Source: "wB:p1"}, at161640)},
@@ -218,11 +219,13 @@ func reportCases() []reportCase {
 		{"no readable reset", with(report(limit.Status{State: limit.Limited, Quote: "You've hit your limit · resets soon", Source: "wB:p1"}, at1522),
 			func(r *Report) { r.Message = "carry on\nwith the plan" })},
 		{"none", Report{
-			Kind: "agent", Agent: "codex", Pane: "wB:p3", Summary: "codex in wB:p3 (idle, ~/projects/shop-backend)",
+			Kind: "agent", Agent: "codex", Pane: "wB:p3", Status: "idle", Cwd: "/home/dev/projects/shop-backend",
+			Summary: "codex in wB:p3 (idle, ~/projects/shop-backend)",
 			Message: "resume", Margin: 60, Now: at1522,
 		}},
 		{"none, a plain pane", Report{
-			Kind: "pane", Agent: "-", Pane: "wB:p5", Summary: "pane wB:p5 (~/projects/shop-backend)",
+			Kind: "pane", Agent: "-", Pane: "wB:p5", Status: "-", Cwd: "/home/dev/projects/shop-backend",
+			Summary: "pane wB:p5 (~/projects/shop-backend)",
 			Message: "ls", Margin: 60, Now: at1522,
 		}},
 	}

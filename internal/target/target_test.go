@@ -1,10 +1,12 @@
 package target
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
-	"schedule-send/internal/term"
+	"github.com/dj-skn/schedule-send/internal/term"
 )
 
 var rows = []Row{
@@ -24,6 +26,14 @@ func panes(rs []Row) string {
 	return strings.Join(ids, " ")
 }
 
+// plainHome reports whether /home is a directory of its own. On macOS it is a
+// symlink, so a /home path normalises to somewhere else and the cases that
+// match one against these rows do not apply.
+func plainHome() bool {
+	p, err := filepath.EvalSymlinks("/home")
+	return err != nil || p == "/home"
+}
+
 func TestFilter(t *testing.T) {
 	t.Setenv("HOME", "/home/dev")
 	cases := []struct {
@@ -41,6 +51,9 @@ func TestFilter(t *testing.T) {
 		{"cwd parent", Filter{Cwd: "/home/dev/src"}, "wE:p1"},
 	}
 	for _, c := range cases {
+		if c.f.Cwd != "" && !plainHome() {
+			continue
+		}
 		if got := panes(c.f.Apply(rows)); got != c.want {
 			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
 		}
@@ -132,7 +145,34 @@ func TestSummary(t *testing.T) {
 	}
 }
 
+func TestNormPathResolvesWhatExists(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "real/project"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "real"), filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", filepath.Join(root, "link"))
+	for in, want := range map[string]string{
+		"~":                                   root + "/real",
+		"~/project/":                          root + "/real/project",
+		root + "/link/./project":              root + "/real/project",
+		root + "/link/project/not/there/../x": root + "/real/project/not/x",
+	} {
+		if got := NormPath(in); got != want {
+			t.Errorf("NormPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestNormPath(t *testing.T) {
+	if !plainHome() {
+		t.Skip("/home is a symlink here")
+	}
 	t.Setenv("HOME", "/home/dev")
 	for in, want := range map[string]string{
 		"~/projects/shop-backend/":       "/home/dev/projects/shop-backend",

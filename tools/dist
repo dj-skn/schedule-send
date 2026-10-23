@@ -1,0 +1,24 @@
+#!/bin/sh
+# Build the release archives: a static Linux binary for each architecture,
+# recording ~/.local/bin/schedule-send, where install.sh puts it, and a
+# checksum file. macOS has no archive; Homebrew builds there. Needs GNU tar.
+set -eu
+[ "$#" -eq 1 ] || [ "$#" -eq 2 ] || { echo 'Usage: tools/dist VERSION [DIRECTORY]' >&2; exit 1; }
+version="${1#v}"
+case "${2:-dist}" in /*) out=${2:-dist} ;; *) out=$PWD/${2:-dist} ;; esac
+cd "$(dirname "$0")/.."
+mkdir -p "$out"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+for arch in amd64 arm64; do
+  mkdir "$work/$arch"
+  CGO_ENABLED=0 GOOS=linux GOARCH=$arch SCHEDULE_SEND_LDFLAGS='-s -w' \
+    tools/build "$work/$arch/schedule-send" '~/.local/bin/schedule-send' "$version"
+  cp LICENSE "$work/$arch/"
+  # Fixed names, owners and times, so the same source gives the same archive.
+  tar -C "$work/$arch" --sort=name --owner=0 --group=0 --numeric-owner --mode=u=rwX,go=rX \
+    --mtime='2020-01-01 00:00:00Z' \
+    -cf - LICENSE schedule-send | gzip -n > "$out/schedule-send-linux-$arch.tar.gz"
+done
+(cd "$out" && sha256sum schedule-send-linux-amd64.tar.gz schedule-send-linux-arm64.tar.gz > checksums.txt)
+echo "dist: $version in $out"

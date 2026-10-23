@@ -8,16 +8,6 @@ import (
 	"testing"
 )
 
-func openPty(t *testing.T) *os.File {
-	t.Helper()
-	f, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
-	if err != nil {
-		t.Skip("no pseudo-terminal:", err)
-	}
-	t.Cleanup(func() { f.Close() })
-	return f
-}
-
 func TestIsTerminal(t *testing.T) {
 	null, err := os.Open(os.DevNull)
 	if err != nil {

@@ -12,8 +12,11 @@ import (
 	"unicode/utf8"
 )
 
-// Encoded is set by tools/build with the final installation path. Plain builds
-// leave it empty and can inspect jobs or preview schedules, but cannot arm them.
+// Encoded is set by tools/build with the final installation path. An
+// installer that knows the path records it whole. A release binary, built
+// before anyone installs it, records one beginning "~/", which is the same
+// place under every user's home. Plain builds leave it empty and can inspect
+// jobs or preview schedules, but cannot arm them.
 var Encoded string
 
 // Resolve checks that this process runs at the recorded installation location.
@@ -33,7 +36,10 @@ func resolve(encoded, current string) (string, error) {
 	if err != nil {
 		return "", errors.New("invalid installation metadata")
 	}
-	path := string(data)
+	path, err := expand(string(data))
+	if err != nil {
+		return "", err
+	}
 	if err := Check(path); err != nil {
 		return "", err
 	}
@@ -62,6 +68,35 @@ func resolve(encoded, current string) (string, error) {
 		return "", errors.New("this executable is outside its recorded installation location")
 	}
 	return path, nil
+}
+
+// expand turns a recorded path that begins "~/" into this user's. The home
+// directory is part of the result, so Check applies to it as well.
+func expand(path string) (string, error) {
+	rest, ok := strings.CutPrefix(path, "~/")
+	if !ok {
+		return path, nil
+	}
+	if err := CheckRecorded(path); err != nil {
+		return "", err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || !filepath.IsAbs(home) {
+		return "", errors.New("installation path is under a home directory that is not known")
+	}
+	return filepath.Join(home, rest), nil
+}
+
+// CheckRecorded is Check for a path as tools/build is given it, which may
+// begin "~/". What follows must be a clean path that stays under the home.
+func CheckRecorded(path string) error {
+	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+		if rest == "" {
+			return errors.New("installation path names the home directory itself")
+		}
+		return Check("/" + rest)
+	}
+	return Check(path)
 }
 
 // Check is the one set of rules for a path that tools/build records and a

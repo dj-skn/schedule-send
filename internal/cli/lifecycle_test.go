@@ -1,3 +1,5 @@
+//go:build linux
+
 package cli
 
 import (
@@ -10,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"schedule-send/internal/job"
+	"github.com/dj-skn/schedule-send/internal/job"
 )
 
 func replaceSystemctl(t *testing.T, h *harness, fail string) {
