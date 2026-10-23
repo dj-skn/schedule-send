@@ -12,9 +12,11 @@ after a rehearsal on the private repository. P7 is complete in `ss-3`,
 fast-forwarded from `ss-3-p7` after the owner's Mac run; its plugin
 screenshot moved to P7.1. P7.1, which reworks the overlay's prompt, is
 complete in `ss-3`, fast-forwarded from `ss-3-p7.1` after a Linux run on the
-owner's homelab server and their live check in Herdr. P8 is not started.
-`ss-3-p3` to `ss-3-p7.1` were pushed to the private repository for those runs,
-on the owner's word; nothing else is pushed, merged into `main`, installed, or published.
+owner's homelab server and their live check in Herdr. P8 is in progress: its
+record is on `ss-3`, and on 2026-10-23 it revised the story's decisions on the
+history and the earlier plans. `ss-3-p3` to `ss-3-p7.1` were pushed to the
+private repository for those runs, on the owner's word; nothing else is
+pushed, merged into `main`, installed, or published.
 
 The owner settled the story's decisions on 2026-10-12 and asked for this plan.
 That is not a build instruction: every phase still gets its own source check,
@@ -33,7 +35,7 @@ command on Linux or macOS:
 - A curl script on Linux, which downloads a checked release binary.
 - A Herdr plugin, listed in Herdr's plugin index, that reuses that script.
 
-The repository carries nothing private, starts from a fresh history, has
+The repository carries nothing private, keeps its history cleaned, has
 numbered releases, runs its checks on every push, and has a README that shows
 what the tool does before it explains it.
 
@@ -74,7 +76,8 @@ Checked read-only against `main` on 2026-10-12:
    starts from one commit. The existing private repository keeps its name and
    its full history as the archive; it is not renamed or deleted. The new
    repository starts private and turns public in P8. The local main checkout
-   stays at its path and switches to the new repository.
+   stays at its path and switches to the new repository. *Revised on
+   2026-10-23 in P8: the new repository carries the full history, cleaned.*
 2. **Name.** `schedule-send` everywhere a user sees a name: repository, formula,
    command, plugin, and the module path `github.com/dj-skn/schedule-send`.
    Timer names and the state directory keep `herdr-send`, as the compatibility
@@ -82,6 +85,8 @@ Checked read-only against `main` on 2026-10-12:
 3. **Licence.** MIT.
 4. **Versions.** Semantic versions tagged `vX.Y.Z`, starting at `v0.1.0`.
 5. **Earlier plans.** The SS-1 and SS-2 plan documents are not published.
+   *Revised on 2026-10-23 in P8: they stay in the cleaned history, and the
+   tree still leaves them out.*
 6. **macOS before publishing.** macOS support is part of this story. Mac users
    install with Homebrew; Linux users with the curl script. The same formula
    also serves Homebrew on Linux.
@@ -122,7 +127,7 @@ Stated in the walkthrough; the owner did not object.
 | P6 | CI and release automation | `ss-3-p6` | complete in ss-3 |
 | P7 | README and visuals | `ss-3-p7` | complete in ss-3 |
 | P7.1 | The overlay's prompt, and the plugin screenshot | `ss-3-p7.1` | complete in ss-3 |
-| P8 | Publication | `ss-3-p8` | not started |
+| P8 | Publication | `ss-3-p8` | in progress |
 
 Each phase starts with a fresh source check and an owner walkthrough. Build
 only the approved phase on its phase branch. Every implementation step has a
@@ -1444,16 +1449,120 @@ list is kept off the Mac; it is due before the tree is published.
 
 ### P8 — Publication
 
-Each outward step waits for the owner's word: merge `ss-3` into `main`; create
-the private `dj-skn/schedule-send`; push one commit built from that tree;
-switch the local checkout to it; set the description, homepage, and topics
-(`herdr` and `herdr-plugin` among them); turn on private vulnerability
-reporting, which the security note links to; add the tap token; confirm CI
-passes; make the repository public; tag `v0.1.0`.
+Publish the repository with its history, cleaned of everything private, and
+release `v0.1.0`. The walkthrough on 2026-10-23 changed the story's first
+decision: the owner wants the history public, so the work behind the project
+can be seen.
 
-→ verify: the badges are green; Homebrew installs on a Mac and in a Linux
-container; the curl script installs on a clean Linux machine; the plugin
-installs from GitHub and appears in Herdr's index.
+#### Code check — 2026-10-23
+
+- The private-term scan, due since P7.1, found nothing at the tip of `ss-3`:
+  69 terms, including the owner's private repository names, gave zero hits in
+  124 tracked files. Thirteen secret patterns matched only the invented
+  request and session identifiers in the test data; gitleaks 8.30.1 in a
+  container found no leaks in 669 KB; the only addresses are four at
+  `example.invalid`. The plugin screenshot shows a pane name, `~/Downloads`, a
+  time, and one-letter workspace labels, with no title bar, pointer, or home
+  path, and its metadata holds only the resolution, the size, and the word
+  "Screenshot". Both GIFs show demo data only. One private repository created
+  after P1 was missing from the list; it had no hits and is now on it.
+- `tools/check` passes at the tip of `ss-3` on Linux.
+- The history is 146 commits. 145 carry a personal address as author and
+  committer; one carries GitHub's noreply address. 87 of its 472 file
+  versions hold private names (658 lines), 229 lines hold the developer's home
+  directory, and 9 versions of the test screens, listings, and job files are
+  the original captures. No commit message holds a private term, and 16 end
+  with a link to a private Claude Code session. gitleaks found no leaks in the
+  history.
+- P1's name map, which includes the home directory, removes every private term
+  outside the captured files except three, in old examples in the README, the
+  usage text, and the zsh script. The captured files can take P1's invented
+  versions, which kept every line the tests read.
+- The owner's global Git configuration sets that personal address, so a new
+  commit in this checkout would have carried it. The checkout now sets
+  GitHub's noreply address itself.
+- The tap's bump action edits an existing formula and fails when nothing
+  changes. The template points at the `v0.1.0` archive with a zeroed checksum,
+  so placed in the tap unchanged, the first release fills in only the checksum.
+- GitHub documents private vulnerability reporting for public repositories, so
+  it is turned on after the repository goes public.
+- A token stored as a secret cannot be read back, so the tap token of the
+  owner's other project cannot be reused.
+- No timer is armed on the development machine.
+
+#### Decisions settled 2026-10-23
+
+The owner chose after the walkthrough and a talk-through, and instructed build.
+
+1. **History** (revises story decision 1). The full history is published,
+   cleaned: every author and committer becomes GitHub's noreply address for
+   the owner's account; the name map, extended for the three old examples, is
+   applied to every file version; the captured files take P1's invented
+   versions; and the session links are removed from the commit messages. The
+   new repository is `dj-skn/schedule-send`; the private repository keeps its
+   name and its uncleaned history as the archive.
+2. **Earlier plans** (revises story decision 5). The SS-1 and SS-2 plans stay
+   in the history, cleaned like everything else; the tree still leaves them
+   out.
+3. **Name.** Story decision 2 stands: `schedule-send` everywhere, the
+   repository included, so the plugin installs with
+   `herdr plugin install dj-skn/schedule-send`, which takes a repository name.
+4. **Tap token.** A fine-grained token that can write only to the tap's
+   contents, valid for a year. The owner makes it and adds it as the
+   `HOMEBREW_TAP_TOKEN` secret on GitHub's website, so it never passes through
+   an agent session.
+5. **Outward steps.** The agent runs each with `gh` after the owner's word for
+   that step.
+
+Assumptions the owner did not object to: the `zsh-baseline` tag is kept,
+cleaned with the rest; the history-rewrite tool runs from a throwaway
+environment; after the switch, the old worktrees and branches leave this
+checkout, since the archive holds them; the description comes from the
+formula, with no homepage, and the topics are `herdr`, `herdr-plugin`, `cli`,
+`go`, `systemd`, and `launchd`; the formula goes into the tap just before the
+release.
+
+#### Steps
+
+1. This record, on `ss-3`.
+   → verify: zero private-term hits in the tree.
+2. In a separate clone, merge `ss-3` into `main` and clean the history.
+   → verify: the final tree is identical to `ss-3`'s; every file version,
+   message, and identity is free of private terms, the home directory, and
+   personal addresses; gitleaks finds nothing.
+3. An independent read of every commit by four reviewers.
+   → verify: every finding fixed or explained, and step 2's checks re-run.
+4. Create the private `dj-skn/schedule-send`; push the cleaned `main` and the
+   tag.
+   → verify: the pushed commits are the checked ones.
+5. Switch this checkout: the old repository becomes the `archive` remote and
+   the new one `origin`, `main` moves to the cleaned history, the old
+   worktrees and branches go, and the program is reinstalled.
+   → verify: `main` is clean and tracks `origin/main`; `tools/install` and
+   `tools/check` pass.
+6. Description and topics; CI runs on the private repository.
+   → verify: all three jobs pass.
+7. The owner adds the tap token.
+   → verify: `gh secret list` shows it.
+8. Make the repository public; turn on private vulnerability reporting.
+   → verify: the badges and links resolve; the report form opens.
+9. The formula into the tap; `tools/release 0.1.0`; push.
+   → verify: every release job passes, the tap bump and `brew audit`
+   included.
+10. Homebrew and the curl script in clean Linux containers, the plugin from
+    GitHub, and the index; the owner runs `brew install` on the Mac.
+    → verify: each prints `schedule-send 0.1.0`; the index lists the
+    repository.
+11. As built, on `ss-3-p8` from the published `main`.
+    → verify: zero private-term hits; merged on the owner's word.
+
+Steps 4 to 11 each wait for the owner's word. The merge in step 2 reaches
+this checkout's `main` only at step 5.
+
+Not included: cleaning the owner's other public repositories, branch
+protection, code signing, Homebrew core, and the three items P7.1 left as
+they are: Ctrl-Space on an empty answer, the seconds in relative times, and
+the manifest's minimum Herdr version.
 
 ## Not included
 
