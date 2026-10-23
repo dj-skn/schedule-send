@@ -18,7 +18,8 @@ owner's word. P8 is in progress: on 2026-10-23 it revised the story's
 decisions on the history and the earlier plans, merged `ss-3` into `main`,
 and pushed the cleaned history to the new repository, still private, which
 this checkout now tracks. P7.2, inserted before P8 makes the repository
-public, rewrites the README and the usage reference.
+public, rewrote the README and the usage reference on `ss-3-p7.2`; it waits
+for the owner's word to merge into `main`.
 
 The owner settled the story's decisions on 2026-10-12 and asked for this plan.
 That is not a build instruction: every phase still gets its own source check,
@@ -129,7 +130,7 @@ Stated in the walkthrough; the owner did not object.
 | P6 | CI and release automation | `ss-3-p6` | complete in ss-3 |
 | P7 | README and visuals | `ss-3-p7` | complete in ss-3 |
 | P7.1 | The overlay's prompt, and the plugin screenshot | `ss-3-p7.1` | complete in ss-3 |
-| P7.2 | The README and the usage reference rewritten | `ss-3-p7.2` | in progress |
+| P7.2 | The README and the usage reference rewritten | `ss-3-p7.2` | built, awaiting merge |
 | P8 | Publication | `ss-3-p8` | in progress |
 
 Each phase starts with a fresh source check and an owner walkthrough. Build
@@ -1516,6 +1517,49 @@ and drops nothing from the reference.
 
 Not included: new recordings, and the contributing guide, security policy,
 and changelog beyond what the deleted picture touches.
+
+#### As built — 2026-10-23
+
+- The README is a landing page: one line naming both uses, the hero
+  recording, three sentences on what it sends and the resume case, Install,
+  a quick start (resume, a message at a set time, commented examples), the
+  plugin's key binding and overlay, How it works as three numbered steps and
+  one line on missed jobs, Documentation, and License. The badges are CI,
+  release, licence, and Herdr plugin.
+- The two how-it-works SVG files are deleted, with the contributing guide's
+  note on them.
+- `docs/usage.md` keeps its nine sections and anchors. It gains the key
+  binding, `--targets`, `--help`, `--version`, the `cancelled` error code,
+  and the exit statuses.
+
+Measured:
+
+- README: 450 words of prose, 594 before. "A minute after the reset" appears
+  once, five times before. No sentence runs over 26 words; the longest is 22,
+  where 4 ran over before, up to 57.
+- `docs/usage.md`: 2,061 words of prose, 1,730 before. No sentence runs over
+  26 words; the longest is 25, where 12 ran over before, up to 42. The code
+  check's "19 of 104" counted list items and headings run together.
+- All 26 options in `--help` are documented. A script found every relative
+  link and anchor in the README, `docs/usage.md`, `AGENTS.md`, and
+  `CONTRIBUTING.md` resolving. Both documents were rendered through GitHub's
+  Markdown API in light and dark at desktop and phone widths, and read.
+- `tools/check` exit 0, 12 packages; zero private-term hits.
+
+Found while building:
+
+- **The old reference had facts wrong.** A fact-checker read both documents
+  against the code and found, among others: lingering, which timers need
+  only to fire while the user is logged out, not to survive a reboot; that
+  timers store UTC only on Linux; that `--pick` applies only without a
+  terminal; what `--recover focus` does; that a comment in the plugin's
+  `args` file must be a whole line; and that `--list` marks only unloadable
+  state `invalid`. All are corrected.
+- **The reference grew by about a fifth.** Splitting long sentences, the
+  corrections, and the additions cost more words than the cuts saved. The
+  README and the reference together are 2,511 words of prose, 2,324 before.
+- **`--help` still says "plain panes"** where both documents say "shell
+  pane". Left as it is: it is program output, pinned by tests.
 
 ### P8 — Publication
 
