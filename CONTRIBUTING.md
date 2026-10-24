@@ -140,6 +140,9 @@ changelog easy to assemble, with a body that says why the change was needed.
 Every push to `main` and every pull request runs the checks on Linux, Linux
 ARM and macOS (`.github/workflows/ci.yml`). The macOS job also installs the
 formula with Homebrew and arms real launchd jobs aimed at the stand-in Herdr.
+`tools/vulncheck` runs with them, and weekly on its own, and fails when the
+program reaches a known vulnerability, the Go standard library included.
+Dependabot proposes updates to the workflows' actions.
 
 ## Releasing
 

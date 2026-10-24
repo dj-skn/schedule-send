@@ -1,10 +1,9 @@
 #!/bin/sh
-# Check tools/bump-tap against a stand-in gh that plays the tap's contents
-# API from a temporary directory, with the archive read from disk. Nothing
-# leaves this machine.
+# Check tools/bump-tap in a temporary copy of the checkout's formula, against
+# stand-ins for gh, which plays the tap's contents API from a directory, and
+# for curl, which reads the archive from disk. Nothing leaves this machine.
 set -eu
 cd "$(dirname "$0")/.."
-root="$(pwd -P)"
 state="$(mktemp -d)"
 trap 'rm -rf "$state"' EXIT
 failures=0
@@ -17,15 +16,21 @@ refuses() { # description, then a command that must fail
   if "$@" > /dev/null 2>&1; then echo "bump-tap test failed: $what" >&2; failures=$((failures + 1)); fi
 }
 
-# The stand-in keeps the tap's formula in $STATE/formula.rb and logs each
-# write's fields to $STATE/writes. $STATE/drop makes it accept writes and keep
-# nothing; $STATE/broken makes every read fail.
-mkdir -p "$state/bin"
+repo="$state/repo"
+mkdir -p "$repo/tools" "$repo/packaging/homebrew" "$state/bin"
+cp tools/bump-tap "$repo/tools/"
+cp packaging/homebrew/schedule-send.rb "$repo/packaging/homebrew/"
+template="$repo/packaging/homebrew/schedule-send.rb"
+cp "$template" "$state/template.orig"
+
+# The tap's formula is $STATE/formula.rb; each write's fields go to
+# $STATE/writes, ending in a --- line. $STATE/drop accepts writes and keeps
+# nothing; $STATE/broken fails reads with a server error; $STATE/garbled and
+# $STATE/noblob spoil a read's content or blob SHA.
 cat > "$state/bin/gh" <<'GH'
 #!/bin/sh
 set -eu
 [ "$1" = api ] && shift
-[ ! -e "$STATE/broken" ] || { echo 'gh: Server Error (HTTP 500)' >&2; exit 1; }
 if [ "$1" = -X ] && [ "$2" = PUT ]; then
   shift 3
   content= sha=
@@ -44,69 +49,98 @@ if [ "$1" = -X ] && [ "$2" = PUT ]; then
   [ -e "$STATE/drop" ] || printf '%s' "$content" | base64 -d > "$STATE/formula.rb"
   exit 0
 fi
+[ ! -e "$STATE/broken" ] || { echo 'gh: Server Error (HTTP 500)' >&2; exit 1; }
 [ -e "$STATE/formula.rb" ] || { echo 'gh: Not Found (HTTP 404)' >&2; exit 1; }
-cksum < "$STATE/formula.rb" | cut -d' ' -f1
-base64 < "$STATE/formula.rb" | tr -d '\n'
-echo
+if [ -e "$STATE/noblob" ]; then echo; else cksum < "$STATE/formula.rb" | cut -d' ' -f1; fi
+if [ -e "$STATE/garbled" ]; then echo '%%%not base64%%%'; else base64 < "$STATE/formula.rb" | tr -d '\n'; echo; fi
 GH
-chmod +x "$state/bin/gh"
-export STATE="$state" PATH="$state/bin:$PATH"
+cat > "$state/bin/curl" <<'CURL'
+#!/bin/sh
+# Only what tools/bump-tap uses: -o FILE and a file:// URL.
+out= url=
+while [ "$#" -gt 0 ]; do
+  case "$1" in -o) out="$2"; shift ;; -*) ;; *) url="$1" ;; esac
+  shift
+done
+case "$url" in file://*) cp "${url#file://}" "$out" ;; *) exit 22 ;; esac
+CURL
+chmod +x "$state/bin/gh" "$state/bin/curl"
+export STATE="$state" PATH="$state/bin:$PATH" BUMP_TAP_SLEEP=0
 
 printf 'not really a tarball\n' > "$state/archive.tar.gz"
 export BUMP_TAP_DOWNLOAD="file://$state/archive.tar.gz"
 sum="$(if command -v sha256sum > /dev/null; then sha256sum "$state/archive.tar.gz"; else shasum -a 256 "$state/archive.tar.gz"; fi | cut -d' ' -f1)"
 url=https://github.com/dj-skn/schedule-send/archive/refs/tags/v0.2.0.tar.gz
-expected() { # version: the formula a bump to it should leave
-  sed -e "s|^  url .*|  url \"https://github.com/dj-skn/schedule-send/archive/refs/tags/v$1.tar.gz\"|" \
-      -e "s|^  sha256 .*|  sha256 \"$sum\"|" "$root/packaging/homebrew/schedule-send.rb"
-}
+bump="$repo/tools/bump-tap"
 writes() { if [ -e "$state/writes" ]; then grep -c '^---$' "$state/writes"; else echo 0; fi; }
-bump="$root/tools/bump-tap"
+same_writes() { [ "$(writes)" -eq "$1" ]; }
+holds() { # version: whether the tap holds the formula a bump to it should leave
+  sed -e "s|^  url .*|  url \"https://github.com/dj-skn/schedule-send/archive/refs/tags/v$1.tar.gz\"|" \
+      -e "s|^  sha256 .*|  sha256 \"$sum\"|" "$template" | cmp -s - "$state/formula.rb"
+}
 
 refuses "a pre-release goes to the tap" "$bump" 0.2.0-rc.1
 refuses "a malformed version is accepted" "$bump" 0.2
 
 check "a tap without the formula gets it" "$bump" 0.2.0
-expected 0.2.0 | cmp -s - "$state/formula.rb" || { echo "bump-tap test failed: the formula written is not the expected one" >&2; failures=$((failures + 1)); }
+check "it is the checkout's formula with the URL and checksum filled in" holds 0.2.0
+check "the URL is the tag's archive" grep -qx "  url \"$url\"" "$state/formula.rb"
 check "the write names no blob for a new file" sh -c "! grep -q '^sha=' '$state/writes'"
 check "the commit is schedule-send 0.2.0" grep -qx 'message=schedule-send 0.2.0' "$state/writes"
-check "the commit carries the noreply address" sh -c "grep -x 'committer\\[email\\]=.*' '$state/writes' | grep -q 'users.noreply.github.com\$' && grep -x 'author\\[email\\]=.*' '$state/writes' | grep -q 'users.noreply.github.com\$'"
-check "the URL in the formula is the tag's archive" grep -qx "  url \"$url\"" "$state/formula.rb"
+check "the commit carries the noreply address as committer" grep -qx 'committer\[email\]=[0-9]*+dj-skn@users\.noreply\.github\.com' "$state/writes"
+check "and as author" grep -qx 'author\[email\]=[0-9]*+dj-skn@users\.noreply\.github\.com' "$state/writes"
 
 check "the same version again succeeds" "$bump" 0.2.0
-check "and writes nothing" sh -c "[ \"\$(grep -c '^---\$' '$state/writes')\" -eq 1 ]"
+check "and writes nothing" same_writes 1
 
 # The v0.1.0 case: the tap already names the version, with a zeroed checksum.
-sed "s|^  sha256 .*|  sha256 \"$(printf '0%.0s' $(seq 64))\"|" "$state/formula.rb" > "$state/f" && mv "$state/f" "$state/formula.rb"
+sed "s|^  sha256 .*|  sha256 \"0000000000000000000000000000000000000000000000000000000000000000\"|" "$state/formula.rb" > "$state/f"
+mv "$state/f" "$state/formula.rb"
 check "a wrong checksum at the same version is corrected" "$bump" 0.2.0
-check "with one more write" sh -c "[ \"\$(grep -c '^---\$' '$state/writes')\" -eq 2 ]"
+check "with one more write" same_writes 2
 check "naming the blob it replaces" grep -q '^sha=' "$state/writes"
-expected 0.2.0 | cmp -s - "$state/formula.rb" || { echo "bump-tap test failed: the corrected formula is not the expected one" >&2; failures=$((failures + 1)); }
+check "leaving the right formula" holds 0.2.0
 
-before="$(writes)"
 refuses "an older version replaces a newer one" "$bump" 0.1.9
-check "the refusal writes nothing" sh -c "[ \"\$(grep -c '^---\$' '$state/writes')\" -eq $before ]"
-
+check "the refusal writes nothing" same_writes 2
 check "a newer version is written" "$bump" 0.10.0
-expected 0.10.0 | cmp -s - "$state/formula.rb" || { echo "bump-tap test failed: 0.10.0 was not written" >&2; failures=$((failures + 1)); }
+check "leaving the 0.10.0 formula" holds 0.10.0
 refuses "0.9.0 is taken as newer than 0.10.0" "$bump" 0.9.0
 
-before="$(writes)"
 check "a dry run succeeds" "$bump" --dry-run 0.11.0
-check "a dry run writes nothing" sh -c "[ \"\$(grep -c '^---\$' '$state/writes')\" -eq $before ]"
+check "a dry run writes nothing" same_writes 3
 check "a dry run shows the change" sh -c "'$bump' --dry-run 0.11.0 | grep -q '^+  url .*v0.11.0.tar.gz\"\$'"
 
 touch "$state/drop"
-refuses "a write the tap did not keep passes" env BUMP_TAP_SLEEP=0 "$bump" 0.11.0
+refuses "a write the tap did not keep passes" "$bump" 0.11.0
 rm "$state/drop"
-
-touch "$state/broken"
-refuses "a failed read is taken for a missing formula" "$bump" 0.11.0
-rm "$state/broken"
-
 before="$(writes)"
+
+for spoil in broken garbled noblob; do
+  touch "$state/$spoil"
+  refuses "a $spoil read is written over" "$bump" 0.11.0
+  check "the $spoil read writes nothing" same_writes "$before"
+  rm "$state/$spoil"
+done
+
+cp "$state/formula.rb" "$state/kept.rb"
+sed 's|^  url .*|  url "https://example.invalid/schedule-send.tar.gz"|' "$state/kept.rb" > "$state/formula.rb"
+refuses "a tap formula of unknown version is overwritten" "$bump" 0.11.0
+check "the unknown version writes nothing" same_writes "$before"
+mv "$state/kept.rb" "$state/formula.rb"
+
+for spoil in comment crlf; do
+  case "$spoil" in
+    comment) sed 's|^\(  url ".*"\)$|\1 # source archive|' "$state/template.orig" > "$template" ;;
+    crlf) sed 's|$|\r|' "$state/template.orig" > "$template" ;;
+  esac
+  refuses "a formula url line with a $spoil is written unchanged" "$bump" 0.11.0
+  check "the $spoil formula writes nothing" same_writes "$before"
+done
+cp "$state/template.orig" "$template"
+
 refuses "a failed download is written" env BUMP_TAP_DOWNLOAD="file://$state/missing.tar.gz" "$bump" 0.11.0
-check "the failed download writes nothing" sh -c "[ \"\$(grep -c '^---\$' '$state/writes')\" -eq $before ]"
+check "the failed download writes nothing" same_writes "$before"
 
 [ "$failures" -eq 0 ] || exit 1
 echo "bump-tap: ok"

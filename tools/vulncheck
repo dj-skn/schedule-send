@@ -1,0 +1,16 @@
+#!/bin/sh
+# Report known vulnerabilities the program reaches, in its modules and in the
+# Go standard library it is built with, for the Linux and the macOS build.
+# Dependabot does not cover the standard library. Exits non-zero when one is
+# reached. Needs network access, for govulncheck and its database.
+set -eu
+cd "$(dirname "$0")/.."
+bin="$(mktemp -d)"
+trap 'rm -rf "$bin"' EXIT
+GOOS= GOARCH= GOBIN="$bin" go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+status=0
+for os in linux darwin; do
+  echo "govulncheck for $os:"
+  GOOS=$os "$bin/govulncheck" ./... || status=1
+done
+exit "$status"

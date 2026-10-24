@@ -17,7 +17,8 @@ compatibility shim for older timers.
 - Run `tools/check` before committing. For delivery or scheduling changes,
   run the relevant `tools/parity` cases or the full suite as appropriate.
 - CI (`.github/workflows/ci.yml`) runs these checks on Linux, Linux ARM, and
-  macOS; a `v*` tag runs `.github/workflows/release.yml`. Prepare releases with
+  macOS, and `tools/vulncheck`, which `.github/workflows/vulnerabilities.yml`
+  also runs weekly; a `v*` tag runs `.github/workflows/release.yml`. Prepare releases with
   `tools/release`, never by editing versions by hand.
 - Use the user's commit prefixes: `feat:`, `fix:`, `docs:`, `refactor:`,
   and `chore:`. Use `chore:` for merge commits and tooling changes.
@@ -46,6 +47,7 @@ compatibility shim for older timers.
 | `tools/plugin-smoke` | Check the Herdr plugin's scripts against stand-ins, and its manifest with Herdr under temporary roots. |
 | `tools/release VERSION` | Date the changelog's Unreleased entries, set the plugin's version, commit, and tag; pushes nothing. |
 | `tools/bump-tap [--dry-run] VERSION` | Write the formula, with the tag's archive URL and checksum, to the Homebrew tap when it differs; run by the release workflow. |
+| `tools/vulncheck` | Report known vulnerabilities the program reaches, Go standard library included, for both builds; needs network. |
 | `tools/release-check VERSION` | Check that the changelog and the plugin manifest carry the version, and print its release notes. |
 | `tools/setup-hooks` | Enable this repository's hooks and install if needed; main checkout on `main` only. |
 | `tools/media [TAPE...]` | Record the README's GIFs from `docs/media/*.tape` with VHS in Docker, against `testdata/demo` and the stand-ins. |

@@ -67,6 +67,10 @@ fetch() { # the tap's formula into $work/current.rb, its blob SHA into $blob; em
 curl -fsSL --retry 3 -o "$work/archive" "${BUMP_TAP_DOWNLOAD:-$url}" || die "could not download $url."
 checksum="$(sha "$work/archive")"
 sed -e "s|^  url \".*\"\$|  url \"$url\"|" -e "s|^  sha256 \".*\"\$|  sha256 \"$checksum\"|" "$formula" > "$work/new.rb"
+# A line the substitution missed, such as one with a trailing comment or a
+# carriage return, would otherwise go to the tap unchanged.
+grep -qxF "  url \"$url\"" "$work/new.rb" && grep -qxF "  sha256 \"$checksum\"" "$work/new.rb" ||
+  die "$formula's url and sha256 lines must each be just the field and a quoted value; nothing was written."
 
 fetch
 if [ -n "$blob" ]; then

@@ -1,0 +1,27 @@
+name: Vulnerabilities
+
+# Weekly, so a newly published vulnerability the program reaches turns this
+# red without a push; CI runs the same scan on every push. It is its own
+# workflow because GitHub disables a scheduled workflow after 60 days without
+# repository activity, which here stops only this one. Re-enable it with
+# `gh workflow enable vulnerabilities.yml`.
+on:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: govulncheck
+        run: tools/vulncheck
