@@ -20,8 +20,10 @@ and pushed the cleaned history to the new repository, still private, which
 this checkout now tracks. P7.2, inserted before P8 makes the repository
 public, rewrote the README and the usage reference; it was merged into
 `main` and pushed on the owner's word. P7.3, inserted on 2026-10-24, reworked
-the README's top as a product page on `ss-3-p7.3`; it waits for the owner's
-word to merge into `main`.
+the README's top as a product page and was merged and pushed the same way.
+On 2026-10-24 the repository went public and v0.1.0 was released. P8.1,
+inserted then, replaces the release's tap bump and sets up Dependabot and
+govulncheck on `ss-3-p8.1`.
 
 The owner settled the story's decisions on 2026-10-12 and asked for this plan.
 That is not a build instruction: every phase still gets its own source check,
@@ -133,8 +135,9 @@ Stated in the walkthrough; the owner did not object.
 | P7 | README and visuals | `ss-3-p7` | complete in ss-3 |
 | P7.1 | The overlay's prompt, and the plugin screenshot | `ss-3-p7.1` | complete in ss-3 |
 | P7.2 | The README and the usage reference rewritten | `ss-3-p7.2` | merged into main |
-| P7.3 | The README's top as a product page | `ss-3-p7.3` | built, awaiting merge |
+| P7.3 | The README's top as a product page | `ss-3-p7.3` | merged into main |
 | P8 | Publication | `ss-3-p8` | in progress |
+| P8.1 | The tap bump, Dependabot, and govulncheck | `ss-3-p8.1` | in progress |
 
 Each phase starts with a fresh source check and an owner walkthrough. Build
 only the approved phase on its phase branch. Every implementation step has a
@@ -1771,6 +1774,73 @@ Not included: cleaning the owner's other public repositories, branch
 protection, code signing, Homebrew core, and the three items P7.1 left as
 they are: Ctrl-Space on an empty answer, the seconds in relative times, and
 the manifest's minimum Herdr version.
+
+### P8.1 — The tap bump, Dependabot, and govulncheck
+
+Inserted on 2026-10-24, during P8 step 9. The v0.1.0 release published its
+archives and installed them on Linux, but its tap job reported success
+while leaving the formula's zeroed checksum, so the Homebrew install that
+followed failed. The checksum was filled in by hand in the tap and the
+failed job rerun; every release job then passed. The owner asked for the
+cause to be fixed and for Dependabot to be set up.
+
+#### Code check — 2026-10-24
+
+- The bump action skips by design. Its `src/run.ts` catches "the formula is
+  already at version" and returns success; it compares the version in the
+  URL and never the checksum. The formula named v0.1.0 before the release,
+  so the bump skipped. A tag made again would skip the same way.
+- The repository's formula keeps a zeroed checksum while the tap's holds the
+  real one, and nothing ties the two: a change to the formula here would not
+  reach the tap.
+- The action receives `HOMEBREW_TAP_TOKEN`; every other action used is
+  GitHub's own.
+- Dependabot alerts and malware alerts are on, with no alerts. Security
+  updates are off, and version updates have no configuration. `go.mod` has
+  no dependencies, so Dependabot has two actions to watch, `checkout` and
+  `setup-go`.
+- Dependabot does not cover the Go standard library. `govulncheck` 1.9.0 on
+  this tree, with Go 1.27.1: 13 known vulnerabilities in the standard
+  library and 1 in an imported package, none reached by the program.
+
+#### Decisions settled 2026-10-24
+
+The owner agreed to all three recommendations and instructed build.
+
+1. **The bump.** `tools/bump-tap` replaces the action. It downloads the
+   tag's source archive, fills its URL and checksum into the repository's
+   formula, and writes that to the tap only when the content differs, as the
+   noreply identity. It refuses to move the tap to an older version, and
+   fails if the tap does not match afterwards.
+2. **Dependabot.** Weekly version updates for GitHub Actions, grouped into
+   one pull request, and for Go modules; security updates on and grouped;
+   commit messages prefixed `chore:`.
+3. **govulncheck.** A CI job, so the standard library is covered.
+
+Assumptions the owner did not object to: the repository's formula keeps
+placeholder URL and checksum lines, with a comment saying the release fills
+them; the script is tested offline in `tools/check`, and its first real
+write is the next release; security updates are turned on through the API
+after the push.
+
+#### Steps
+
+1. This record, on `ss-3-p8.1` from `main`.
+   → verify: zero private-term hits.
+2. `tools/bump-tap`, used by the release's tap job instead of the action.
+   → verify: `tools/check` with offline tests; a read-only run against the
+   real tap for 0.1.0 reports it up to date and writes nothing.
+3. `.github/dependabot.yml`.
+   → verify: after the push, Dependabot lists both ecosystems without a
+   configuration error.
+4. The govulncheck job in CI.
+   → verify: CI passes; the job reports no vulnerability reached.
+5. Full gate, As built; merge into `main` and push on the owner's word, then
+   security updates on.
+   → verify: the settings show them on.
+
+Not included: moving Go from 1.27.1 to 1.27.3, pinning actions to commits,
+and auto-merging Dependabot's pull requests.
 
 ## Not included
 
