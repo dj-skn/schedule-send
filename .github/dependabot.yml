@@ -1,9 +1,31 @@
+# Weekly version updates, and security updates, each grouped into one pull
+# request per ecosystem: for the GitHub Actions the workflows use, and for Go
+# modules. go.mod requires none today, so that entry waits for the first.
+# Dependabot does not cover the Go standard library; CI runs govulncheck.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    commit-message:
+      prefix: "chore"
     groups:
       actions:
+        patterns: ["*"]
+      actions-security:
+        applies-to: "security-updates"
+        patterns: ["*"]
+
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore"
+    groups:
+      go:
+        patterns: ["*"]
+      go-security:
+        applies-to: "security-updates"
         patterns: ["*"]
