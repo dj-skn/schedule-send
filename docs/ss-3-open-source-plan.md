@@ -18,8 +18,9 @@ owner's word. P8 is in progress: on 2026-10-23 it revised the story's
 decisions on the history and the earlier plans, merged `ss-3` into `main`,
 and pushed the cleaned history to the new repository, still private, which
 this checkout now tracks. P7.2, inserted before P8 makes the repository
-public, rewrote the README and the usage reference on `ss-3-p7.2`; it waits
-for the owner's word to merge into `main`.
+public, rewrote the README and the usage reference; it was merged into
+`main` and pushed on the owner's word. P7.3, inserted on 2026-10-24, reworks
+the README's top as a product page on `ss-3-p7.3`.
 
 The owner settled the story's decisions on 2026-10-12 and asked for this plan.
 That is not a build instruction: every phase still gets its own source check,
@@ -130,7 +131,8 @@ Stated in the walkthrough; the owner did not object.
 | P6 | CI and release automation | `ss-3-p6` | complete in ss-3 |
 | P7 | README and visuals | `ss-3-p7` | complete in ss-3 |
 | P7.1 | The overlay's prompt, and the plugin screenshot | `ss-3-p7.1` | complete in ss-3 |
-| P7.2 | The README and the usage reference rewritten | `ss-3-p7.2` | built, awaiting merge |
+| P7.2 | The README and the usage reference rewritten | `ss-3-p7.2` | merged into main |
+| P7.3 | The README's top as a product page | `ss-3-p7.3` | in progress |
 | P8 | Publication | `ss-3-p8` | in progress |
 
 Each phase starts with a fresh source check and an owner walkthrough. Build
@@ -1560,6 +1562,61 @@ Found while building:
   README and the reference together are 2,511 words of prose, 2,324 before.
 - **`--help` still says "plain panes"** where both documents say "shell
   pane". Left as it is: it is program output, pinned by tests.
+
+### P7.3 — The README's top as a product page
+
+Inserted on 2026-10-24, before P8 makes the repository public. Reading the
+P7.2 README on GitHub, the owner asked which badges had gone, wanted each
+picture at the top of its section, and asked for the README to be shaped
+like Herdr's, as a product page that has to win its reader over.
+
+#### Code check — 2026-10-24
+
+- Herdr's own README is 474 words. From the top: a centred logo, a row of
+  links, six badges in one grey style, the demo video, one bold line, eight
+  bullets that each lead with a bold benefit, one install command with the
+  alternatives on a line, how to start it, and links to the docs. It has no
+  section on how it works.
+- The most-starred Herdr plugins read (herdr-reviewr, herdr-projects, and
+  three others) open the same way. herdr-reviewr follows its features with
+  one line on what it never does.
+- The README's selling points sit in a four-sentence paragraph and in How it
+  works, at the bottom. The question a reader most needs answered, whether
+  it can type into the wrong pane or twice, is answered last.
+- P7.2 dropped the Go and platform badges. Star and download badges would
+  read 0 at launch.
+
+#### Decisions settled 2026-10-24
+
+The owner chose from previews and instructed build.
+
+1. **Headline.** Neutral: what it is, then both uses on one line.
+2. **How it works.** Folded into the feature list near the top; the section
+   goes, so each promise is made once.
+3. **Badges.** Six, in Herdr's grey style: CI, release, licence, Go,
+   platforms, and Herdr plugin. Stars and downloads wait for real numbers.
+
+Assumptions the owner did not object to: a centred header with a row of
+links; one line on what it never does, every claim checked against
+`docs/usage.md`; Install leading with Homebrew; the headline as the
+repository description; P7.2's writing rules, at about 450 to 500 words.
+
+#### Steps
+
+1. This record, on `ss-3-p7.3` from `main`.
+   → verify: zero private-term hits.
+2. The README: header, headline, recording, features, Install, Quick start
+   with its recording first, the plugin with its screenshot first,
+   Documentation, License.
+   → verify: each claim traced to `docs/usage.md`; each fact once, by
+   script; every link and anchor resolves.
+3. Rendered in GitHub's styles, light, dark, and phone.
+   → verify: the screenshots read.
+4. Full gate, As built; merge into `main` and push to the private
+   repository on the owner's word.
+   → verify: the owner reads it on GitHub.
+
+Not included: a logo, new recordings, and any change to `docs/usage.md`.
 
 ### P8 — Publication
 
