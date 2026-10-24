@@ -1,0 +1,112 @@
+#!/bin/sh
+# Check tools/bump-tap against a stand-in gh that plays the tap's contents
+# API from a temporary directory, with the archive read from disk. Nothing
+# leaves this machine.
+set -eu
+cd "$(dirname "$0")/.."
+root="$(pwd -P)"
+state="$(mktemp -d)"
+trap 'rm -rf "$state"' EXIT
+failures=0
+check() { # description, then a command that must succeed
+  what="$1"; shift
+  if "$@" > /dev/null 2>&1; then :; else echo "bump-tap test failed: $what" >&2; failures=$((failures + 1)); fi
+}
+refuses() { # description, then a command that must fail
+  what="$1"; shift
+  if "$@" > /dev/null 2>&1; then echo "bump-tap test failed: $what" >&2; failures=$((failures + 1)); fi
+}
+
+# The stand-in keeps the tap's formula in $STATE/formula.rb and logs each
+# write's fields to $STATE/writes. $STATE/drop makes it accept writes and keep
+# nothing; $STATE/broken makes every read fail.
+mkdir -p "$state/bin"
+cat > "$state/bin/gh" <<'GH'
+#!/bin/sh
+set -eu
+[ "$1" = api ] && shift
+[ ! -e "$STATE/broken" ] || { echo 'gh: Server Error (HTTP 500)' >&2; exit 1; }
+if [ "$1" = -X ] && [ "$2" = PUT ]; then
+  shift 3
+  content= sha=
+  while [ "$#" -gt 0 ]; do
+    case "$2" in
+      content=*) content="${2#content=}" ;;
+      sha=*) sha="${2#sha=}"; echo "$2" >> "$STATE/writes" ;;
+      *) echo "$2" >> "$STATE/writes" ;;
+    esac
+    shift 2
+  done
+  echo --- >> "$STATE/writes"
+  if [ -e "$STATE/formula.rb" ]; then
+    [ "$sha" = "$(cksum < "$STATE/formula.rb" | cut -d' ' -f1)" ] || { echo 'gh: sha does not match (HTTP 409)' >&2; exit 1; }
+  fi
+  [ -e "$STATE/drop" ] || printf '%s' "$content" | base64 -d > "$STATE/formula.rb"
+  exit 0
+fi
+[ -e "$STATE/formula.rb" ] || { echo 'gh: Not Found (HTTP 404)' >&2; exit 1; }
+cksum < "$STATE/formula.rb" | cut -d' ' -f1
+base64 < "$STATE/formula.rb" | tr -d '\n'
+echo
+GH
+chmod +x "$state/bin/gh"
+export STATE="$state" PATH="$state/bin:$PATH"
+
+printf 'not really a tarball\n' > "$state/archive.tar.gz"
+export BUMP_TAP_DOWNLOAD="file://$state/archive.tar.gz"
+sum="$(if command -v sha256sum > /dev/null; then sha256sum "$state/archive.tar.gz"; else shasum -a 256 "$state/archive.tar.gz"; fi | cut -d' ' -f1)"
+url=https://github.com/dj-skn/schedule-send/archive/refs/tags/v0.2.0.tar.gz
+expected() { # version: the formula a bump to it should leave
+  sed -e "s|^  url .*|  url \"https://github.com/dj-skn/schedule-send/archive/refs/tags/v$1.tar.gz\"|" \
+      -e "s|^  sha256 .*|  sha256 \"$sum\"|" "$root/packaging/homebrew/schedule-send.rb"
+}
+writes() { if [ -e "$state/writes" ]; then grep -c '^---$' "$state/writes"; else echo 0; fi; }
+bump="$root/tools/bump-tap"
+
+refuses "a pre-release goes to the tap" "$bump" 0.2.0-rc.1
+refuses "a malformed version is accepted" "$bump" 0.2
+
+check "a tap without the formula gets it" "$bump" 0.2.0
+expected 0.2.0 | cmp -s - "$state/formula.rb" || { echo "bump-tap test failed: the formula written is not the expected one" >&2; failures=$((failures + 1)); }
+check "the write names no blob for a new file" sh -c "! grep -q '^sha=' '$state/writes'"
+check "the commit is schedule-send 0.2.0" grep -qx 'message=schedule-send 0.2.0' "$state/writes"
+check "the commit carries the noreply address" sh -c "grep -x 'committer\\[email\\]=.*' '$state/writes' | grep -q 'users.noreply.github.com\$' && grep -x 'author\\[email\\]=.*' '$state/writes' | grep -q 'users.noreply.github.com\$'"
+check "the URL in the formula is the tag's archive" grep -qx "  url \"$url\"" "$state/formula.rb"
+
+check "the same version again succeeds" "$bump" 0.2.0
+check "and writes nothing" sh -c "[ \"\$(grep -c '^---\$' '$state/writes')\" -eq 1 ]"
+
+# The v0.1.0 case: the tap already names the version, with a zeroed checksum.
+sed "s|^  sha256 .*|  sha256 \"$(printf '0%.0s' $(seq 64))\"|" "$state/formula.rb" > "$state/f" && mv "$state/f" "$state/formula.rb"
+check "a wrong checksum at the same version is corrected" "$bump" 0.2.0
+check "with one more write" sh -c "[ \"\$(grep -c '^---\$' '$state/writes')\" -eq 2 ]"
+check "naming the blob it replaces" grep -q '^sha=' "$state/writes"
+expected 0.2.0 | cmp -s - "$state/formula.rb" || { echo "bump-tap test failed: the corrected formula is not the expected one" >&2; failures=$((failures + 1)); }
+
+before="$(writes)"
+refuses "an older version replaces a newer one" "$bump" 0.1.9
+check "the refusal writes nothing" sh -c "[ \"\$(grep -c '^---\$' '$state/writes')\" -eq $before ]"
+
+check "a newer version is written" "$bump" 0.10.0
+expected 0.10.0 | cmp -s - "$state/formula.rb" || { echo "bump-tap test failed: 0.10.0 was not written" >&2; failures=$((failures + 1)); }
+refuses "0.9.0 is taken as newer than 0.10.0" "$bump" 0.9.0
+
+before="$(writes)"
+check "a dry run succeeds" "$bump" --dry-run 0.11.0
+check "a dry run writes nothing" sh -c "[ \"\$(grep -c '^---\$' '$state/writes')\" -eq $before ]"
+check "a dry run shows the change" sh -c "'$bump' --dry-run 0.11.0 | grep -q '^+  url .*v0.11.0.tar.gz\"\$'"
+
+touch "$state/drop"
+refuses "a write the tap did not keep passes" env BUMP_TAP_SLEEP=0 "$bump" 0.11.0
+rm "$state/drop"
+
+touch "$state/broken"
+refuses "a failed read is taken for a missing formula" "$bump" 0.11.0
+rm "$state/broken"
+
+before="$(writes)"
+refuses "a failed download is written" env BUMP_TAP_DOWNLOAD="file://$state/missing.tar.gz" "$bump" 0.11.0
+check "the failed download writes nothing" sh -c "[ \"\$(grep -c '^---\$' '$state/writes')\" -eq $before ]"
+
+[ "$failures" -eq 0 ] || exit 1
+echo "bump-tap: ok"

@@ -92,22 +92,21 @@ jobs:
     needs: [version, installed]
     if: github.repository == 'dj-skn/schedule-send' && needs.version.outputs.prerelease == 'false'
     runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - name: Check for the tap token
+      - uses: actions/checkout@v7
+      # The tag's formula with its archive's URL and checksum, written only
+      # when the tap's differs and read back after; see tools/bump-tap.
+      - name: Write the formula to the tap
         env:
-          TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          if [ -z "$TOKEN" ]; then
+          if [ -z "$GH_TOKEN" ]; then
             echo "::error::HOMEBREW_TAP_TOKEN is not set, so the formula was not bumped. The release itself is published."
             exit 1
           fi
-      - uses: mislav/bump-homebrew-formula-action@v4
-        with:
-          formula-name: schedule-send
-          formula-path: Formula/schedule-send.rb
-          homebrew-tap: dj-skn/homebrew-tap
-        env:
-          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          tools/bump-tap "$VERSION"
 
   brew:
     name: Install from the tap

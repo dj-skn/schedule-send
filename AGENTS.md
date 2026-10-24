@@ -45,6 +45,7 @@ compatibility shim for older timers.
 | `tools/brew-smoke` | Install the formula from a temporary local tap and check it, then uninstall; needs Homebrew. |
 | `tools/plugin-smoke` | Check the Herdr plugin's scripts against stand-ins, and its manifest with Herdr under temporary roots. |
 | `tools/release VERSION` | Date the changelog's Unreleased entries, set the plugin's version, commit, and tag; pushes nothing. |
+| `tools/bump-tap [--dry-run] VERSION` | Write the formula, with the tag's archive URL and checksum, to the Homebrew tap when it differs; run by the release workflow. |
 | `tools/release-check VERSION` | Check that the changelog and the plugin manifest carry the version, and print its release notes. |
 | `tools/setup-hooks` | Enable this repository's hooks and install if needed; main checkout on `main` only. |
 | `tools/media [TAPE...]` | Record the README's GIFs from `docs/media/*.tape` with VHS in Docker, against `testdata/demo` and the stand-ins. |

@@ -1,6 +1,7 @@
 class ScheduleSend < Formula
   desc "Schedule messages and key presses into Herdr agents and terminal panes"
   homepage "https://github.com/dj-skn/schedule-send"
+  # Each release fills in url and sha256, with tools/bump-tap in dj-skn/schedule-send.
   url "https://github.com/dj-skn/schedule-send/archive/refs/tags/v0.1.0.tar.gz"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
   license "MIT"

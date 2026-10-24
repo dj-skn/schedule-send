@@ -1,0 +1,101 @@
+#!/bin/sh
+# Bring the Homebrew tap's formula to a released version: this checkout's
+# formula with the tag's source archive URL and SHA-256 filled in. The tap is
+# written only when its formula differs, never moved to an older version, and
+# read back afterwards. The release workflow runs it with a token that can
+# write to the tap in GH_TOKEN. --dry-run writes nothing and shows what would
+# change.
+#
+#   tools/bump-tap [--dry-run] VERSION        (a leading v is ignored)
+set -eu
+dry_run=false
+if [ "${1:-}" = --dry-run ]; then
+  dry_run=true
+  shift
+fi
+[ "$#" -eq 1 ] || { echo 'Usage: tools/bump-tap [--dry-run] VERSION' >&2; exit 1; }
+version="${1#v}"
+cd "$(dirname "$0")/.."
+die() {
+  echo "bump-tap: $*" >&2
+  exit 1
+}
+
+tap="${BUMP_TAP_REPO:-dj-skn/homebrew-tap}"
+path=Formula/schedule-send.rb
+formula=packaging/homebrew/schedule-send.rb
+url="https://github.com/dj-skn/schedule-send/archive/refs/tags/v$version.tar.gz"
+# Commits carry the maintainer's GitHub noreply address, never a personal one.
+name=Jan
+email=123612193+dj-skn@users.noreply.github.com
+
+printf '%s\n' "$version" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+' ||
+  die "$version is not a release version such as 1.2.3; pre-releases stay out of the tap."
+for tool in curl gh base64; do
+  command -v "$tool" > /dev/null || die "needs $tool."
+done
+[ "$(grep -c '^  url "' "$formula")" -eq 1 ] && [ "$(grep -c '^  sha256 "' "$formula")" -eq 1 ] ||
+  die "$formula needs exactly one url line and one sha256 line."
+
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+sha() { if command -v sha256sum > /dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
+older() { # a b: whether version a is older than version b
+  awk -v a="$1" -v b="$2" 'BEGIN {
+    split(a, x, "."); split(b, y, ".")
+    for (i = 1; i <= 3; i++) { if (x[i] + 0 < y[i] + 0) exit 0; if (x[i] + 0 > y[i] + 0) exit 1 }
+    exit 1
+  }'
+}
+fetch() { # the tap's formula into $work/current.rb, its blob SHA into $blob; empty when absent
+  blob=
+  : > "$work/current.rb"
+  if gh api "repos/$tap/contents/$path" --jq '.sha, (.content | gsub("\n"; ""))' > "$work/reply" 2> "$work/error"; then
+    blob="$(sed -n 1p "$work/reply")"
+    sed -n 2p "$work/reply" | base64 -d > "$work/current.rb" || die "could not decode $path from $tap."
+    [ -n "$blob" ] || die "$tap gave no blob SHA for $path."
+  elif grep -q 'HTTP 404' "$work/error"; then
+    : # No formula yet: the update creates it.
+  else
+    cat "$work/error" >&2
+    die "could not read $path from $tap."
+  fi
+}
+
+# The checksum is of the archive GitHub serves for the tag, as Homebrew
+# downloads it. BUMP_TAP_DOWNLOAD fetches the same bytes from elsewhere.
+curl -fsSL --retry 3 -o "$work/archive" "${BUMP_TAP_DOWNLOAD:-$url}" || die "could not download $url."
+checksum="$(sha "$work/archive")"
+sed -e "s|^  url \".*\"\$|  url \"$url\"|" -e "s|^  sha256 \".*\"\$|  sha256 \"$checksum\"|" "$formula" > "$work/new.rb"
+
+fetch
+if [ -n "$blob" ]; then
+  current="$(sed -n 's|^  url ".*/v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)\.tar\.gz"$|\1|p' "$work/current.rb")"
+  [ -n "$current" ] || die "cannot tell which version $tap's formula is at; fix it by hand first."
+  ! older "$version" "$current" || die "$tap's formula is at $current, newer than $version; it is left as it is."
+fi
+if cmp -s "$work/current.rb" "$work/new.rb"; then
+  echo "$tap: $path is already at $version (sha256 $checksum)."
+  exit 0
+fi
+if [ "$dry_run" = true ]; then
+  diff -u "$work/current.rb" "$work/new.rb" | sed '1,2d' || true
+  echo "$tap: $path would be brought to $version (sha256 $checksum); nothing was written."
+  exit 0
+fi
+
+set -- -X PUT "repos/$tap/contents/$path" -f message="schedule-send $version" \
+  -f content="$(base64 < "$work/new.rb" | tr -d '\n')" \
+  -f "committer[name]=$name" -f "committer[email]=$email" -f "author[name]=$name" -f "author[email]=$email"
+[ -z "$blob" ] || set -- "$@" -f sha="$blob"
+gh api "$@" > /dev/null || die "could not write $path to $tap."
+
+# Read it back: a reply can succeed without the tap holding this formula.
+# BUMP_TAP_SLEEP sets the pause between reads, for tests.
+tries=0
+while fetch && ! cmp -s "$work/current.rb" "$work/new.rb"; do
+  tries=$((tries + 1))
+  [ "$tries" -lt 5 ] || die "$tap's $path does not match the $version formula after the update."
+  sleep "${BUMP_TAP_SLEEP:-2}"
+done
+echo "$tap: $path brought to $version (sha256 $checksum)."
