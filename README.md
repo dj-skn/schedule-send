@@ -1,6 +1,11 @@
 <h1 align="center">schedule-send</h1>
 
 <p align="center">
+  <b>Scheduled messages for your <a href="https://herdr.dev">Herdr</a> agents.</b><br />
+  At a time you choose, or a minute after a usage limit resets.
+</p>
+
+<p align="center">
   <a href="#install">install</a> · <a href="#quick-start">quick start</a> · <a href="#herdr-plugin">plugin</a> · <a href="docs/usage.md">docs</a>
 </p>
 
@@ -12,9 +17,6 @@
   <a href="#install"><img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS-666666?labelColor=333333" alt="Linux and macOS" /></a>
   <a href="https://herdr.dev/plugins/"><img src="https://img.shields.io/badge/herdr-plugin-666666?labelColor=333333" alt="Herdr plugin" /></a>
 </p>
-
-**Scheduled messages for your [Herdr](https://herdr.dev) agents.** At a time
-you choose, or a minute after a usage limit resets.
 
 ![schedule-send in a terminal: the picker, then Enter at each question](docs/media/resume.gif)
 
