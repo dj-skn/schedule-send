@@ -22,8 +22,9 @@ public, rewrote the README and the usage reference; it was merged into
 `main` and pushed on the owner's word. P7.3, inserted on 2026-10-24, reworked
 the README's top as a product page and was merged and pushed the same way.
 On 2026-10-24 the repository went public and v0.1.0 was released. P8.1,
-inserted then, replaces the release's tap bump and sets up Dependabot and
-govulncheck on `ss-3-p8.1`.
+inserted then, replaced the release's tap bump and set up Dependabot and
+govulncheck on `ss-3-p8.1`; it waits for the owner's word to merge into
+`main`.
 
 The owner settled the story's decisions on 2026-10-12 and asked for this plan.
 That is not a build instruction: every phase still gets its own source check,
@@ -137,7 +138,7 @@ Stated in the walkthrough; the owner did not object.
 | P7.2 | The README and the usage reference rewritten | `ss-3-p7.2` | merged into main |
 | P7.3 | The README's top as a product page | `ss-3-p7.3` | merged into main |
 | P8 | Publication | `ss-3-p8` | in progress |
-| P8.1 | The tap bump, Dependabot, and govulncheck | `ss-3-p8.1` | in progress |
+| P8.1 | The tap bump, Dependabot, and govulncheck | `ss-3-p8.1` | built, awaiting merge |
 
 Each phase starts with a fresh source check and an owner walkthrough. Build
 only the approved phase on its phase branch. Every implementation step has a
@@ -1796,12 +1797,12 @@ cause to be fixed and for Dependabot to be set up.
 - The action receives `HOMEBREW_TAP_TOKEN`; every other action used is
   GitHub's own.
 - Dependabot alerts and malware alerts are on, with no alerts. Security
-  updates are off, and version updates have no configuration. `go.mod` has
-  no dependencies, so Dependabot has two actions to watch, `checkout` and
-  `setup-go`.
+  updates are off. Version updates were set up in P6 for the workflows'
+  actions, weekly and grouped. `go.mod` has no dependencies, so Dependabot
+  has two actions to watch, `checkout` and `setup-go`.
 - Dependabot does not cover the Go standard library. `govulncheck` 1.9.0 on
-  this tree, with Go 1.27.1: 13 known vulnerabilities in the standard
-  library and 1 in an imported package, none reached by the program.
+  this tree, with Go 1.27.1: 14 known vulnerabilities, all in the standard
+  library, none reached by the program.
 
 #### Decisions settled 2026-10-24
 
@@ -1841,6 +1842,70 @@ after the push.
 
 Not included: moving Go from 1.27.1 to 1.27.3, pinning actions to commits,
 and auto-merging Dependabot's pull requests.
+
+#### As built — 2026-10-24
+
+- `tools/bump-tap` writes `packaging/homebrew`'s formula, with the tag's
+  archive URL and checksum, to the tap. It checks that both landed, writes
+  only when the tap's formula differs, refuses an older version, a formula
+  of unknown version, or a spoiled read, commits as the noreply identity,
+  and reads the tap back. `--dry-run` shows the change. The release's tap
+  job runs it instead of the action, and no third-party code receives the
+  tap token. The formula carries a comment saying the release fills in its
+  URL and checksum.
+- `tools/test-bump-tap`, in `tools/check`, runs it from a copy of the
+  formula against stand-ins for `gh` and `curl`: 38 checks, including the
+  v0.1.0 case.
+- `.github/dependabot.yml` keeps the weekly grouped updates for the
+  actions, groups their security updates, and adds Go modules the same way;
+  commit messages take the `chore:` prefix.
+- `tools/vulncheck` runs govulncheck 1.9.0 for the Linux and the macOS
+  build. CI runs it on every push, pull request, and release, and
+  `.github/workflows/vulnerabilities.yml` runs it each Monday.
+- `AGENTS.md` and `CONTRIBUTING.md` describe both scripts and the weekly
+  scan.
+
+Measured:
+
+- Nine bugs planted in `tools/bump-tap` one at a time: the old version-only
+  skip, no older-version guard, no read-back, versions compared as text,
+  any read error taken for a missing formula, no unknown-version guard, no
+  empty-blob guard, no render check, and no decode check. The first eight
+  each fail between one and seven checks. The ninth fails none: a spoiled
+  read then fails the version guard, so nothing is written either way.
+- Against the real tap for 0.1.0, `tools/bump-tap --dry-run` computed the
+  same checksum as Homebrew and the two downloads, and showed one change,
+  the new comment line; nothing was written. The step's verify expected "up
+  to date"; it could not be, once the formula gained that line.
+- `tools/vulncheck`: 0 vulnerabilities reached in either build. On a
+  throwaway program that calls `http.Get` with Go 1.27.1 it reports 9 and
+  exits 1.
+- `.github/dependabot.yml` validates against SchemaStore's Dependabot
+  schema, which flags planted mistakes. actionlint 1.7.7 passes every
+  workflow and flags planted mistakes.
+- `tools/check` exit 0, 12 packages; zero private-term hits.
+
+Found while building:
+
+- **The Dependabot file already existed.** The code check missed P6's
+  version updates for the actions; this phase extends that file.
+- **The review found two real gaps.** Three independent reviewers read the
+  branch. One showed that a url or sha256 line the substitution missed,
+  with a trailing comment or a carriage return, would reach the tap with a
+  success message; the render check above closes it. Another showed that a
+  weekly schedule in `ci.yml` would expose the whole of CI to GitHub's
+  rule that disables a public repository's scheduled workflows after 60
+  days without activity, and that a weekly run could cancel a pending push
+  run on `main`. The weekly scan moved to its own workflow. They also found
+  a vacuous test, three untested guards, an undocumented need for `curl`
+  in the check, and the two misstatements corrected in the code check
+  above; all are fixed.
+- **If the weekly scan goes quiet,** it is GitHub's 60-day rule:
+  `gh workflow enable vulnerabilities.yml` turns it back on.
+
+What this adds to P8: the first real write to the tap is the next release,
+which also adds the formula's comment line. Security updates are turned on
+after the merge.
 
 ## Not included
 
