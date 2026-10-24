@@ -19,8 +19,9 @@ decisions on the history and the earlier plans, merged `ss-3` into `main`,
 and pushed the cleaned history to the new repository, still private, which
 this checkout now tracks. P7.2, inserted before P8 makes the repository
 public, rewrote the README and the usage reference; it was merged into
-`main` and pushed on the owner's word. P7.3, inserted on 2026-10-24, reworks
-the README's top as a product page on `ss-3-p7.3`.
+`main` and pushed on the owner's word. P7.3, inserted on 2026-10-24, reworked
+the README's top as a product page on `ss-3-p7.3`; it waits for the owner's
+word to merge into `main`.
 
 The owner settled the story's decisions on 2026-10-12 and asked for this plan.
 That is not a build instruction: every phase still gets its own source check,
@@ -132,7 +133,7 @@ Stated in the walkthrough; the owner did not object.
 | P7 | README and visuals | `ss-3-p7` | complete in ss-3 |
 | P7.1 | The overlay's prompt, and the plugin screenshot | `ss-3-p7.1` | complete in ss-3 |
 | P7.2 | The README and the usage reference rewritten | `ss-3-p7.2` | merged into main |
-| P7.3 | The README's top as a product page | `ss-3-p7.3` | in progress |
+| P7.3 | The README's top as a product page | `ss-3-p7.3` | built, awaiting merge |
 | P8 | Publication | `ss-3-p8` | in progress |
 
 Each phase starts with a fresh source check and an owner walkthrough. Build
@@ -1617,6 +1618,42 @@ repository description; P7.2's writing rules, at about 450 to 500 words.
    → verify: the owner reads it on GitHub.
 
 Not included: a logo, new recordings, and any change to `docs/usage.md`.
+
+#### As built — 2026-10-24
+
+- The README opens with a centred header: the name, the headline, a row of
+  links (install, quick start, plugin, docs), and six badges in one grey
+  style. The hero recording follows, then eight feature bullets, three of
+  them linking into the usage reference, and two sentences: what it never
+  does, and what happens to a missed job.
+- How it works is gone; its three steps are feature bullets. The
+  recording and the screenshot sit at the top of their sections. The
+  plugin's install command moved into the plugin section, which Install
+  points to.
+- `docs/usage.md` is unchanged.
+
+Measured:
+
+- 436 words of prose, as before, counted the same way for both. Above
+  Install there are 217, where there were 76: the promises moved up rather
+  than grew. No sentence runs over 26 words. Every link and anchor
+  resolves, and each fact appears once, except the shell pane and the
+  overlay, named again where the plugin is used.
+- Rendered through GitHub's Markdown API in light and dark at desktop and
+  phone widths, and read. `tools/check` exit 0, 12 packages; zero
+  private-term hits.
+
+Found while building:
+
+- **The headline read as a stray line.** Left-aligned between the centred
+  header and the recording, it looked detached; centred under the title it
+  completes the header. It moved there after the render.
+- **Three badges show errors until the repository is public.** shields.io
+  cannot read a private repository, so CI, release, and Go show "not found"
+  in red. The same settings on public repositories render grey and short.
+  The release badge fills in with v0.1.0.
+- **The feature list states the minute once.** The resume bullet says it
+  reads the reset time; the headline carries "a minute after".
 
 ### P8 — Publication
 
