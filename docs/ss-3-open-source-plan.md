@@ -14,17 +14,18 @@ screenshot moved to P7.1. P7.1, which reworks the overlay's prompt, is
 complete in `ss-3`, fast-forwarded from `ss-3-p7.1` after a Linux run on the
 owner's homelab server and their live check in Herdr. `ss-3-p3` to
 `ss-3-p7.1` were pushed to the private repository for those runs, on the
-owner's word. P8 is in progress: on 2026-10-23 it revised the story's
-decisions on the history and the earlier plans, merged `ss-3` into `main`,
-and pushed the cleaned history to the new repository, still private, which
-this checkout now tracks. P7.2, inserted before P8 makes the repository
-public, rewrote the README and the usage reference; it was merged into
-`main` and pushed on the owner's word. P7.3, inserted on 2026-10-24, reworked
-the README's top as a product page and was merged and pushed the same way.
-On 2026-10-24 the repository went public and v0.1.0 was released. P8.1,
-inserted then, replaced the release's tap bump and set up Dependabot and
-govulncheck on `ss-3-p8.1`; it waits for the owner's word to merge into
-`main`.
+owner's word. P8 began on 2026-10-23: it revised the story's decisions on
+the history and the earlier plans, merged `ss-3` into `main`, and pushed the
+cleaned history to the new repository, still private, which this checkout
+now tracks. P7.2, inserted before P8 made the repository public, rewrote the
+README and the usage reference; it was merged into `main` and pushed on the
+owner's word. P7.3, inserted on 2026-10-24, reworked the README's top as a
+product page and was merged and pushed the same way. On 2026-10-24 the
+repository went public and v0.1.0 was released. P8.1, inserted then,
+replaced the release's tap bump and set up Dependabot and govulncheck; it was
+merged into `main` and pushed on 2026-10-27. P8 is complete: its install
+checks passed on 2026-11-02, and this update accompanies its As built. SS-3
+is complete; what it left open is taken up by SS-3.1.
 
 The owner settled the story's decisions on 2026-10-12 and asked for this plan.
 That is not a build instruction: every phase still gets its own source check,
@@ -1776,6 +1777,63 @@ protection, code signing, Homebrew core, and the three items P7.1 left as
 they are: Ctrl-Space on an empty answer, the seconds in relative times, and
 the manifest's minimum Herdr version.
 
+#### As built — 2026-10-23 to 2026-11-02
+
+- **Steps 1 to 3, 2026-10-23.** The cleaned history is 148 commits, ending
+  in the merge of `ss-3` into `main`, and its final tree is identical to
+  `ss-3`'s. Every author and committer is the noreply identity. The checker
+  found no private term, home directory, personal address, session link, or
+  other identity in any of its 456 file versions or 148 messages, and
+  gitleaks found nothing. Four reviewers read every commit and made 32
+  findings. Four passages in older plan versions were reworded, and a
+  message that said "PR #1", which GitHub would have linked to the new
+  repository's first issue, now says "PR review". 21 were left as they are,
+  since they name nothing private: old commit identifiers, unnamed mentions
+  of the private repository, a temporary path, a pane name, and a folder
+  layout. The history was then rebuilt and checked again.
+- **Steps 4 to 7, 2026-10-23.** `dj-skn/schedule-send` was created private
+  and given the checked commits and both tags. This checkout tracks it as
+  `origin`, with the old repository as a second remote. The description and
+  topics were set, CI passed on all three systems, and the owner added
+  `HOMEBREW_TAP_TOKEN`.
+- **Step 8, 2026-10-24.** The owner made the repository public, after auto
+  mode refused the agent's command. Private vulnerability reporting is on;
+  Wiki and Projects are off. The badges, the README's links, and the report
+  form resolved; the release badge waited for v0.1.0.
+- **Step 9, 2026-10-24.** The formula went into the tap, and
+  `tools/release 0.1.0` made the release commit and tag. Every release job
+  passed except the Homebrew install, which failed on a zeroed checksum: the
+  bump action had skipped, because the formula already named v0.1.0. The
+  checksum was filled in by hand in the tap and the job rerun; it passed,
+  with `brew test` and `brew audit`. P8.1 replaced the action.
+- **Step 10, 2026-11-02.** The release had already installed v0.1.0 with
+  `install.sh` from the public repository on x86-64 and ARM Linux, and from
+  the tap on macOS. In throwaway containers, removed afterwards with the
+  image they needed: Homebrew 4.6.20 on Linux installed from the tap,
+  printed `schedule-send 0.1.0`, and passed `brew test`; Herdr 0.9.5 on
+  Ubuntu 24.04 installed the plugin from GitHub, whose install step put
+  `schedule-send 0.1.0` in `~/.local/bin`, and listed it enabled. Herdr's
+  plugin index lists `dj-skn.schedule-send` 0.1.0.
+- **Clean-up, 2026-11-02.** The worktrees and branches left from this story
+  are gone. The old repository received the last three commits of its story
+  branch, which only a local backup held; the backups and its remote then
+  left this checkout. The owner archives the old repository on GitHub.
+
+Found while building:
+
+- **Herdr asks before installing from GitHub.** Without a terminal,
+  `herdr plugin install` refuses unless given `--yes`. The README's command
+  is typed in a terminal, so it is unaffected.
+- **The owner's own `brew install` was left optional.** The release's macOS
+  job ran the same install, `brew test`, and `brew audit`.
+- **The tap's first write by `tools/bump-tap` is still to come**, with the
+  next release.
+
+Left for SS-3.1: Ctrl-Space on an empty answer, the seconds in relative
+times, the Herdr minimum, a stale row in `CONTRIBUTING.md`, Go 1.27.3,
+Homebrew on Linux in the release, pinned actions, Dependabot's auto-merge,
+and the commit addresses in the owner's other public repositories.
+
 ### P8.1 — The tap bump, Dependabot, and govulncheck
 
 Inserted on 2026-10-24, during P8 step 9. The v0.1.0 release published its
@@ -1906,6 +1964,11 @@ Found while building:
 What this adds to P8: the first real write to the tap is the next release,
 which also adds the formula's comment line. Security updates are turned on
 after the merge.
+
+After the merge, 2026-10-27: security updates were turned on through the
+API and read back as enabled. CI, a hand-started run of the weekly scan, and
+Dependabot's first run for both ecosystems passed, and Dependabot opened no
+pull requests.
 
 ## Not included
 
