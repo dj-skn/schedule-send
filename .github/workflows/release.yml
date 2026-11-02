@@ -110,13 +110,21 @@ jobs:
           tools/bump-tap "$VERSION"
 
   brew:
-    name: Install from the tap
+    name: Install from the tap on ${{ matrix.runner }}
     needs: [version, tap]
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.runner }}
     env:
       VERSION: ${{ needs.version.outputs.version }}
       HOMEBREW_NO_INSTALL_CLEANUP: "1"
     steps:
+      # Ubuntu's runner carries Homebrew, but not on the PATH.
+      - name: Put Homebrew on the PATH
+        if: runner.os == 'Linux'
+        run: echo /home/linuxbrew/.linuxbrew/bin >> "$GITHUB_PATH"
       # The command a user types, from the tap the previous job just bumped.
       - name: Install with Homebrew
         run: |

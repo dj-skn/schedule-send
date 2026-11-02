@@ -161,7 +161,7 @@ workflow, which checks that the tag, the changelog and the plugin manifest
 agree, runs CI, publishes the GitHub release with the Linux archives, installs
 it on x86-64 and ARM, writes the formula to
 [dj-skn/homebrew-tap](https://github.com/dj-skn/homebrew-tap), and installs
-from the tap on macOS.
+from the tap on macOS and Linux.
 
 A version such as `1.2.3-rc.1` makes a pre-release, which is never sent to the
 tap. The formula is written by `tools/bump-tap`: `packaging/homebrew` with
