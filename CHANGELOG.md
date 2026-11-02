@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The Herdr plugin needs Herdr 0.9.5 or newer, the release its checks run
+  against.
+- Releases are built with the newest stable Go, and building from source
+  needs Go 1.27.3 or newer.
+
 ## [0.1.0] - 2026-10-24
 
 The first public release.
