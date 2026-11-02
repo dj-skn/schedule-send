@@ -60,7 +60,7 @@ scheduling.
 | `herdr-plugin.toml`, `plugin` | The Herdr plugin: one action that opens the scheduling prompt for the focused agent. |
 | `.githooks`, `tools` | Automatic installation, builds, and verification. |
 | `testdata` | Stand-in commands, test fixtures, the demo scenario, and the zsh baseline. |
-| `docs/media` | The README's recordings, their tapes, and the diagram. |
+| `docs/media` | The README's recordings, their tapes, and the plugin screenshot. |
 
 ## Installing from a checkout
 
