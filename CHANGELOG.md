@@ -16,6 +16,11 @@ All notable changes to this project are documented here. The format follows
 - Releases are built with the newest stable Go, and building from source
   needs Go 1.27.3 or newer.
 
+### Fixed
+
+- Ctrl-Space on an empty answer no longer ends the run without scheduling
+  anything; it does nothing, as it already did once text was typed.
+
 ## [0.1.0] - 2026-10-24
 
 The first public release.
