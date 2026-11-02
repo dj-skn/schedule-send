@@ -6,7 +6,8 @@ Plan recorded on 2026-11-02 on story branch `ss-3.1`, from `main` after SS-3
 closed. The owner settled the decisions below on 2026-11-02 and instructed
 the build. P3 and P5 were added at the owner's request after the
 walkthrough; each gets its own code check and walkthrough before it is
-built.
+built. P1 is complete in `ss-3.1`, fast-forwarded from `ss-3.1-p1` after CI
+passed on it.
 
 This document is published with the repository. It names no private
 project, address, or identifier.
@@ -54,7 +55,7 @@ project, address, or identifier.
 
 | Phase | What | State |
 | --- | --- | --- |
-| P1 | Housekeeping and current versions | building |
+| P1 | Housekeeping and current versions | complete |
 | P2 | The prompt: minutes and Ctrl-Space | planned |
 | P3 | Pinned actions and Dependabot's auto-merge | walkthrough first |
 | P4 | Release v0.1.1 | planned |
@@ -104,6 +105,44 @@ outside this repository and can run at any point after its walkthrough.
 
 Not included: the versions other tools are pinned to, such as govulncheck's
 in `tools/vulncheck`.
+
+#### As built — 2026-11-02
+
+- `CONTRIBUTING.md`'s row names the recordings, their tapes, and the plugin
+  screenshot.
+- `go.mod` names Go 1.27.3. CI, the weekly scan, and the release take
+  setup-go's `stable`, with a comment that `go.mod` names only the oldest Go
+  that builds. `AGENTS.md` and `CONTRIBUTING.md` point at `go.mod` for the
+  version, and `AGENTS.md` carries the rule on current versions.
+- The manifest and the README ask for Herdr 0.9.5. The changelog's
+  Unreleased section records both version changes.
+- The release's Homebrew install runs on macOS and on Ubuntu 24.04, and
+  neither cancels the other; on Ubuntu a first step puts Homebrew on the
+  PATH. `CONTRIBUTING.md` says so.
+
+Measured:
+
+- `tools/check` exit 0, 12 packages, under Go 1.27.3, which Go fetched by
+  itself. `tools/parity`: 41 identical, 37 known differences, 0 unexpected.
+  `tools/vulncheck`: no vulnerabilities in either build.
+  `tools/plugin-smoke`: Herdr 0.9.5 accepts the manifest. actionlint 1.7.7
+  passes every workflow.
+- The new Linux job's commands, from `brew update` to
+  `brew audit --strict --online`, passed for v0.1.0 in a throwaway Homebrew
+  container, removed afterwards.
+- CI on the pushed `ss-3.1-p1`, started by hand: Linux, Linux ARM, macOS,
+  and the scan passed, each with go1.27.3 from `stable`. On macOS,
+  `tools/brew-smoke` built the checkout with Homebrew's Go 1.27.3.
+
+Found while building:
+
+- **Homebrew caps the `go` line.** Homebrew builds with `GOTOOLCHAIN=local`,
+  so a `go` line newer than its `go` formula would break `brew install`.
+  The rule in `AGENTS.md` keeps the line at or below Homebrew's Go; CI's
+  macOS `tools/brew-smoke`, which builds the checkout with Homebrew, would
+  show a breach on the next push.
+- **The README's Herdr version is a second place to move.** Nothing checks
+  that it matches the manifest.
 
 ### P2 — The prompt: minutes and Ctrl-Space
 
