@@ -20,6 +20,11 @@ compatibility shim for older timers.
   macOS, and `tools/vulncheck`, which `.github/workflows/vulnerabilities.yml`
   also runs weekly; a `v*` tag runs `.github/workflows/release.yml`. Prepare releases with
   `tools/release`, never by editing versions by hand.
+- Keep versions current. At the start of every story, move the `go` line in
+  `go.mod` and `min_herdr_version` in `herdr-plugin.toml` to the newest
+  stable Go and Herdr, with the README's Herdr version beside it. CI, the
+  weekly scan, and releases build with setup-go's `stable`, so they always
+  use the newest stable Go; do not pin them to a Go version.
 - Use the user's commit prefixes: `feat:`, `fix:`, `docs:`, `refactor:`,
   and `chore:`. Use `chore:` for merge commits and tooling changes.
 - `tools/install` and `tools/setup-hooks` must run only from the main checkout
