@@ -62,15 +62,46 @@ var (
 	dateTool = DateTool
 )
 
-// Resolve turns a send time into an epoch. ok is false when date(1) cannot
-// read it.
+// Resolve turns a typed send time into an epoch. ok is false when date(1)
+// cannot read it.
+//
+// A time typed without seconds fires on a whole minute. date(1) reads a
+// relative time such as "+30" or "tomorrow" against the wall clock, to the
+// second, so it moves up to the next minute: never earlier than asked, at
+// most 59 seconds later, and shown as the minute it fires. Seconds typed on
+// purpose, as in "03:30:15" or "@1791033725", are kept.
+func Resolve(at string, now int64) (epoch int64, ok bool) {
+	epoch, ok = resolve(at, now)
+	if ok && !namesSeconds(at) {
+		epoch = UpToMinute(epoch)
+	}
+	return epoch, ok
+}
+
+// UpToMinute is the first whole minute at or after epoch.
+func UpToMinute(epoch int64) int64 {
+	if r := epoch % 60; r != 0 {
+		return epoch + 60 - r
+	}
+	return epoch
+}
+
+var typedSeconds = regexp.MustCompile(`[0-9]:[0-9]{2}:[0-9]{2}`)
+
+// namesSeconds reports whether a typed time gives its seconds itself.
+func namesSeconds(at string) bool {
+	at = strings.TrimSpace(at)
+	return strings.HasPrefix(at, "@") || typedSeconds.MatchString(at)
+}
+
+// resolve is Resolve without the rounding, as a notice's own time is read.
 //
 // A value with no date part means its next occurrence. That includes 12-hour
 // forms such as "12:27 AM" and "3pm": handed to date(1) whole they resolve to
 // today even once today's has passed. When it has, the time is re-parsed
 // against tomorrow's calendar date rather than advanced by 86400, so a DST
 // transition between the two days cannot shift the result by an hour.
-func Resolve(at string, now int64) (epoch int64, ok bool) {
+func resolve(at string, now int64) (epoch int64, ok bool) {
 	at, zone := normalise(at)
 	prefix := ""
 	if zone != "" {
@@ -103,12 +134,13 @@ func Resolve(at string, now int64) (epoch int64, ok bool) {
 // Year when a future interpretation fits the limit's reset horizon. A month/day
 // more than a week ahead must instead be a stale notice from the previous year:
 // usage windows cannot extend beyond a week. Explicit-year notices and other
-// accepted date expressions keep Resolve's semantics.
+// accepted date expressions keep Resolve's semantics, without its rounding:
+// a notice's time is compared with now as the agent printed it.
 func ResolveReset(at string, now, horizon int64) (int64, bool) {
 	text, zone := normalise(at)
 	m := yearless.FindStringSubmatch(text)
 	if m == nil {
-		return Resolve(at, now)
+		return resolve(at, now)
 	}
 	day, prefix, ok := dateContext(zone, now)
 	if !ok {

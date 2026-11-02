@@ -88,13 +88,69 @@ func TestResolveAcrossDST(t *testing.T) {
 	}
 }
 
+// aboutMinuteAfter reports whether got is the whole minute a relative time
+// read at about want moves up to: on a minute, and no earlier than want.
+func aboutMinuteAfter(got, want int64) bool {
+	return got%60 == 0 && got >= want-5 && got < want+60+5
+}
+
 func TestResolveRelative(t *testing.T) {
-	// date(1) reads "+30 min" against the wall clock, not the given now.
+	// date(1) reads "+30 min" against the wall clock, not the given now, and
+	// the result moves up to the next whole minute.
 	warsaw(t)
 	got, ok := Resolve("+30 min", 0)
 	want := time.Now().Add(30 * time.Minute).Unix()
+	if !ok || !aboutMinuteAfter(got, want) {
+		t.Errorf("got %s, want the minute at or after %s", Format(got, Calendar), Format(want, Calendar))
+	}
+}
+
+func TestUpToMinute(t *testing.T) {
+	base := int64(1791033720) // a whole minute
+	for _, c := range []struct{ in, want int64 }{
+		{base, base},
+		{base + 1, base + 60},
+		{base + 59, base + 60},
+		{base + 60, base + 60},
+	} {
+		if got := UpToMinute(c.in); got != c.want {
+			t.Errorf("UpToMinute(base+%d) = base+%d, want base+%d", c.in-base, got-base, c.want-base)
+		}
+	}
+}
+
+func TestResolveKeepsTypedSeconds(t *testing.T) {
+	loc := warsaw(t)
+	now := time.Date(2026, 10, 3, 15, 22, 0, 0, loc).Unix()
+	for in, want := range map[string]int64{
+		"03:30:15":            time.Date(2026, 10, 4, 3, 30, 15, 0, loc).Unix(),
+		"2026-10-04 09:00:59": time.Date(2026, 10, 4, 9, 0, 59, 0, loc).Unix(),
+		"@1791033725":         1791033725,
+		" @1791033725 ":       1791033725,
+	} {
+		if got, ok := Resolve(in, now); !ok || got != want {
+			t.Errorf("Resolve(%q) = %s ok=%v, want %s", in, Format(got, Calendar), ok, Format(want, Calendar))
+		}
+	}
+	// A relative time read to the second keeps none.
+	if got, ok := Resolve("tomorrow", now); !ok || got%60 != 0 {
+		t.Errorf("Resolve(tomorrow) = %s ok=%v, want a whole minute", Format(got, Calendar), ok)
+	}
+}
+
+func TestResolveResetKeepsNoticeSeconds(t *testing.T) {
+	// A notice's own time is not rounded: the limit is compared with now as
+	// the agent printed it.
+	loc := warsaw(t)
+	now := time.Date(2026, 10, 3, 15, 22, 0, 0, loc).Unix()
+	want := time.Date(2026, 10, 3, 16, 0, 30, 0, loc).Unix()
+	if got, ok := ResolveReset("2026-10-03T16:00:30", now, 7*24*3600); !ok || got != want {
+		t.Errorf("ResolveReset = %s ok=%v, want %s", Format(got, Calendar), ok, Format(want, Calendar))
+	}
+	got, ok := ResolveReset("+30 min", now, 7*24*3600)
+	want = time.Now().Add(30 * time.Minute).Unix()
 	if !ok || got < want-5 || got > want+5 {
-		t.Errorf("got %d, want about %d", got, want)
+		t.Errorf("ResolveReset(+30 min) = %d, want about %d, unrounded", got, want)
 	}
 }
 
@@ -196,8 +252,8 @@ func TestResolveShortOffsets(t *testing.T) {
 	} {
 		got, ok := Resolve(in, 0)
 		want := time.Now().Add(d).Unix()
-		if !ok || got < want-5 || got > want+5 {
-			t.Errorf("Resolve(%q) = %d, %v; want about %d", in, got, ok, want)
+		if !ok || !aboutMinuteAfter(got, want) {
+			t.Errorf("Resolve(%q) = %d, %v; want the minute at or after %d", in, got, ok, want)
 		}
 	}
 	for _, in := range []string{"+30x", "30m", "+-5"} {

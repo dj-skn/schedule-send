@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- A time typed without seconds, such as `+30`, fires on a whole minute and
+  is shown without seconds; seconds typed on purpose are kept. "One minute
+  from now" after a limit has passed moves up to a whole minute too.
 - The Herdr plugin needs Herdr 0.9.5 or newer, the release its checks run
   against.
 - Releases are built with the newest stable Go, and building from source
