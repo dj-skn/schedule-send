@@ -49,9 +49,10 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
+      # The newest stable Go; go.mod names only the oldest that builds.
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: stable
       - name: Build the archives
         run: tools/dist "$VERSION" dist
       - name: Create the release

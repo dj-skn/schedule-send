@@ -4,8 +4,9 @@ Thanks for considering it. Bug reports and pull requests are both welcome.
 
 ## Getting set up
 
-You need Linux with Go 1.27.1 or newer, Git, `flock`, GNU coreutils, `zsh`, and
-`jq`. The parity suite also needs Python 3 and `script`.
+You need Linux with Go at the version `go.mod` names or newer, Git, `flock`,
+GNU coreutils, `zsh`, and `jq`. The parity suite also needs Python 3 and
+`script`.
 
 ```bash
 git clone https://github.com/dj-skn/schedule-send.git

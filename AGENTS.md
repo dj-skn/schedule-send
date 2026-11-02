@@ -22,9 +22,12 @@ compatibility shim for older timers.
   `tools/release`, never by editing versions by hand.
 - Keep versions current. At the start of every story, move the `go` line in
   `go.mod` and `min_herdr_version` in `herdr-plugin.toml` to the newest
-  stable Go and Herdr, with the README's Herdr version beside it. CI, the
-  weekly scan, and releases build with setup-go's `stable`, so they always
-  use the newest stable Go; do not pin them to a Go version.
+  stable Go and Herdr, with the README's Herdr version beside it. The `go`
+  line goes no further than Homebrew's `go` formula: Homebrew builds with
+  `GOTOOLCHAIN=local`, so a newer line breaks `brew install`, which CI's
+  macOS `tools/brew-smoke` would show. CI, the weekly scan, and releases
+  build with setup-go's `stable`, so they always use the newest stable Go;
+  do not pin them to a Go version.
 - Use the user's commit prefixes: `feat:`, `fix:`, `docs:`, `refactor:`,
   and `chore:`. Use `chore:` for merge commits and tooling changes.
 - `tools/install` and `tools/setup-hooks` must run only from the main checkout
@@ -57,7 +60,7 @@ compatibility shim for older timers.
 | `tools/setup-hooks` | Enable this repository's hooks and install if needed; main checkout on `main` only. |
 | `tools/media [TAPE...]` | Record the README's GIFs from `docs/media/*.tape` with VHS in Docker, against `testdata/demo` and the stand-ins. |
 
-Build/install needs Go 1.27.1+, Git, `flock`, and GNU coreutils (`base64`, `tr`). Checks also need `zsh` and
+Build/install needs Go at `go.mod`'s version or newer, Git, `flock`, and GNU coreutils (`base64`, `tr`). Checks also need `zsh` and
 `jq`; parity uses Python 3 and `script`, and runs on Linux only. Runtime on Linux needs Herdr, GNU `date`,
 `/usr/bin/env` (GNU coreutils), and `systemctl --user`; on macOS, Herdr, `launchctl`, and GNU `date` as `gdate`.
 
