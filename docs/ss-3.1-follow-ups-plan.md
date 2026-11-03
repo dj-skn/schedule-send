@@ -19,7 +19,9 @@ through a second merge of `ss-3.1`. The owner settled P3.1's decisions on
 passed on it. On 2026-11-03 the owner instructed the release: `ss-3.1` went
 into `main` a second time, and v0.1.1 is released, so P4 is complete. On
 2026-11-04 the owner added P4.1, keeping agents' co-author trailers out, and
-settled its decisions; it is being built. P5 follows, with its walkthrough.
+settled its decisions. P4.1 is built and in `ss-3.1`, after CI passed on
+it; it takes effect once `ss-3.1` is in `main`. P5 follows, with its
+walkthrough.
 
 This document is published with the repository. It names no private
 project, address, or identifier.
@@ -73,7 +75,7 @@ project, address, or identifier.
 | P3 | Pinned actions and Dependabot's auto-merge | complete |
 | P3.1 | The picker shows sends already scheduled | built; Mac look to come |
 | P4 | Release v0.1.1 | complete |
-| P4.1 | No co-author trailers from agents | building |
+| P4.1 | No co-author trailers from agents | built; reaches `main` on the owner's word |
 | P5 | The owner's other public repositories | walkthrough first |
 
 P3 comes before the release so that v0.1.1 runs pinned actions, and P3.1 so
@@ -634,6 +636,44 @@ no changelog entry, since the program does not change.
    → verify: zero private-term hits.
 
 Not included: Dependabot's trailers, and rewriting `ee9d7d2`.
+
+#### As built — 2026-11-04
+
+- `.githooks/commit-msg` refuses a commit, amend, or merge whose message has
+  a line starting `Co-authored-by:`, in any letter case and with spaces or
+  tabs before it or before the colon. It prints the line and says to remove
+  it. Git's comment lines and the diff of `git commit --verbose` do not
+  count, and the words in the middle of a line do not either. mawk, gawk,
+  gawk in POSIX mode, and BusyBox's awk give the same results; the Mac's
+  awk was not at hand.
+- `tools/check-trailers RANGE` runs that hook on each commit in the range
+  and names the ones it refuses. It skips commits whose author is
+  `dependabot[bot]`, and fails on a range it cannot read. Without the skip
+  it names `ee9d7d2`; with it, `ee9d7d2^..main` passes.
+- CI's Linux job checks out the full history and runs the check before Go
+  is set up: a pull request's base to its head, a push's old head to its
+  new one, or the new head alone when the old one is gone, as for the tag
+  push that starts a release; any other run checks what is not on `main`.
+  Each case was run here against this repository's commits.
+- `tools/test-hooks` has ten new cases: refused in either case, the branch
+  left where it was, the words mid-line taken, a merge refused, comments and
+  the `--verbose` diff ignored, a clean range passing, a commit made with
+  `--no-verify` named, Dependabot's skipped, and an unreadable range
+  failing. With the hook planted to accept everything, the tests failed.
+- `AGENTS.md` and `CONTRIBUTING.md` give the rule, the hook, and the check.
+
+Found while building:
+
+- The new checkout setting sat on the line that Dependabot's update had
+  changed on `main`, so the two conflicted. `main` was merged into `ss-3.1`
+  (`dcca608`), with the release, and the phase's commits were replayed on
+  it, so CI on the phase branch tests what reaches `main`.
+- The tooling commits first had `feat:`; they were given `chore:`, as
+  `AGENTS.md` asks, before anything was pushed.
+- CI's macOS job does not run the hook tests, so the hook on the Mac is a
+  check by hand.
+- The hook takes effect when `ss-3.1` is in the main checkout, at the merge
+  into `main` the owner approved, on their word.
 
 ### P5 — The owner's other public repositories
 
