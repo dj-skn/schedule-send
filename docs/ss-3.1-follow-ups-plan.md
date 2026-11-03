@@ -10,7 +10,8 @@ built. P1 is complete in `ss-3.1`, fast-forwarded from `ss-3.1-p1` after CI
 passed on it. P2 is built and in `ss-3.1`, fast-forwarded from `ss-3.1-p2`
 after CI passed on it; the owner's Mac run is still to come. The owner
 settled P3's decisions on 2026-11-03 and instructed its build, and added
-P3.1 from a screenshot of the picker.
+P3.1 from a screenshot of the picker. P3 is built and in `ss-3.1`, after CI
+passed on it; its GitHub settings go on at P4.
 
 This document is published with the repository. It names no private
 project, address, or identifier.
@@ -61,7 +62,7 @@ project, address, or identifier.
 | --- | --- | --- |
 | P1 | Housekeeping and current versions | complete |
 | P2 | The prompt: minutes and Ctrl-Space | built; Mac run to come |
-| P3 | Pinned actions and Dependabot's auto-merge | building |
+| P3 | Pinned actions and Dependabot's auto-merge | built; settings at P4 |
 | P3.1 | The picker shows sends already scheduled | walkthrough first |
 | P4 | Release v0.1.1 | planned |
 | P5 | The owner's other public repositories | walkthrough first |
@@ -290,6 +291,53 @@ Dependabot's first run proposes v7.0.1 and tests the auto-merge end to end.
 Not included: a merge queue, which one pull request a week does not need,
 and the other repositories' workflows, which P5 looks at.
 
+#### As built — 2026-11-03
+
+- The 15 uses of an action name a commit with its version beside it:
+  `actions/checkout` at v7.0.0, one release behind on purpose, and
+  `actions/setup-go` at v7.0.0. Each commit was read from its tag on
+  GitHub. The release's call of `ci.yml` is still by path.
+- `tools/check` fails on a `uses:` under `.github` that names neither a
+  40-character commit with a `# v` version after it nor a path in this
+  repository.
+- `.github/workflows/auto-merge.yml` runs on pull requests that Dependabot
+  opened in this repository. `dependabot/fetch-metadata` (v3.1.0, pinned)
+  reads the update and refuses commits Dependabot did not make; for a patch
+  or minor it turns on squash auto-merge with the workflow's own token.
+- Dependabot proposes an action's release once it is seven days old.
+- `AGENTS.md`, `CONTRIBUTING.md`, and the changelog say so. P4's first step
+  now carries the three settings as `gh` commands, checked against GitHub's
+  published REST description: the ruleset's fields, role 5 as the
+  repository admin, `allow_auto_merge`, and `sha_pinning_required`.
+
+Measured:
+
+- `tools/check` exit 0, 12 packages. The pin check failed each of four
+  planted faults: `@v7`, a commit without its version, a short commit, and
+  a quoted tag; it passed the pinned tree.
+- The Dependabot configuration validates against its published schema,
+  `cooldown` included, with no errors.
+- CI on the pushed `ss-3.1-p3`, started by hand, passed on Linux, Linux
+  ARM, and macOS, and the scan; its log shows both actions downloaded at
+  the pinned commits.
+
+Found while building:
+
+- **actionlint did not run.** Auto mode refused to download it, as code
+  from outside. The workflows parse as YAML and CI ran the three changed
+  ones; the auto-merge workflow runs only on a pull request, so its first
+  real run is Dependabot's first pull request after P4.
+- **checkout v7.0.1 has fixes.** It escapes values passed to `git config
+  --unset` and narrows a check on pull requests. Running v7.0.0 until
+  Dependabot's first pull request merges was accepted for the end-to-end
+  test; none of the fixes touches how these workflows check out.
+- **Settings and the first push.** The ruleset goes on after `main` is
+  pushed, so the release push in P4's second step is the first to show the
+  bypass notice.
+
+Still to confirm, at P4: the settings take, the release passes under them,
+and Dependabot's checkout v7.0.1 pull request merges itself.
+
 ### P3.1 — The picker shows sends already scheduled
 
 Added on 2026-11-03 from the owner's screenshot: two agents held by the same
@@ -311,13 +359,35 @@ starts from these facts:
 #### Steps
 
 1. Push `ss-3.1`, merged into `main`, on the owner's word; then apply P3's
-   settings: the ruleset, auto-merge, and the pin setting.
-   → verify: the push shows the bypass notice; the ruleset lists the four
-   checks; CI on `main` runs under the pin setting.
+   settings, the commands below.
+   → verify: the ruleset lists the four checks and the admin bypass; the
+   repository allows auto-merge and requires pinned actions; CI on `main`,
+   started by hand, passes under them.
 2. `tools/release 0.1.1`; push the commit and the tag on the owner's word.
-   → verify: every release job passes; `tools/bump-tap` writes the tap and
-   reads it back; Homebrew on macOS and on Ubuntu prints
-   `schedule-send 0.1.1`.
+   → verify: the push shows the bypass notice; every release job passes;
+   `tools/bump-tap` writes the tap and reads it back; Homebrew on macOS and
+   on Ubuntu prints `schedule-send 0.1.1`.
+
+P3's settings. Role 5 is the repository admin role, the one that may bypass:
+
+```sh
+gh api -X POST repos/dj-skn/schedule-send/rulesets --input - <<'JSON'
+{
+  "name": "main requires CI",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+  "bypass_actors": [{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}],
+  "rules": [{"type": "required_status_checks", "parameters": {
+    "strict_required_status_checks_policy": false,
+    "required_status_checks": [{"context": "Linux"}, {"context": "Linux ARM"},
+                               {"context": "macOS"}, {"context": "Vulnerabilities"}]}}]
+}
+JSON
+gh api -X PATCH repos/dj-skn/schedule-send -F allow_auto_merge=true
+gh api -X PUT repos/dj-skn/schedule-send/actions/permissions \
+  -F enabled=true -f allowed_actions=all -F sha_pinning_required=true
+```
 3. As built, once Dependabot's first pull request has merged itself.
    → verify: zero private-term hits.
 
