@@ -7,7 +7,8 @@ closed. The owner settled the decisions below on 2026-11-02 and instructed
 the build. P3 and P5 were added at the owner's request after the
 walkthrough; each gets its own code check and walkthrough before it is
 built. P1 is complete in `ss-3.1`, fast-forwarded from `ss-3.1-p1` after CI
-passed on it.
+passed on it. P2 is built and in `ss-3.1`, fast-forwarded from `ss-3.1-p2`
+after CI passed on it; the owner's Mac run is still to come.
 
 This document is published with the repository. It names no private
 project, address, or identifier.
@@ -56,7 +57,7 @@ project, address, or identifier.
 | Phase | What | State |
 | --- | --- | --- |
 | P1 | Housekeeping and current versions | complete |
-| P2 | The prompt: minutes and Ctrl-Space | planned |
+| P2 | The prompt: minutes and Ctrl-Space | built; Mac run to come |
 | P3 | Pinned actions and Dependabot's auto-merge | walkthrough first |
 | P4 | Release v0.1.1 | planned |
 | P5 | The owner's other public repositories | walkthrough first |
@@ -166,6 +167,53 @@ Found while building:
    without hanging; `tools/check` on the owner's Mac.
 3. Changelog entries, full gate and parity, As built, fast-forward into
    `ss-3.1`.
+
+#### As built — 2026-11-02 to 2026-11-03
+
+- `when.Resolve` moves a typed time without seconds up to the next whole
+  minute, with `when.UpToMinute`. Seconds typed on purpose, as in
+  `18:30:15` or `@epoch`, are kept, since `--at` documents `HH:MM:SS`. A
+  notice's own time is read without the rounding, since the limit logic
+  compares it with now as the agent printed it.
+- "One minute from now", proposed once a limit has passed, moves up to a
+  whole minute the same way, so the prompt shows no seconds there either.
+- On a terminal, a NUL ends an empty answer only if it was already waiting
+  when the prompt switched to reading keys. The switch counts the waiting
+  bytes, with `TIOCINQ` on Linux and `FIONREAD` on macOS, whose value
+  package `syscall` leaves out. A NUL typed later, which is Ctrl-Space,
+  does nothing. If the count fails, every NUL ends an empty answer, as
+  before, so a run fed no input still cannot wait for good.
+- The usage reference and the changelog describe both.
+
+Measured:
+
+- `tools/check` exit 0, 12 packages. `tools/parity`: 41 identical, 37 known
+  differences, 0 unexpected; `confirm-eof` finished without hanging.
+- The terminal tests passed 20 runs in a row. Two planted bugs each fail
+  them: every NUL ending the answer fails three tests, and nothing counted
+  as waiting fails two, the kept end of input among them, which then
+  waits.
+- CI on the pushed `ss-3.1-p2`, started by hand, passed on Linux, Linux
+  ARM, and macOS, and the scan. On macOS the real-terminal tests passed, so
+  the `FIONREAD` value holds there, and `tools/launchd-smoke` passed.
+
+Found while building:
+
+- **The launchd test assumed seconds.** It armed its job due soon at
+  `+75 sec`, which now rounds up to as much as 134 seconds, past the two
+  minutes within which launchd starts a job when it is loaded. CI's first
+  macOS run failed on that check; the test now arms `+40 sec`, 40 to 99
+  seconds out. The test runs on macOS only, so the Linux gate could not
+  show it.
+- **The delay shown counts clock minutes.** `+30` typed at 22:02:54 reads
+  "22:33, in 31m": the delay rounds up, as before, and 22:02 to 22:33 is 31
+  minutes on the clock.
+- **Two sends to one pane within a minute now share a time.** The second
+  is refused as already scheduled, as two sends at the same typed time
+  always were.
+
+Still to confirm by hand: `tools/check` on the owner's Mac, and Ctrl-Space
+and a `+30` answer in the live prompt.
 
 ### P3 — Pinned actions and Dependabot's auto-merge
 
