@@ -8,7 +8,9 @@ the build. P3 and P5 were added at the owner's request after the
 walkthrough; each gets its own code check and walkthrough before it is
 built. P1 is complete in `ss-3.1`, fast-forwarded from `ss-3.1-p1` after CI
 passed on it. P2 is built and in `ss-3.1`, fast-forwarded from `ss-3.1-p2`
-after CI passed on it; the owner's Mac run is still to come.
+after CI passed on it; the owner's Mac run is still to come. The owner
+settled P3's decisions on 2026-11-03 and instructed its build, and added
+P3.1 from a screenshot of the picker.
 
 This document is published with the repository. It names no private
 project, address, or identifier.
@@ -20,8 +22,9 @@ project, address, or identifier.
 - The project builds with the newest stable Go and asks for a current Herdr,
   and every story starts by moving both to the newest stable release.
 - Every release checks the Homebrew install on Linux as well as on macOS.
-- The workflows run actions pinned to commits, and Dependabot's updates
-  merge themselves once CI passes, as P3's walkthrough settles.
+- The workflows run actions pinned to commits, and Dependabot's patch and
+  minor updates merge themselves once CI passes.
+- The picker shows which agents already have a send scheduled.
 - v0.1.1 is released, its tap written by `tools/bump-tap`.
 - The owner's other public repositories carry the noreply address, as P5's
   walkthrough settles.
@@ -58,11 +61,13 @@ project, address, or identifier.
 | --- | --- | --- |
 | P1 | Housekeeping and current versions | complete |
 | P2 | The prompt: minutes and Ctrl-Space | built; Mac run to come |
-| P3 | Pinned actions and Dependabot's auto-merge | walkthrough first |
+| P3 | Pinned actions and Dependabot's auto-merge | building |
+| P3.1 | The picker shows sends already scheduled | walkthrough first |
 | P4 | Release v0.1.1 | planned |
 | P5 | The owner's other public repositories | walkthrough first |
 
-P3 comes before the release so that v0.1.1 runs pinned actions. P5 is
+P3 comes before the release so that v0.1.1 runs pinned actions, and P3.1 so
+that it carries the picker change. P5 is
 outside this repository and can run at any point after its walkthrough.
 
 ### P1 — Housekeeping and current versions
@@ -217,27 +222,103 @@ and a `+30` answer in the live prompt.
 
 ### P3 — Pinned actions and Dependabot's auto-merge
 
-Added on 2026-11-02 at the owner's request. Its code check and walkthrough
-come before it is built. It starts from these questions:
+Added on 2026-11-02 at the owner's request.
 
-- **Pinning.** Each `uses:` names a full commit, with its version as a
-  comment that Dependabot keeps up to date.
-- **Auto-merge.** GitHub merges a pull request by itself only once its
-  required checks pass, and `main` requires none, since SS-3 left out
-  branch protection. Auto-merge needs a rule on `main` that requires CI;
-  how that rule meets the owner's direct pushes to `main` has to be
-  settled.
-- **Which updates** merge themselves, and which wait for the owner.
+#### Code check — 2026-11-03
+
+- The workflows name two actions in 15 places: `actions/checkout` (v7.0.1)
+  and `actions/setup-go` (v7.0.0). Auto-merge adds
+  `dependabot/fetch-metadata` (v3.1.0).
+- With `@v7`, each workflow follows every v7 release by itself, so
+  Dependabot proposes only a new major; it has opened no pull request. A
+  pinned commit turns every release into an update, grouped into one pull
+  request a week at most. Dependabot rewrites the version comment beside a
+  pinned commit, which its source shows (`version_commenter.rb`).
+- `main` has no branch protection and no ruleset, and the repository does
+  not allow auto-merge. GitHub offers auto-merge only while a required check
+  is pending. A rule that requires CI also refuses a direct push, unless the
+  pusher's role is on its bypass list.
+- The repository setting "Require actions to be pinned to a full-length
+  commit SHA" (`sha_pinning_required`, off) refuses a workflow that uses an
+  unpinned action; a reusable workflow may still be named by path or tag.
+  Turned on while `main` is unpinned, it would stop CI there and the weekly
+  scan.
+- A pull request runs CI, not the release's own jobs: the tap write and the
+  Homebrew installs run only for a tag.
+- `dependabot/fetch-metadata` reports the largest version step in a grouped
+  pull request as `update-type`. Dependabot already waits three days after
+  a release before proposing it; `cooldown` changes that for Actions with
+  `default-days` only, and security updates never wait.
+- CI took 7 minutes on the last run, macOS the longest.
+
+#### Decisions settled 2026-11-03
+
+1. **The owner's pushes.** A ruleset on `main` requires the four CI checks,
+   Linux, Linux ARM, macOS, and Vulnerabilities, and the repository admin
+   role may always bypass it. The owner's direct pushes go through with a
+   notice.
+2. **What merges itself.** Patch and minor updates, once CI passes. A major
+   waits for the owner, since CI does not run the release's own jobs.
+3. **Enforcing the pins.** GitHub's setting, and a check in `tools/check`
+   that fails before an unpinned line is pushed.
+4. **The settings.** The ruleset, auto-merge, and the pin setting are applied
+   with `gh` right after `ss-3.1` is pushed to `main` at P4, on the owner's
+   word then.
+
+Built on these, which the owner did not object to: squash merges, so an
+update is one `chore:` commit on `main`; a seven-day wait after an action's
+release; and `actions/checkout` pinned at v7.0.0, one release behind, so
+Dependabot's first run proposes v7.0.1 and tests the auto-merge end to end.
+
+#### Steps
+
+1. Pin the 15 references as `@<commit> # vX.Y.Z`.
+   → verify: no `uses:` of an action without a 40-character commit; CI
+   passes on the pushed phase branch.
+2. `tools/check` refuses an unpinned action.
+   → verify: a planted `@v7` fails it; the hook tests still pass.
+3. The auto-merge workflow: Dependabot's pull requests only; it reads the
+   update type and turns on squash auto-merge for patch and minor.
+   → verify: actionlint is clean; the job is skipped on our own branch.
+4. Dependabot waits seven days for Actions.
+   → verify: GitHub reports no configuration error after the P4 push.
+5. `AGENTS.md` and `CONTRIBUTING.md`: actions are pinned, and how updates
+   merge.
+   → verify: `tools/check`; zero private-term hits.
+6. As built, fast-forward into `ss-3.1`.
+
+Not included: a merge queue, which one pull request a week does not need,
+and the other repositories' workflows, which P5 looks at.
+
+### P3.1 — The picker shows sends already scheduled
+
+Added on 2026-11-03 from the owner's screenshot: two agents held by the same
+limit, one of them already scheduled, and nothing in the picker to tell
+them apart. Its code check and walkthrough come before it is built. It
+starts from these facts:
+
+- The picker reads each agent's screen for its limit, never the scheduled
+  sends, though each send's state records its pane, agent, and folder.
+- Enter takes the first row, which can be the agent already scheduled.
+- A second send to one pane at the same minute is refused, but only after
+  the message is typed.
+- The plugin opens on one agent and skips the picker, so a mark in the
+  picker alone would not reach it.
+- At a narrow width the header and long rows wrap.
 
 ### P4 — Release v0.1.1
 
 #### Steps
 
-1. `tools/release 0.1.1`; push the commit and the tag on the owner's word.
+1. Push `ss-3.1`, merged into `main`, on the owner's word; then apply P3's
+   settings: the ruleset, auto-merge, and the pin setting.
+   → verify: the push shows the bypass notice; the ruleset lists the four
+   checks; CI on `main` runs under the pin setting.
+2. `tools/release 0.1.1`; push the commit and the tag on the owner's word.
    → verify: every release job passes; `tools/bump-tap` writes the tap and
    reads it back; Homebrew on macOS and on Ubuntu prints
    `schedule-send 0.1.1`.
-2. As built.
+3. As built, once Dependabot's first pull request has merged itself.
    → verify: zero private-term hits.
 
 ### P5 — The owner's other public repositories
