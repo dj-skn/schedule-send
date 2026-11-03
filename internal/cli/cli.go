@@ -86,8 +86,9 @@ type app struct {
 	tgt  target.Row
 	now  int64 // when the run started; screens are judged at this moment
 
-	lim map[string]limit.Status // set by limits
-	ask *asker                  // set by asking, at the first question
+	lim   map[string]limit.Status // set by limits
+	sends map[string][]int64      // set by queued
+	ask   *asker                  // set by asking, at the first question
 }
 
 // asker is the terminal a run asks its questions on, drawn as a rail. It is
@@ -1102,12 +1103,7 @@ func (a *app) list() {
 		} else if b, err := os.ReadFile(strings.TrimSuffix(f, ".json") + ".msg"); err == nil {
 			j.Message = string(b)
 		}
-		j.RunAt = s.RunAt
-		if j.RunAt == 0 {
-			if at, err := time.ParseInLocation(when.Calendar, s.At, when.Loc); err == nil {
-				j.RunAt = at.Unix()
-			}
-		}
+		j.RunAt = runAt(s)
 		jobs = append(jobs, j)
 	}
 	if a.o.json {

@@ -1,16 +1,18 @@
 #!/bin/sh
 # A stand-in for systemctl that arms nothing. Calls are appended to
 # $SYSTEMCTL_STANDIN_LOG when it is set. is-active answers active only for
-# units matching $SYSTEMCTL_STANDIN_ACTIVE, a unit name or a shell pattern.
+# units matching $SYSTEMCTL_STANDIN_ACTIVE: unit names or shell patterns,
+# separated by spaces.
 [ -n "${SYSTEMCTL_STANDIN_LOG:-}" ] && printf '%s\n' "$*" >> "$SYSTEMCTL_STANDIN_LOG"
 [ "${1:-}" = --user ] && shift
 case "${1:-}" in
   is-system-running) echo running ;;
   is-active)
-    if [ -n "${SYSTEMCTL_STANDIN_ACTIVE:-}" ]; then
+    set -f
+    for active in ${SYSTEMCTL_STANDIN_ACTIVE:-}; do
       # shellcheck disable=SC2254 # a pattern on purpose
-      case "${2:-}" in $SYSTEMCTL_STANDIN_ACTIVE) echo active; exit 0 ;; esac
-    fi
+      case "${2:-}" in $active) echo active; exit 0 ;; esac
+    done
     echo inactive; exit 3 ;;
   status) echo "stand-in status for $2" ;;
 esac
