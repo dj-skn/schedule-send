@@ -1,0 +1,19 @@
+#!/bin/sh
+# This repository takes no Co-authored-by trailers, from any agent or person.
+# Git runs this for commits, amends, and merges; tools/check-trailers runs it
+# in CI on commits made where it is not set up. Git's comment lines, and the
+# diff below the scissors line of `git commit --verbose`, are not the message.
+set -eu
+message="${1:?commit-msg: no message file}"
+found="$(awk '
+  /^# -+ >8 -+$/ { exit }
+  /^#/ { next }
+  tolower($0) ~ /^[ \t]*co-authored-by[ \t]*:/ { print "  " $0 }
+' "$message")"
+[ -n "$found" ] || exit 0
+{
+  echo 'commit-msg: this repository takes no Co-authored-by trailers:'
+  printf '%s\n' "$found"
+  echo 'Remove the line and run the command again.'
+} >&2
+exit 1

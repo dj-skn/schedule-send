@@ -137,4 +137,36 @@ if (cd "$worktree" && tools/setup-hooks) > /dev/null 2>&1; then
   echo 'setup accepted a linked worktree' >&2; exit 1
 fi
 count 8
+# commit-msg refuses a Co-authored-by trailer in any letter case, for commits
+# and merges alike, and leaves the words alone in the middle of a line.
+refused() {
+  if "$@" > "$fixture/bin/trailer-output" 2>&1; then
+    echo "accepted a co-author trailer: $*" >&2; exit 1
+  fi
+  if ! grep -q 'no Co-authored-by trailers' "$fixture/bin/trailer-output"; then
+    echo "missing trailer diagnostic: $*" >&2; exit 1
+  fi
+}
+head="$(git -C "$fixture" rev-parse HEAD)"
+refused git -C "$fixture" commit -q --allow-empty -m 'chore: pair' \
+  -m 'Co-authored-by: Agent <agent@example.invalid>'
+refused git -C "$fixture" commit -q --allow-empty -m 'chore: pair' \
+  -m 'co-authored-by: Agent <agent@example.invalid>'
+[ "$(git -C "$fixture" rev-parse HEAD)" = "$head" ]
+git -C "$fixture" commit -q --allow-empty -m 'chore: mention the rule' \
+  -m 'A Co-authored-by: line is not taken here.'
+git -C "$fixture" checkout -q -b paired
+git -C "$fixture" commit -q --allow-empty -m 'chore: side commit'
+git -C "$fixture" checkout -q main
+head="$(git -C "$fixture" rev-parse HEAD)"
+refused git -C "$fixture" merge -q --no-ff paired -m 'chore: merge paired' \
+  -m 'Co-authored-by: Agent <agent@example.invalid>'
+git -C "$fixture" merge --abort
+[ "$(git -C "$fixture" rev-parse HEAD)" = "$head" ]
+# Comment lines and the diff of `git commit --verbose` are not the message.
+printf '%s\n' 'chore: verbose' '# Co-authored-by: Agent <agent@example.invalid>' \
+  '# ------------------------ >8 ------------------------' \
+  ' Co-authored-by: Agent <agent@example.invalid>' > "$fixture/bin/verbose-message"
+(cd "$fixture" && .githooks/commit-msg bin/verbose-message)
+count 8
 echo 'hooks: ok'
