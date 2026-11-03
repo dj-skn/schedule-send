@@ -15,6 +15,8 @@ All notable changes to this project are documented here. The format follows
   against.
 - Releases are built with the newest stable Go, and building from source
   needs Go 1.27.3 or newer.
+- Releases are built by GitHub Actions pinned to commits, not to tags that
+  can be moved.
 
 ### Fixed
 

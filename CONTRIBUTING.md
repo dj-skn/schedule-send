@@ -21,7 +21,7 @@ Nothing has to be installed to work on it: the checks build what they need.
 Run both before you push:
 
 ```bash
-tools/check                  # formatting, vet, Go tests, shell and hook checks
+tools/check                  # formatting, pinned actions, vet, Go tests, shell and hook checks
 tools/parity                 # compare with the zsh baseline
 ```
 
@@ -143,7 +143,13 @@ ARM and macOS (`.github/workflows/ci.yml`). The macOS job also installs the
 formula with Homebrew and arms real launchd jobs aimed at the stand-in Herdr.
 `tools/vulncheck` runs with them, and weekly on its own, and fails when the
 program reaches a known vulnerability, the Go standard library included.
-Dependabot proposes updates to the workflows' actions.
+A pull request merges into `main` only once these checks pass.
+
+Each action is pinned to a full commit with its version beside it, and
+`tools/check` fails on one that is not. Dependabot proposes an action's new
+release a week after it is out. A patch or minor update merges itself once
+CI passes (`.github/workflows/auto-merge.yml`); a major waits for a
+maintainer.
 
 ## Releasing
 

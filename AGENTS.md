@@ -28,6 +28,12 @@ compatibility shim for older timers.
   macOS `tools/brew-smoke` would show. CI, the weekly scan, and releases
   build with setup-go's `stable`, so they always use the newest stable Go;
   do not pin them to a Go version.
+- Pin every action in `.github` to a full commit with its version beside it
+  (`@<commit> # v1.2.3`); `tools/check` fails otherwise, and GitHub refuses
+  an unpinned action. Dependabot moves the pins: patch and minor updates
+  merge themselves once CI passes (`.github/workflows/auto-merge.yml`), and
+  a major waits for the owner. A ruleset on `main` requires CI's checks;
+  the owner's direct pushes bypass it.
 - Use the user's commit prefixes: `feat:`, `fix:`, `docs:`, `refactor:`,
   and `chore:`. Use `chore:` for merge commits and tooling changes.
 - `tools/install` and `tools/setup-hooks` must run only from the main checkout
@@ -45,7 +51,7 @@ compatibility shim for older timers.
 
 | Command | Purpose |
 | --- | --- |
-| `tools/check` | Formatting, vet for Linux and macOS, Go tests, zsh shim syntax, shell syntax, and isolated hook tests. |
+| `tools/check` | Formatting, pinned actions, vet for Linux and macOS, Go tests, zsh shim syntax, shell syntax, and isolated hook tests. |
 | `tools/parity [CASE...]` | Compare behavior against the zsh baseline in `testdata/baseline` with documented differences checked. |
 | `tools/launchd-smoke` | Arm real launchd jobs aimed at the stand-in Herdr and check they fire and clean up; macOS only. |
 | `tools/install` | Build, atomically publish, and link the binary; main checkout on `main` only. |
