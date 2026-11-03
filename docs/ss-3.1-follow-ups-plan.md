@@ -11,7 +11,10 @@ passed on it. P2 is built and in `ss-3.1`, fast-forwarded from `ss-3.1-p2`
 after CI passed on it; the owner's Mac run is still to come. The owner
 settled P3's decisions on 2026-11-03 and instructed its build, and added
 P3.1 from a screenshot of the picker. P3 is built and in `ss-3.1`, after CI
-passed on it; its GitHub settings go on at P4.
+passed on it. On 2026-11-03, ahead of P3.1, the owner merged `ss-3.1` into
+`main`, pushed it, and applied P3's settings: P4's first step. Dependabot's
+first pull request then merged itself. P3.1 and the release reach `main`
+through a second merge of `ss-3.1`.
 
 This document is published with the repository. It names no private
 project, address, or identifier.
@@ -62,9 +65,9 @@ project, address, or identifier.
 | --- | --- | --- |
 | P1 | Housekeeping and current versions | complete |
 | P2 | The prompt: minutes and Ctrl-Space | built; Mac run to come |
-| P3 | Pinned actions and Dependabot's auto-merge | built; settings at P4 |
+| P3 | Pinned actions and Dependabot's auto-merge | complete |
 | P3.1 | The picker shows sends already scheduled | walkthrough first |
-| P4 | Release v0.1.1 | planned |
+| P4 | Release v0.1.1 | step 1 done; release after P3.1 |
 | P5 | The owner's other public repositories | walkthrough first |
 
 P3 comes before the release so that v0.1.1 runs pinned actions, and P3.1 so
@@ -367,6 +370,8 @@ starts from these facts:
    → verify: the push shows the bypass notice; every release job passes;
    `tools/bump-tap` writes the tap and reads it back; Homebrew on macOS and
    on Ubuntu prints `schedule-send 0.1.1`.
+3. As built, once Dependabot's first pull request has merged itself.
+   → verify: zero private-term hits.
 
 P3's settings. Role 5 is the repository admin role, the one that may bypass:
 
@@ -388,8 +393,32 @@ gh api -X PATCH repos/dj-skn/schedule-send -F allow_auto_merge=true
 gh api -X PUT repos/dj-skn/schedule-send/actions/permissions \
   -F enabled=true -f allowed_actions=all -F sha_pinning_required=true
 ```
-3. As built, once Dependabot's first pull request has merged itself.
-   → verify: zero private-term hits.
+
+#### Step 1 as done — 2026-11-03
+
+The owner ran step 1 ahead of P3.1, with the commands above in one-line
+form: `ss-3.1` merged into `main` as `8c9ef26` and pushed, then the three
+settings. The release waits for P3.1.
+
+- The merge commit carries the noreply address, and `main` has zero
+  private-term hits. The hook installed the new build in the main checkout.
+- GitHub stores the ruleset as active, with role 5 bypassing always and the
+  four checks required. Auto-merge is allowed, and pinned actions are
+  required.
+- CI on `main`, started by hand, passed on Linux, Linux ARM, and macOS, and
+  the scan: the first run with pinned actions required.
+- Dependabot ran on its new configuration within a minute and opened pull
+  request #1, checkout v7.0.0 to v7.0.1, moving each pinned commit and its
+  version comment together. The auto-merge workflow turned on a squash
+  merge. macOS failed once: the runner could not download setup-go's
+  archive at its pinned commit, after one attempt, though the other jobs
+  and the run on `main` had downloaded it. The archive answered when
+  checked, and one rerun of that job passed. GitHub then merged the pull
+  request itself, as `ee9d7d2` by Dependabot, 38 seconds after its last
+  check passed.
+- No CI ran on `main` for `ee9d7d2`: GitHub starts no workflow from a push
+  made with a workflow's own token. The pull request's checks, run on the
+  merged result, were its test.
 
 ### P5 — The owner's other public repositories
 
