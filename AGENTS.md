@@ -20,6 +20,20 @@ compatibility shim for older timers.
   macOS, and `tools/vulncheck`, which `.github/workflows/vulnerabilities.yml`
   also runs weekly; a `v*` tag runs `.github/workflows/release.yml`. Prepare releases with
   `tools/release`, never by editing versions by hand.
+- Keep versions current. At the start of every story, move the `go` line in
+  `go.mod` and `min_herdr_version` in `herdr-plugin.toml` to the newest
+  stable Go and Herdr, with the README's Herdr version beside it. The `go`
+  line goes no further than Homebrew's `go` formula: Homebrew builds with
+  `GOTOOLCHAIN=local`, so a newer line breaks `brew install`, which CI's
+  macOS `tools/brew-smoke` would show. CI, the weekly scan, and releases
+  build with setup-go's `stable`, so they always use the newest stable Go;
+  do not pin them to a Go version.
+- Pin every action in `.github` to a full commit with its version beside it
+  (`@<commit> # v1.2.3`); `tools/check` fails otherwise, and GitHub refuses
+  an unpinned action. Dependabot moves the pins: patch and minor updates
+  merge themselves once CI passes (`.github/workflows/auto-merge.yml`), and
+  a major waits for the owner. A ruleset on `main` requires CI's checks;
+  the owner's direct pushes bypass it.
 - Use the user's commit prefixes: `feat:`, `fix:`, `docs:`, `refactor:`,
   and `chore:`. Use `chore:` for merge commits and tooling changes.
 - `tools/install` and `tools/setup-hooks` must run only from the main checkout
@@ -37,7 +51,7 @@ compatibility shim for older timers.
 
 | Command | Purpose |
 | --- | --- |
-| `tools/check` | Formatting, vet for Linux and macOS, Go tests, zsh shim syntax, shell syntax, and isolated hook tests. |
+| `tools/check` | Formatting, pinned actions, vet for Linux and macOS, Go tests, zsh shim syntax, shell syntax, and isolated hook tests. |
 | `tools/parity [CASE...]` | Compare behavior against the zsh baseline in `testdata/baseline` with documented differences checked. |
 | `tools/launchd-smoke` | Arm real launchd jobs aimed at the stand-in Herdr and check they fire and clean up; macOS only. |
 | `tools/install` | Build, atomically publish, and link the binary; main checkout on `main` only. |
@@ -52,7 +66,7 @@ compatibility shim for older timers.
 | `tools/setup-hooks` | Enable this repository's hooks and install if needed; main checkout on `main` only. |
 | `tools/media [TAPE...]` | Record the README's GIFs from `docs/media/*.tape` with VHS in Docker, against `testdata/demo` and the stand-ins. |
 
-Build/install needs Go 1.27.1+, Git, `flock`, and GNU coreutils (`base64`, `tr`). Checks also need `zsh` and
+Build/install needs Go at `go.mod`'s version or newer, Git, `flock`, and GNU coreutils (`base64`, `tr`). Checks also need `zsh` and
 `jq`; parity uses Python 3 and `script`, and runs on Linux only. Runtime on Linux needs Herdr, GNU `date`,
 `/usr/bin/env` (GNU coreutils), and `systemctl --user`; on macOS, Herdr, `launchctl`, and GNU `date` as `gdate`.
 

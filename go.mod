@@ -1,3 +1,3 @@
 module github.com/dj-skn/schedule-send
 
-go 1.27.1
+go 1.27.3

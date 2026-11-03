@@ -4,8 +4,9 @@ Thanks for considering it. Bug reports and pull requests are both welcome.
 
 ## Getting set up
 
-You need Linux with Go 1.27.1 or newer, Git, `flock`, GNU coreutils, `zsh`, and
-`jq`. The parity suite also needs Python 3 and `script`.
+You need Linux with Go at the version `go.mod` names or newer, Git, `flock`,
+GNU coreutils, `zsh`, and `jq`. The parity suite also needs Python 3 and
+`script`.
 
 ```bash
 git clone https://github.com/dj-skn/schedule-send.git
@@ -20,7 +21,7 @@ Nothing has to be installed to work on it: the checks build what they need.
 Run both before you push:
 
 ```bash
-tools/check                  # formatting, vet, Go tests, shell and hook checks
+tools/check                  # formatting, pinned actions, vet, Go tests, shell and hook checks
 tools/parity                 # compare with the zsh baseline
 ```
 
@@ -60,7 +61,7 @@ scheduling.
 | `herdr-plugin.toml`, `plugin` | The Herdr plugin: one action that opens the scheduling prompt for the focused agent. |
 | `.githooks`, `tools` | Automatic installation, builds, and verification. |
 | `testdata` | Stand-in commands, test fixtures, the demo scenario, and the zsh baseline. |
-| `docs/media` | The README's recordings, their tapes, and the diagram. |
+| `docs/media` | The README's recordings, their tapes, and the plugin screenshot. |
 
 ## Installing from a checkout
 
@@ -142,7 +143,13 @@ ARM and macOS (`.github/workflows/ci.yml`). The macOS job also installs the
 formula with Homebrew and arms real launchd jobs aimed at the stand-in Herdr.
 `tools/vulncheck` runs with them, and weekly on its own, and fails when the
 program reaches a known vulnerability, the Go standard library included.
-Dependabot proposes updates to the workflows' actions.
+A pull request merges into `main` only once these checks pass.
+
+Each action is pinned to a full commit with its version beside it, and
+`tools/check` fails on one that is not. Dependabot proposes an action's new
+release a week after it is out. A patch or minor update merges itself once
+CI passes (`.github/workflows/auto-merge.yml`); a major waits for a
+maintainer.
 
 ## Releasing
 
@@ -160,7 +167,7 @@ workflow, which checks that the tag, the changelog and the plugin manifest
 agree, runs CI, publishes the GitHub release with the Linux archives, installs
 it on x86-64 and ARM, writes the formula to
 [dj-skn/homebrew-tap](https://github.com/dj-skn/homebrew-tap), and installs
-from the tap on macOS.
+from the tap on macOS and Linux.
 
 A version such as `1.2.3-rc.1` makes a pre-release, which is never sent to the
 tap. The formula is written by `tools/bump-tap`: `packaging/homebrew` with

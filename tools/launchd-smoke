@@ -86,7 +86,9 @@ settled() { # id: nothing of the job is left
   check "unloaded from launchd" unloaded "$1"
 }
 
-set -- $(arm wB:p1 '+75 sec');  soon_id=$1 soon_at=$2
+# A typed time moves up to the next whole minute, so '+40 sec' fires 40 to 99
+# seconds from now: always inside the two minutes that make a job due soon.
+set -- $(arm wB:p1 '+40 sec');  soon_id=$1 soon_at=$2
 set -- $(arm wA:p1 '+200 sec'); cal_id=$1 cal_at=$2
 set -- $(arm wB:p3 '+30 min');  far_id=$1
 set -- $(arm wB:p3 '+40 min' --persistent); keep_id=$1

@@ -21,7 +21,7 @@ jobs:
       version: ${{ steps.check.outputs.version }}
       prerelease: ${{ steps.check.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       # The tag, the changelog and the plugin manifest must agree.
       - id: check
         run: |
@@ -48,10 +48,11 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # The newest stable Go; go.mod names only the oldest that builds.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: stable
       - name: Build the archives
         run: tools/dist "$VERSION" dist
       - name: Create the release
@@ -72,7 +73,7 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       # From the public repository, install.sh downloads the release the way
       # a user's would. Any other repository's assets need a token, so they
       # are fetched first and installed from disk.
@@ -95,7 +96,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       # The tag's formula with its archive's URL and checksum, written only
       # when the tap's differs and read back after; see tools/bump-tap.
       - name: Write the formula to the tap
@@ -109,13 +110,21 @@ jobs:
           tools/bump-tap "$VERSION"
 
   brew:
-    name: Install from the tap
+    name: Install from the tap on ${{ matrix.runner }}
     needs: [version, tap]
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.runner }}
     env:
       VERSION: ${{ needs.version.outputs.version }}
       HOMEBREW_NO_INSTALL_CLEANUP: "1"
     steps:
+      # Ubuntu's runner carries Homebrew, but not on the PATH.
+      - name: Put Homebrew on the PATH
+        if: runner.os == 'Linux'
+        run: echo /home/linuxbrew/.linuxbrew/bin >> "$GITHUB_PATH"
       # The command a user types, from the tap the previous job just bumped.
       - name: Install with Homebrew
         run: |

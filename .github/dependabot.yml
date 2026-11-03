@@ -2,12 +2,18 @@
 # request per ecosystem: for the GitHub Actions the workflows use, and for Go
 # modules. go.mod requires none today, so that entry waits for the first.
 # Dependabot does not cover the Go standard library; CI runs govulncheck.
+# Patch and minor updates merge themselves once CI passes (auto-merge.yml).
 version: 2
 updates:
+  # Actions are pinned to commits, so each release is an update. One is
+  # proposed only after it has been out a week, which gives a bad release
+  # time to be found before it merges itself. Security updates do not wait.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "chore"
     groups:

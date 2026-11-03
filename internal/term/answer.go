@@ -30,9 +30,9 @@ const (
 // control characters left out.
 func Answer(tty io.ReadWriter, prompt string) (string, Outcome) {
 	if f, ok := tty.(*os.File); ok {
-		if restore, err := keyByKey(f); err == nil {
+		if restore, queued, err := keyByKey(f); err == nil {
 			defer restore()
-			return edit(f, f, prompt)
+			return edit(f, f, prompt, queued)
 		}
 	}
 	fmt.Fprint(tty, prompt)
@@ -46,19 +46,26 @@ func Answer(tty io.ReadWriter, prompt string) (string, Outcome) {
 // keyByKey switches f to handing over each key as it is pressed, without echo
 // and without turning Ctrl-C into a signal, and returns what puts it back.
 // Output is processed as before, so a newline still returns the carriage.
-func keyByKey(f *os.File) (restore func(), err error) {
+// queued is how many bytes were already waiting at the switch, or -1 when the
+// terminal does not say.
+func keyByKey(f *os.File) (restore func(), queued int, err error) {
 	var old syscall.Termios
 	if err := termios(f.Fd(), ioctlGetTermios, &old); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	t := old
 	t.Lflag &^= syscall.ICANON | syscall.ECHO | syscall.ISIG | syscall.IEXTEN
 	t.Iflag &^= syscall.ICRNL | syscall.IXON
 	t.Cc[syscall.VMIN], t.Cc[syscall.VTIME] = 1, 0
 	if err := termios(f.Fd(), ioctlSetTermios, &t); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return func() { _ = termios(f.Fd(), ioctlSetTermios, &old) }, nil
+	restore = func() { _ = termios(f.Fd(), ioctlSetTermios, &old) }
+	var n int32
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), ioctlQueued, uintptr(unsafe.Pointer(&n))); errno != 0 {
+		return restore, -1, nil
+	}
+	return restore, int(n), nil
 }
 
 func termios(fd, request uintptr, t *syscall.Termios) error {
@@ -71,7 +78,12 @@ func termios(fd, request uintptr, t *syscall.Termios) error {
 // edit reads keys from in until Enter, Ctrl-C, or the end of the input, and
 // after each change redraws prompt and the line on out, with the cursor in
 // its place. The line has no wrapping to follow, as answers are short.
-func edit(in io.Reader, out io.Writer, prompt string) (string, Outcome) {
+//
+// queued is how many bytes were already waiting when keys began to be read
+// one by one, or -1 when that is not known: a NUL among them is an end of
+// input that Linux kept from while the terminal read lines. A NUL typed
+// after, which is what Ctrl-Space sends, does nothing.
+func edit(in io.Reader, out io.Writer, prompt string, queued int) (string, Outcome) {
 	var line []rune
 	at := 0 // the cursor, as an index into line
 	draw := func() {
@@ -82,7 +94,7 @@ func edit(in io.Reader, out io.Writer, prompt string) (string, Outcome) {
 		io.WriteString(out, s)
 	}
 	draw()
-	keys := keyReader{in}
+	keys := &keyReader{in: in, queued: queued}
 	for {
 		k, r, ok := keys.next()
 		if !ok {
@@ -151,14 +163,20 @@ const (
 )
 
 // keyReader turns a terminal's bytes into keys. It reads a byte at a time, so
-// nothing typed after an answer is taken from the next one.
-type keyReader struct{ in io.Reader }
+// nothing typed after an answer is taken from the next one. queued is how
+// many bytes were waiting when it began, or -1 when that is not known, and
+// read how many it has taken.
+type keyReader struct {
+	in           io.Reader
+	queued, read int
+}
 
-func (k keyReader) byte() (byte, bool) {
+func (k *keyReader) byte() (byte, bool) {
 	var b [1]byte
 	for {
 		n, err := k.in.Read(b[:])
 		if n == 1 {
+			k.read++
 			return b[0], true
 		}
 		if err != nil {
@@ -169,7 +187,7 @@ func (k keyReader) byte() (byte, bool) {
 
 // next is the next key, with the character when it types one. ok is false at
 // the end of the input.
-func (k keyReader) next() (key, rune, bool) {
+func (k *keyReader) next() (key, rune, bool) {
 	b, ok := k.byte()
 	if !ok {
 		return keyNone, 0, false
@@ -179,12 +197,19 @@ func (k keyReader) next() (key, rune, bool) {
 		return keyEnter, 0, true
 	case b == 0x03:
 		return keyCancel, 0, true
+	case b == 0x04:
+		return keyEOF, 0, true
 	// Linux keeps an end of input that came while the terminal still read
 	// lines as a NUL byte, and hands that over once keys are read one by one.
 	// Taking it for Ctrl-D ends a run fed no more input, which would
-	// otherwise wait for good.
-	case b == 0x04 || b == 0x00:
-		return keyEOF, 0, true
+	// otherwise wait for good. Ctrl-Space sends a NUL too, but it can only
+	// be typed after the switch, so a NUL that was not already waiting then
+	// does nothing. Without the count, every NUL is taken for Ctrl-D.
+	case b == 0x00:
+		if k.queued < 0 || k.read <= k.queued {
+			return keyEOF, 0, true
+		}
+		return keyNone, 0, true
 	case b == 0x7f || b == 0x08:
 		return keyBackspace, 0, true
 	case b == 0x01:
@@ -222,7 +247,7 @@ func (k keyReader) next() (key, rune, bool) {
 // escape reads the rest of a key that starts with Esc: "[" and its
 // parameters up to a final byte, or "O" and one letter. Esc followed by
 // anything else is a key the line has no use for.
-func (k keyReader) escape() key {
+func (k *keyReader) escape() key {
 	b, ok := k.byte()
 	if !ok {
 		return keyNone

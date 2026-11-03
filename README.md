@@ -114,7 +114,7 @@ The [usage reference](docs/usage.md) lists every option.
 
 ![The overlay over a Claude Code agent with no usage limit, reading "+30 min" back as a time](docs/media/plugin.png)
 
-Install it with Herdr 0.9.3 or newer:
+Install it with Herdr 0.9.5 or newer:
 
 ```sh
 herdr plugin install dj-skn/schedule-send

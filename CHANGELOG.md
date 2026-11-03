@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A time typed without seconds, such as `+30`, fires on a whole minute and
+  is shown without seconds; seconds typed on purpose are kept. "One minute
+  from now" after a limit has passed moves up to a whole minute too.
+- The Herdr plugin needs Herdr 0.9.5 or newer, the release its checks run
+  against.
+- Releases are built with the newest stable Go, and building from source
+  needs Go 1.27.3 or newer.
+- Releases are built by GitHub Actions pinned to commits, not to tags that
+  can be moved.
+
+### Fixed
+
+- Ctrl-Space on an empty answer no longer ends the run without scheduling
+  anything; it does nothing, as it already did once text was typed.
+
 ## [0.1.0] - 2026-10-24
 
 The first public release.

@@ -9,6 +9,15 @@ if [ -n "$unformatted" ]; then
   echo "$unformatted" >&2
   exit 1
 fi
+# Every action runs at a full commit with its version beside it, which
+# Dependabot keeps current; GitHub refuses the rest. A workflow of this
+# repository is named by its path.
+unpinned="$(grep -rn -E '^[[:space:]-]*uses:' .github | grep -v -E 'uses:[[:space:]]+(\./|[^@[:space:]]+@[0-9a-f]{40} # v[0-9])' || true)"
+if [ -n "$unpinned" ]; then
+  echo "Actions not pinned to a full commit with its version beside it:" >&2
+  echo "$unpinned" >&2
+  exit 1
+fi
 # Each system's scheduler is its own file, so vet both; only one can run here.
 GOOS=linux go vet ./...
 GOOS=darwin go vet ./...

@@ -313,7 +313,7 @@ func TestAutoAfterTheResetSendsAMinuteFromNow(t *testing.T) {
 	if h.stderr.String() != want {
 		t.Errorf("stderr %q, want %q", h.stderr, want)
 	}
-	if !strings.Contains(h.stdout.String(), "at=2026-10-03 16:17:40\n") {
+	if !strings.Contains(h.stdout.String(), "at=2026-10-03 16:18:00\n") {
 		t.Errorf("stdout:\n%s", h.stdout)
 	}
 }
@@ -358,10 +358,10 @@ func TestConfirmOverDefaultStaysAMinuteAhead(t *testing.T) {
 	if code := h.a.main([]string{"--pane", "wB:p1", "--dry-run"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.stderr)
 	}
-	if want := "│  Enter keeps Sat 16:17:40, 1 min from now\n"; !strings.Contains(h.tty.String(), want) {
+	if want := "│  Enter keeps Sat 16:18, 1 min from now\n"; !strings.Contains(h.tty.String(), want) {
 		t.Errorf("terminal:\n%s\nwant it to hold:\n%s", h.tty, want)
 	}
-	for _, want := range []string{"at=2026-10-03 16:19:40\n", "delay_seconds=60\n"} {
+	for _, want := range []string{"at=2026-10-03 16:20:00\n", "delay_seconds=80\n"} {
 		if !strings.Contains(h.stdout.String(), want) {
 			t.Errorf("stdout lacks %q:\n%s", want, h.stdout)
 		}
@@ -396,8 +396,8 @@ func TestConfirmJudgesAnswersWhenGiven(t *testing.T) {
 		_, rest, _ := strings.Cut(h.stdout.String(), "run_at_epoch=")
 		line, _, _ := strings.Cut(rest, "\n")
 		runAt, _ := strconv.ParseInt(line, 10, 64)
-		if d := runAt - answered; d < 60 || d > 65 {
-			t.Fatalf("sends %d s after the answer, want about 60:\n%s", d, h.stdout)
+		if d := runAt - answered; d < 60 || d > 125 || runAt%60 != 0 {
+			t.Fatalf("sends %d s after the answer, want the minute at or after 60 s:\n%s", d, h.stdout)
 		}
 		if want := " · in " + when.Delay(runAt-answered) + " · Enter keeps it\n"; !strings.Contains(h.tty.String(), want) {
 			t.Errorf("terminal lacks %q:\n%s", want, h.tty)
@@ -744,7 +744,8 @@ func TestPickerAsksAgainOnTheRail(t *testing.T) {
 
 func TestShortOffsetAndStrayKeyCodes(t *testing.T) {
 	// The arrow keys' codes come through a terminal that reads whole lines,
-	// and are left out of the answer; "+30" is thirty minutes.
+	// and are left out of the answer; "+30" is thirty minutes, up to the whole
+	// minute.
 	input := "\n\x1b[A\x1b[C+30\n\n"
 	h := newHarness(t, &input)
 	// date(1) resolves "+30" from the real clock, so the answer is given at
@@ -757,8 +758,8 @@ func TestShortOffsetAndStrayKeyCodes(t *testing.T) {
 	_, rest, _ := strings.Cut(h.stdout.String(), "run_at_epoch=")
 	line, _, _ := strings.Cut(rest, "\n")
 	runAt, _ := strconv.ParseInt(line, 10, 64)
-	if d := runAt - answered; d < 1800 || d > 1805 {
-		t.Fatalf("sends %d s after the answer, want about 1800:\n%s", d, h.stdout)
+	if d := runAt - answered; d < 1800 || d > 1865 || runAt%60 != 0 {
+		t.Fatalf("sends %d s after the answer, want the minute at or after 1800 s:\n%s", d, h.stdout)
 	}
 	if want := " · in " + when.Delay(runAt-answered) + " · Enter keeps it\n"; !strings.Contains(h.tty.String(), want) {
 		t.Errorf("terminal lacks %q:\n%s", want, h.tty)

@@ -954,7 +954,7 @@ func (a *app) detectAt(now int64) (int64, error) {
 	fromNow := false
 	switch {
 	case st.State == limit.Over:
-		proposed, fromNow = now+limitMargin, true
+		proposed, fromNow = when.UpToMinute(now+limitMargin), true
 	case st.State != limit.None && st.Reset != 0:
 		proposed = st.Reset + limitMargin
 	}
@@ -1045,7 +1045,7 @@ func (a *app) confirmAt(q *asker, def int64, fromNow bool, now int64) (int64, er
 			case def == 0:
 				continue
 			case fromNow:
-				def = max(def, now+limitMargin)
+				def = max(def, when.UpToMinute(now+limitMargin))
 			}
 			q.say(q.rail.Gap())
 			return def, nil

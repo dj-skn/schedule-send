@@ -134,7 +134,9 @@ expired limits, then the soonest known reset, then unknown ones.
 `date` expression such as `+30 min`. A full timestamp is `2026-10-15 18:30:00`
 or `2026-10-15T18:30:00`. `+30` and `+30m` are minutes, and `+2h` is hours. A
 clock time already past today means that time tomorrow, even across a
-daylight-saving change. A past timestamp is refused.
+daylight-saving change. A past timestamp is refused. A time given without
+seconds fires on a whole minute: `+30` typed at 18:02:54 sends at 18:33:00,
+never earlier than asked. Seconds typed on purpose, as in `18:30:15`, are kept.
 
 On Linux, timers store the instant in UTC. The receipt, the summary printed
 when a job is scheduled, shows local time. `HERDR_SCHEDULE_NOW_EPOCH` fixes
