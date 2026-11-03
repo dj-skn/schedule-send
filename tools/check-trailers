@@ -1,0 +1,27 @@
+#!/bin/sh
+# Fail when a commit in RANGE carries a Co-authored-by trailer, with the test
+# the commit-msg hook makes. CI runs it for commits made where the hook is not
+# set up. Dependabot's commits are skipped: GitHub adds their trailer when it
+# merges them, and that one is accepted.
+#
+#   tools/check-trailers origin/main..HEAD
+set -eu
+[ "$#" -eq 1 ] || { echo 'Usage: tools/check-trailers RANGE' >&2; exit 1; }
+cd "$(dirname "$0")/.."
+commits="$(git rev-list "$1")"
+message="$(mktemp)"
+trap 'rm -f "$message"' EXIT
+refused=0
+for commit in $commits; do
+  [ "$(git log -1 --format=%an "$commit")" != 'dependabot[bot]' ] || continue
+  git log -1 --format=%B "$commit" > "$message"
+  if ! .githooks/commit-msg "$message" 2> /dev/null; then
+    git log -1 --format='  %h %s' "$commit" >&2
+    refused=$((refused + 1))
+  fi
+done
+if [ "$refused" -gt 0 ]; then
+  echo "check-trailers: the $refused commit(s) above carry a Co-authored-by trailer, which this repository does not take." >&2
+  exit 1
+fi
+echo 'check-trailers: ok'
