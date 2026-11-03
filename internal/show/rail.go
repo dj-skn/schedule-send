@@ -18,13 +18,22 @@ type Rail struct{ p palette }
 // NewRail draws in the colours of the terminal the questions are asked on.
 func NewRail(c term.Colors) Rail { return Rail{palette(c)} }
 
-// Top is the rail's first line: what the run does, and how to leave it.
-func (r Rail) Top(dryRun bool) string {
+// Top is the rail's first line: what the run does, and how to leave it, at
+// the right on a terminal wide enough, closer in on a narrow one, and left
+// out where it would wrap. width is 0 when it is not known.
+func (r Rail) Top(dryRun bool, width int) string {
 	title := "Schedule a send"
 	if dryRun {
 		title += " · dry run"
 	}
-	return r.p.dim("┌").s + "  " + plain(title).pad(41) + r.p.dim("Ctrl-C cancels").s
+	const leave = "Ctrl-C cancels"
+	switch n := len([]rune(title)); {
+	case width == 0 || 3+max(n, 41)+len(leave) <= width:
+		return r.p.dim("┌").s + "  " + plain(title).pad(41) + r.p.dim(leave).s
+	case 3+n+2+len(leave) <= width:
+		return r.p.dim("┌").s + "  " + title + "  " + r.p.dim(leave).s
+	}
+	return r.p.dim("┌").s + "  " + title
 }
 
 // Gap is the rail with nothing beside it, between steps.

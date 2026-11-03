@@ -7,8 +7,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/dj-skn/schedule-send/internal/term"
 )
@@ -187,8 +189,10 @@ type Mark struct {
 
 // Render draws the picker: agents and plain panes in separate groups, each row
 // numbered by its place in rows. marks, keyed by pane, may be nil. proc names a
-// plain pane's foreground process.
-func Render(w io.Writer, rows []Row, marks map[string]Mark, c term.Colors, self string, proc func(pane string) string) {
+// plain pane's foreground process. width is the columns a row may take, or 0
+// when that is not known, as through a pipe; fit says how a row that is too
+// wide is drawn.
+func Render(w io.Writer, rows []Row, marks map[string]Mark, c term.Colors, self string, proc func(pane string) string, width int) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, c.Bold+"agents"+c.Reset)
 	any := false
@@ -220,8 +224,22 @@ func Render(w io.Writer, rows []Row, marks map[string]Mark, c term.Colors, self 
 		if r.Pane == self {
 			here = " " + c.Dim + "← this pane" + c.Reset
 		}
-		fmt.Fprintf(w, "%3d  %s %-8s %-8s %-8s %-26s %s%s\n",
-			i+1, glyph, status, r.Agent, r.Pane, PrettyCwd(r.Cwd), text, here)
+		lead := fmt.Sprintf("%3d  %s %-8s %-8s %-8s ", i+1, glyph, status, r.Agent, r.Pane)
+		full := lead + fmt.Sprintf("%-26s %s%s", PrettyCwd(r.Cwd), text, here)
+		notes := ""
+		if m.Note != "" {
+			notes = c.Dim + m.Note + c.Reset
+		}
+		if here != "" {
+			notes = joined(notes, here[1:])
+		}
+		dimTitle := ""
+		if title != "" {
+			dimTitle = c.Dim + title + c.Reset
+		}
+		for _, line := range fit(width, full, lead, PrettyCwd(r.Cwd), 26, dimTitle, notes) {
+			fmt.Fprintln(w, line)
+		}
 	}
 	if !any {
 		fmt.Fprintln(w, "     "+c.Dim+"none"+c.Reset)
@@ -246,13 +264,87 @@ func Render(w io.Writer, rows []Row, marks map[string]Mark, c term.Colors, self 
 		}
 		note := ""
 		if m.Note != "" {
-			note = "  " + c.Dim + m.Note + c.Reset
+			note = c.Dim + m.Note + c.Reset
 		}
-		fmt.Fprintf(w, "%3d  %s %-8s %-8s %s%s\n",
-			i+1, glyph, label, r.Pane, PrettyCwd(r.Cwd), note)
+		lead := fmt.Sprintf("%3d  %s %-8s %-8s ", i+1, glyph, label, r.Pane)
+		full := lead + joined(PrettyCwd(r.Cwd), note)
+		for _, line := range fit(width, full, lead, PrettyCwd(r.Cwd), 0, "", note) {
+			fmt.Fprintln(w, line)
+		}
 	}
 	if !any {
 		fmt.Fprintln(w, "     "+c.Dim+"none"+c.Reset)
 	}
 	fmt.Fprintln(w)
 }
+
+// fit lays out a picker row in width columns. full is the row as drawn when it
+// fits or width is 0; lead is everything before the folder, pad the folder's
+// column width in full, and title and notes what may follow it, drawn. A row
+// too wide drops its title, keeping the notes in the title's column while
+// they fit there; then shortens its folder from the left; and when the folder
+// would be cut too short, puts its notes on a second line, with the title when
+// it fits there. The notes, a limit's reset and the sends already scheduled,
+// always stay.
+func fit(width int, full, lead, cwd string, pad int, title, notes string) []string {
+	if width <= 0 || visible(full) <= width {
+		return []string{full}
+	}
+	if line := lead + fmt.Sprintf("%-*s ", pad, cwd) + notes; pad > 0 && notes != "" && visible(line) <= width {
+		return []string{line}
+	}
+	if line := lead + joined(cwd, notes); visible(line) <= width {
+		return []string{line}
+	}
+	room := width - visible(lead)
+	if notes != "" {
+		room -= 2 + visible(notes)
+	}
+	if room >= min(12, utf8.RuneCountInString(cwd)) {
+		return []string{lead + joined(shorten(cwd, room), notes)}
+	}
+	lines := []string{lead + shorten(cwd, width-visible(lead))}
+	second := "     " + joined(title, notes)
+	if visible(second) > width {
+		second = "     " + notes
+	}
+	if notes != "" || title != "" {
+		lines = append(lines, strings.TrimRight(second, " "))
+	}
+	return lines
+}
+
+// joined is a and b two spaces apart, or whichever is not empty.
+func joined(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	}
+	return a + "  " + b
+}
+
+// shorten keeps the end of a folder in n columns, from a "/" where one fits:
+// "…/reports-tool" for "~/projects/reports-tool".
+func shorten(p string, n int) string {
+	r := []rune(p)
+	switch {
+	case len(r) <= n:
+		return p
+	case n <= 1:
+		return "…"
+	}
+	for i, ch := range r {
+		if ch == '/' && len(r)-i+1 <= n {
+			return "…" + string(r[i:])
+		}
+	}
+	return "…" + string(r[len(r)-(n-1):])
+}
+
+var escape = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// visible is how many columns s takes on a terminal, its colours left out.
+// Each character is counted as one column.
+func visible(s string) int { return utf8.RuneCountInString(escape.ReplaceAllString(s, "")) }

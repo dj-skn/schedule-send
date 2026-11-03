@@ -288,3 +288,28 @@ func TestAClashAtWhenAsksAgainAndKeepsTheMessage(t *testing.T) {
 		}
 	})
 }
+
+func TestThePickerFitsANarrowTerminal(t *testing.T) {
+	input := "\n\n\n"
+	h := newHarness(t, &input)
+	h.a.ttyWidth = func() int { return 52 }
+	twoLimited(t, h)
+	if code := h.a.main([]string{"--dry-run"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	for _, want := range []string{
+		"┌  Schedule a send · dry run  Ctrl-C cancels\n",
+		"│    1  ◷ limited  claude   wB:p1    …/shop-backend\n│       resets 16:00 (weekly)\n",
+		"│    4  » queued   claude   wA:p1    …/analytics\n│       resets 16:00 (weekly)  sends 16:01\n",
+	} {
+		if !strings.Contains(h.tty.String(), want) {
+			t.Errorf("terminal lacks %q:\n%s", want, h.tty)
+		}
+	}
+	picker := h.tty.String()[:strings.Index(h.tty.String(), "Enter takes 1")]
+	for _, line := range strings.Split(picker, "\n") {
+		if n := len([]rune(line)); n > 52 {
+			t.Errorf("%d columns wide: %q", n, line)
+		}
+	}
+}

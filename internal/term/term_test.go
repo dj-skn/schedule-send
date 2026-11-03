@@ -5,7 +5,9 @@ import (
 	"io"
 	"os"
 	"strings"
+	"syscall"
 	"testing"
+	"unsafe"
 )
 
 func TestIsTerminal(t *testing.T) {
@@ -69,5 +71,25 @@ func TestReadLineLeavesTheRest(t *testing.T) {
 	rest, _ := io.ReadAll(r)
 	if string(rest) != "\n" {
 		t.Errorf("left %q, want %q", rest, "\n")
+	}
+}
+
+func TestWidthReadsTheWindow(t *testing.T) {
+	master, slave := openPtyPair(t)
+	size := struct{ Rows, Cols, X, Y uint16 }{Rows: 24, Cols: 52}
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, master.Fd(), syscall.TIOCSWINSZ, uintptr(unsafe.Pointer(&size))); errno != 0 {
+		t.Fatal("setting the window size:", errno)
+	}
+	if got := Width(slave.Fd()); got != 52 {
+		t.Errorf("Width of a 52-column window = %d", got)
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	if got := Width(r.Fd()); got != 0 {
+		t.Errorf("Width of a pipe = %d, want 0", got)
 	}
 }

@@ -79,6 +79,7 @@ type app struct {
 	h              herdr.Client
 	selfPane       string                 // HERDR_PANE_ID
 	installedPath  func() (string, error) // private injection for isolated tests
+	ttyWidth       func() int             // the terminal's columns, for isolated tests
 	exit           func(code int)         // os.Exit; tests catch it
 	statusTimeouts statusTimeouts         // private deadlines for isolated tests
 
@@ -96,10 +97,19 @@ type app struct {
 // comes from one stream, as typed, and the rail ends with how the run came
 // out.
 type asker struct {
-	tty  io.ReadWriteCloser
-	c    term.Colors
-	rail show.Rail
-	stop func() // hands Ctrl-C back; nil once it has
+	tty   io.ReadWriteCloser
+	c     term.Colors
+	rail  show.Rail
+	width int    // the terminal's columns; 0 when unknown
+	stop  func() // hands Ctrl-C back; nil once it has
+}
+
+// room is the columns beside the rail, or 0 when the width is unknown.
+func (q *asker) room() int {
+	if q.width <= 3 {
+		return 0
+	}
+	return q.width - 3
 }
 
 // say writes lines on the terminal.
@@ -140,8 +150,14 @@ func (a *app) asking() (*asker, error) {
 		return nil, err
 	}
 	c := term.ColorsFor(tty)
-	a.ask = &asker{tty: tty, c: c, rail: show.NewRail(c)}
-	a.ask.say("", a.ask.rail.Top(a.o.dryRun), a.ask.rail.Gap())
+	width := 0
+	if a.ttyWidth != nil {
+		width = a.ttyWidth()
+	} else if f, ok := tty.(*os.File); ok {
+		width = term.Width(f.Fd())
+	}
+	a.ask = &asker{tty: tty, c: c, rail: show.NewRail(c), width: width}
+	a.ask.say("", a.ask.rail.Top(a.o.dryRun, width), a.ask.rail.Gap())
 	a.ask.stop = a.cancelOnInterrupt(a.ask)
 	return a.ask, nil
 }
@@ -789,7 +805,7 @@ func (a *app) chooseTarget() (target.Row, error) {
 			return target.Row{}, fail("ambiguous", "Multiple targets matched. Narrow with --cwd/--kind/--pane, or use --pick best.")
 		}
 		fmt.Fprintln(a.stderr, "Multiple targets matched. Narrow with --cwd/--kind/--pane, or use --pick best.")
-		target.Render(a.stderr, rows, marks, term.ColorsFor(a.stderr), a.selfPane, a.h.ProcName)
+		target.Render(a.stderr, rows, marks, term.ColorsFor(a.stderr), a.selfPane, a.h.ProcName, 0)
 		return target.Row{}, failure{code: 1}
 	}
 
@@ -799,7 +815,7 @@ func (a *app) chooseTarget() (target.Row, error) {
 		return target.Row{}, die("Could not open /dev/tty for target selection.")
 	}
 	var list bytes.Buffer
-	target.Render(&list, rows, marks, q.c, a.selfPane, a.h.ProcName)
+	target.Render(&list, rows, marks, q.c, a.selfPane, a.h.ProcName, q.room())
 	q.say(q.rail.Step("Which agent or pane?"))
 	for _, line := range strings.Split(strings.Trim(list.String(), "\n"), "\n") {
 		q.say(q.rail.Line(line))
@@ -1206,7 +1222,7 @@ func (a *app) showTargets() error {
 		show.TargetsJSON(a.stdout, listed)
 		return nil
 	}
-	target.Render(a.stdout, rows, marks, term.ColorsFor(a.stdout), a.selfPane, a.h.ProcName)
+	target.Render(a.stdout, rows, marks, term.ColorsFor(a.stdout), a.selfPane, a.h.ProcName, 0)
 	return nil
 }
 
