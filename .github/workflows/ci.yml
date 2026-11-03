@@ -22,6 +22,30 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # No commit this run adds may carry a Co-authored-by trailer: a pull
+      # request's own commits, a push's new ones, or for a run started by
+      # hand what is not on main. A push whose old head is gone checks its
+      # new head alone.
+      - name: No co-author trailers
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          case "$EVENT" in
+            pull_request) range="$BASE..$HEAD" ;;
+            push)
+              if git cat-file -e "$BEFORE^{commit}" 2> /dev/null; then
+                range="$BEFORE..$GITHUB_SHA"
+              else
+                range="$GITHUB_SHA^!"
+              fi ;;
+            *) range="origin/main..HEAD" ;;
+          esac
+          tools/check-trailers "$range"
       # The newest stable Go; go.mod names only the oldest that builds.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
