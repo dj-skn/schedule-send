@@ -16,7 +16,9 @@ passed on it. On 2026-11-03, ahead of P3.1, the owner merged `ss-3.1` into
 first pull request then merged itself. P3.1 and the release reach `main`
 through a second merge of `ss-3.1`. The owner settled P3.1's decisions on
 2026-11-03 and instructed its build. P3.1 is built and in `ss-3.1`, after CI
-passed on it.
+passed on it. On 2026-11-03 the owner instructed the release: `ss-3.1` went
+into `main` a second time, and v0.1.1 is released, so P4 is complete. P5 is
+next, with its walkthrough.
 
 This document is published with the repository. It names no private
 project, address, or identifier.
@@ -69,7 +71,7 @@ project, address, or identifier.
 | P2 | The prompt: minutes and Ctrl-Space | built; Mac run to come |
 | P3 | Pinned actions and Dependabot's auto-merge | complete |
 | P3.1 | The picker shows sends already scheduled | built; Mac look to come |
-| P4 | Release v0.1.1 | step 1 done; release after P3.1 |
+| P4 | Release v0.1.1 | complete |
 | P5 | The owner's other public repositories | walkthrough first |
 
 P3 comes before the release so that v0.1.1 runs pinned actions, and P3.1 so
@@ -538,6 +540,41 @@ settings. The release waits for P3.1.
 - No CI ran on `main` for `ee9d7d2`: GitHub starts no workflow from a push
   made with a workflow's own token. The pull request's checks, run on the
   merged result, were its test.
+
+#### As built — 2026-11-03
+
+- `ss-3.1` went into `main` a second time as `ebe6adc`, and `tools/check`
+  passed there, all 12 packages. `tools/release 0.1.1` dated the changelog
+  2026-11-03, set the plugin to 0.1.1, committed `21a78e0`, and made the
+  annotated tag. The tree, the added lines, the messages, and the tag had
+  zero private-term hits, and every author, committer, and tagger is the
+  noreply address.
+- One atomic push took `main` and `v0.1.1`. GitHub printed the bypass
+  notice: "Bypassed rule violations for refs/heads/main: 4 of 4 required
+  status checks are expected."
+- CI on `main` and all 14 jobs of the release passed. The release is
+  published, not a draft, with the two Linux archives and `checksums.txt`.
+  `install.sh` installed 0.1.1 on Ubuntu, x86 and Arm. `tools/bump-tap`
+  brought the tap's formula to 0.1.1, committed with the noreply address.
+  Homebrew on macOS and on Ubuntu installed it, and its version check,
+  test, and audit passed. The formula's checksum matches the tag's archive,
+  hashed here: `4363bbda…cb5b`.
+- The release went out before the owner's Mac run of P2 and Mac look at
+  P3.1. CI's macOS jobs passed both phases' tests; the hand checks stay
+  open.
+
+Found while releasing:
+
+- The owner asked for GitHub to refuse any commit carrying a
+  `Co-authored-by` trailer, on any branch. GitHub's rule on commit messages
+  is for Enterprise organizations: asked to create one here, disabled,
+  GitHub answered 422 "Invalid rule 'commit_message_pattern'", and nothing
+  was created.
+- GitHub adds `Co-authored-by: dependabot[bot]` itself when it
+  squash-merges Dependabot's pull requests. `ee9d7d2` carries it, and the
+  pull request's own commit does not; it is the only commit in the history
+  with the trailer. A local hook, a CI check, and merging Dependabot by
+  rebase are with the owner to decide.
 
 ### P5 — The owner's other public repositories
 
