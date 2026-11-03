@@ -69,9 +69,33 @@ func (r Rail) Cancelled() string { return r.end("Cancelled. Nothing was schedule
 func (r Rail) end(s string) string { return r.p.dim("└").s + "  " + s }
 
 // RailLines is the report as it opens the questions: where the send goes,
-// then, for an agent, what its screen says of a usage limit. Each line goes
-// beside the rail.
+// then, for an agent, what its screen says of a usage limit, and last the
+// sends already scheduled to it. Each line goes beside the rail.
 func (r Report) RailLines(c term.Colors) []string {
+	lines := r.railLines(c)
+	if len(r.Queued) > 0 {
+		lines = append(lines, QueuedLine(c, r.Queued, r.Now))
+	}
+	return lines
+}
+
+// QueuedLine says, beside the rail, that a target already has sends before
+// another is armed.
+func QueuedLine(c term.Colors, times []int64, now int64) string {
+	p := palette(c)
+	return p.cyan("»").s + " already has " + QueuedPhrase(times, now) + p.dim(" · this adds another").s
+}
+
+// QueuedPhrase says when the sends already scheduled to a target fire: "a
+// send at Sat 16:01", or "2 sends, the next at Sat 16:01".
+func QueuedPhrase(times []int64, now int64) string {
+	if len(times) == 1 {
+		return "a send at " + Time(times[0], now)
+	}
+	return fmt.Sprintf("%d sends, the next at %s", len(times), Time(times[0], now))
+}
+
+func (r Report) railLines(c term.Colors) []string {
 	p := palette(c)
 	place := "pane " + r.Pane
 	if r.Kind == "agent" {

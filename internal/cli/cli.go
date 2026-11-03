@@ -543,6 +543,11 @@ func (a *app) run(args []string) (retErr error) {
 		a.warn(fmt.Sprintf("Warning: agent in %s is blocked on a prompt right now.", t.Pane))
 	}
 
+	// The questions open with the target's report, which says this itself.
+	if !ask {
+		a.tellQueued(t)
+	}
+
 	var runAt int64
 	if detect {
 		if runAt, err = a.detectAt(now); err != nil {
@@ -967,7 +972,7 @@ func (a *app) detectAt(now int64) (int64, error) {
 	report := show.Report{
 		Kind: a.tgt.Kind, Agent: a.tgt.Agent, Pane: a.tgt.Pane, Status: a.tgt.Status, Cwd: a.tgt.Cwd,
 		Summary: target.Summary(a.tgt), Limit: st, Message: a.o.message, Keys: a.o.keys,
-		Margin: limitMargin, Auto: a.o.auto, Now: now,
+		Margin: limitMargin, Auto: a.o.auto, Now: now, Queued: a.queued()[a.tgt.Pane],
 	}
 
 	if a.o.auto {

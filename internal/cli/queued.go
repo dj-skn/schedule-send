@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dj-skn/schedule-send/internal/job"
+	"github.com/dj-skn/schedule-send/internal/show"
 	"github.com/dj-skn/schedule-send/internal/target"
 	"github.com/dj-skn/schedule-send/internal/when"
 )
@@ -108,4 +109,18 @@ func queuedNote(times []int64, now int64) string {
 		return "sends " + noteTime(times[0], now)
 	}
 	return fmt.Sprintf("%d sends, next %s", len(times), noteTime(times[0], now))
+}
+
+// tellQueued says that the target already has sends, before another is
+// armed: beside the rail when the picker opened one, else as a note.
+func (a *app) tellQueued(t target.Row) {
+	times := a.queued()[t.Pane]
+	if len(times) == 0 {
+		return
+	}
+	if a.ask != nil {
+		a.ask.say(a.ask.rail.Line(show.QueuedLine(a.ask.c, times, a.now)))
+		return
+	}
+	a.note(fmt.Sprintf("%s already has %s; this adds another.", t.Pane, show.QueuedPhrase(times, a.now)))
 }

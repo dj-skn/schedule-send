@@ -27,7 +27,7 @@ func (h *harness) schedule(t *testing.T, s job.State) {
 
 func (h *harness) armed(t *testing.T, ids ...string) {
 	t.Helper()
-	var units []string
+	units := strings.Fields(os.Getenv("SYSTEMCTL_STANDIN_ACTIVE"))
 	dir := filepath.Join(h.dir, "launchd")
 	os.MkdirAll(dir, 0o755)
 	for _, id := range ids {
@@ -96,16 +96,21 @@ func TestQueuedWithoutStateIsEmpty(t *testing.T) {
 	}
 }
 
-// twoLimited makes wA:p1 show the same weekly limit as wB:p1, and schedules a
-// send to wA:p1 for 16:01: the owner's screenshot, two agents held by one
-// limit and one of them already scheduled.
-func twoLimited(t *testing.T, h *harness) {
+// limitA makes wA:p1 show the same weekly limit as wB:p1.
+func limitA(t *testing.T, h *harness) {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(h.dir, "herdr", "visible-wB-p1.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	os.WriteFile(filepath.Join(h.dir, "herdr", "visible-wA-p1.txt"), b, 0o644)
+}
+
+// twoLimited is the owner's screenshot: wA:p1 and wB:p1 held by one limit,
+// and wA:p1 already has a send for 16:01, the time a run proposes.
+func twoLimited(t *testing.T, h *harness) {
+	t.Helper()
+	limitA(t, h)
 	h.schedule(t, job.State{ID: "20261003-160100-wAp1", Kind: "agent", PaneID: "wA:p1", Agent: "claude",
 		Cwd: "/home/dev/projects/analytics", At: "2026-10-03 16:01:00", RunAt: 1791036060})
 	h.armed(t, "20261003-160100-wAp1")
@@ -166,4 +171,84 @@ func TestPickerMarksAScheduledPaneAndCountsSends(t *testing.T) {
 	if want := "  5  » zsh      wB:p5    ~/projects/shop-backend  2 sends, next 16:30\n"; !strings.Contains(h.stderr.String(), want) {
 		t.Errorf("stderr lacks %q:\n%s", want, h.stderr)
 	}
+}
+
+// laterSend schedules a send to wA:p1 at 16:30, which is not the time a run
+// proposes for it, so a new send can be armed beside it.
+func laterSend(t *testing.T, h *harness) {
+	t.Helper()
+	h.schedule(t, job.State{ID: "20261003-163000-wAp1", Kind: "agent", PaneID: "wA:p1", Agent: "claude",
+		Cwd: "/home/dev/projects/analytics", At: "2026-10-03 16:30:00", RunAt: 1791037800})
+	h.armed(t, "20261003-163000-wAp1")
+}
+
+func TestThePluginsPromptSaysTheAgentHasASend(t *testing.T) {
+	// The plugin passes the pane it opened on, so there is no picker; the
+	// report that opens the questions says it instead.
+	input := "\n\n"
+	h := newHarness(t, &input)
+	limitA(t, h)
+	laterSend(t, h)
+	if code := h.a.main([]string{"--pane", "wA:p1", "--message", "go on", "--dry-run"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	want := `│  claude · wA:p1 · ~/projects/analytics
+│  ◷ hit its weekly limit · resets Sat 16:00, in 38m
+│  » already has a send at Sat 16:30 · this adds another
+│
+◆  When?
+`
+	if !strings.Contains(h.tty.String(), want) {
+		t.Errorf("terminal:\n%s\nwant within it:\n%s", h.tty, want)
+	}
+	if strings.Contains(h.stderr.String(), "already has") {
+		t.Errorf("said twice, on stderr too:\n%s", h.stderr)
+	}
+}
+
+func TestAGivenTimeNotesTheSendsAlreadyThere(t *testing.T) {
+	h := newHarness(t, nil)
+	laterSend(t, h)
+	if code := h.a.main([]string{"--pane", "wA:p1", "--at", "17:00", "--message", "x", "--dry-run"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	if want := "wA:p1 already has a send at Sat 16:30; this adds another.\n"; !strings.Contains(h.stderr.String(), want) {
+		t.Errorf("stderr lacks %q:\n%s", want, h.stderr)
+	}
+
+	t.Run("as JSON", func(t *testing.T) {
+		h := newHarness(t, nil)
+		laterSend(t, h)
+		if code := h.a.main([]string{"--pane", "wA:p1", "--at", "17:00", "--message", "x", "--dry-run", "--json"}); code != 0 {
+			t.Fatalf("exit %d: %s", code, h.stderr)
+		}
+		if want := `{"note":"wA:p1 already has a send at Sat 16:30; this adds another."}`; !strings.Contains(h.stderr.String(), want) {
+			t.Errorf("stderr lacks %s:\n%s", want, h.stderr)
+		}
+	})
+
+	t.Run("beside the rail after the picker", func(t *testing.T) {
+		input := "4\n"
+		h := newHarness(t, &input)
+		laterSend(t, h)
+		if code := h.a.main([]string{"--at", "17:00", "--message", "x", "--dry-run"}); code != 0 {
+			t.Fatalf("exit %d: %s", code, h.stderr)
+		}
+		if want := "│  › │\n│  » already has a send at Sat 16:30 · this adds another\n"; !strings.Contains(h.tty.String(), want) {
+			t.Errorf("terminal lacks %q:\n%s", want, h.tty)
+		}
+		if !strings.Contains(h.stdout.String(), "target=agent wA:p1 ") {
+			t.Errorf("row 4 is not wA:p1:\n%s", h.stdout)
+		}
+	})
+
+	t.Run("nothing when there is none", func(t *testing.T) {
+		h := newHarness(t, nil)
+		if code := h.a.main([]string{"--pane", "wA:p1", "--at", "17:00", "--message", "x", "--dry-run"}); code != 0 {
+			t.Fatalf("exit %d: %s", code, h.stderr)
+		}
+		if strings.Contains(h.stderr.String(), "already has") {
+			t.Errorf("stderr:\n%s", h.stderr)
+		}
+	})
 }
