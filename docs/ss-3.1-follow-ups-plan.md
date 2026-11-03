@@ -14,7 +14,8 @@ P3.1 from a screenshot of the picker. P3 is built and in `ss-3.1`, after CI
 passed on it. On 2026-11-03, ahead of P3.1, the owner merged `ss-3.1` into
 `main`, pushed it, and applied P3's settings: P4's first step. Dependabot's
 first pull request then merged itself. P3.1 and the release reach `main`
-through a second merge of `ss-3.1`.
+through a second merge of `ss-3.1`. The owner settled P3.1's decisions on
+2026-11-03 and instructed its build.
 
 This document is published with the repository. It names no private
 project, address, or identifier.
@@ -66,7 +67,7 @@ project, address, or identifier.
 | P1 | Housekeeping and current versions | complete |
 | P2 | The prompt: minutes and Ctrl-Space | built; Mac run to come |
 | P3 | Pinned actions and Dependabot's auto-merge | complete |
-| P3.1 | The picker shows sends already scheduled | walkthrough first |
+| P3.1 | The picker shows sends already scheduled | building |
 | P4 | Release v0.1.1 | step 1 done; release after P3.1 |
 | P5 | The owner's other public repositories | walkthrough first |
 
@@ -345,17 +346,73 @@ and Dependabot's checkout v7.0.1 pull request merges itself.
 
 Added on 2026-11-03 from the owner's screenshot: two agents held by the same
 limit, one of them already scheduled, and nothing in the picker to tell
-them apart. Its code check and walkthrough come before it is built. It
-starts from these facts:
+them apart.
+
+#### Code check — 2026-11-03
 
 - The picker reads each agent's screen for its limit, never the scheduled
-  sends, though each send's state records its pane, agent, and folder.
-- Enter takes the first row, which can be the agent already scheduled.
-- A second send to one pane at the same minute is refused, but only after
-  the message is typed.
-- The plugin opens on one agent and skips the picker, so a mark in the
-  picker alone would not reach it.
-- At a narrow width the header and long rows wrap.
+  sends. Each send's state records its pane, agent, and folder; asking
+  whether its timer is armed is one call per send, 10 ms measured with
+  `systemctl --user is-active` on Linux, and `launchctl print` on macOS,
+  not measured.
+- A send is delivered only if its pane still runs the same agent in the
+  same folder (`internal/worker`); a pane id alone can belong to another
+  agent by then.
+- The plugin passes the pane it opened on, so the run skips the picker and
+  opens the rail with the target's report in `detectAt`.
+- Two sends to one pane at the same minute share an id. The second is
+  refused after the message and the time are answered, and the run ends.
+  P2's rounding makes accepting the proposed reset twice land on the same
+  minute.
+- Nothing reads the window's width. A picker row needs 64 columns before
+  its title, the rail's top line 58; the screenshot is about 52.
+  `TIOCGWINSZ` is in package `syscall` on Linux and macOS.
+
+#### Decisions settled 2026-11-03
+
+1. **The mark.** A row with a send reads "queued" in the status column,
+   with its own symbol, and its note adds "sends 22:51", or "2 sends, next
+   22:51"; the limit's "resets 22:50" stays.
+2. **Order.** Within a group, rows with a send come after those without,
+   so Enter takes the one still waiting; `--pick best` follows the same
+   order.
+3. **A clash at "When?".** The time is checked when it is confirmed; a
+   clash says so and asks again, keeping the message. A time given with
+   `--at` is refused as before.
+4. **Narrow windows.** A row fits the window: the title goes first, then
+   the folder shortens from the left; the limit and send notes stay. The
+   rail's top line drops its padding.
+
+Built on these, which the owner did not object to: a send counts while its
+timer is armed, including one being delivered; a gone or invalid one does
+not. Plain panes get the same mark. The report that opens the questions
+says "already has a send at 22:51 · this adds another". The list printed
+when several targets match shows the marks, and `--json` gets a note.
+
+#### Steps
+
+1. Find each pane's scheduled sends: state that loads, the same agent and
+   folder, an armed timer.
+   → verify: unit tests for a match, a reused pane, a gone timer, an
+   invalid state, and several sends.
+2. The mark and the order in the picker, and `--pick best`.
+   → verify: the screenshot's case, two limited agents and one scheduled:
+   Enter takes the other, and the row reads "queued … sends 22:51".
+3. The line in the report when the target is given (the plugin,
+   `--pane`), and a note otherwise.
+   → verify: unit tests; `tools/plugin-smoke`.
+4. The clash check at "When?".
+   → verify: a real-terminal test: the scheduled minute asks again and the
+   message is kept; `tools/parity duplicate` unchanged.
+5. Rows and the top line fit the window.
+   → verify: rendering tests at 52, 64, and 100 columns; no width, as
+   through a pipe, is unchanged.
+6. Usage reference, changelog, full gate and parity, As built,
+   fast-forward into `ss-3.1`.
+   → verify: `tools/check`; `tools/parity` 0 unexpected; CI on macOS.
+
+Not included: cancelling or replacing a send from the picker; `--cancel`
+stays the way.
 
 ### P4 — Release v0.1.1
 
