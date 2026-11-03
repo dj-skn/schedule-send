@@ -79,6 +79,7 @@ type app struct {
 	h              herdr.Client
 	selfPane       string                 // HERDR_PANE_ID
 	installedPath  func() (string, error) // private injection for isolated tests
+	ttyWidth       func() int             // the terminal's columns, for isolated tests
 	exit           func(code int)         // os.Exit; tests catch it
 	statusTimeouts statusTimeouts         // private deadlines for isolated tests
 
@@ -86,8 +87,9 @@ type app struct {
 	tgt  target.Row
 	now  int64 // when the run started; screens are judged at this moment
 
-	lim map[string]limit.Status // set by limits
-	ask *asker                  // set by asking, at the first question
+	lim   map[string]limit.Status // set by limits
+	sends map[string][]int64      // set by queued
+	ask   *asker                  // set by asking, at the first question
 }
 
 // asker is the terminal a run asks its questions on, drawn as a rail. It is
@@ -95,10 +97,19 @@ type app struct {
 // comes from one stream, as typed, and the rail ends with how the run came
 // out.
 type asker struct {
-	tty  io.ReadWriteCloser
-	c    term.Colors
-	rail show.Rail
-	stop func() // hands Ctrl-C back; nil once it has
+	tty   io.ReadWriteCloser
+	c     term.Colors
+	rail  show.Rail
+	width int    // the terminal's columns; 0 when unknown
+	stop  func() // hands Ctrl-C back; nil once it has
+}
+
+// room is the columns beside the rail, or 0 when the width is unknown.
+func (q *asker) room() int {
+	if q.width <= 3 {
+		return 0
+	}
+	return q.width - 3
 }
 
 // say writes lines on the terminal.
@@ -139,8 +150,14 @@ func (a *app) asking() (*asker, error) {
 		return nil, err
 	}
 	c := term.ColorsFor(tty)
-	a.ask = &asker{tty: tty, c: c, rail: show.NewRail(c)}
-	a.ask.say("", a.ask.rail.Top(a.o.dryRun), a.ask.rail.Gap())
+	width := 0
+	if a.ttyWidth != nil {
+		width = a.ttyWidth()
+	} else if f, ok := tty.(*os.File); ok {
+		width = term.Width(f.Fd())
+	}
+	a.ask = &asker{tty: tty, c: c, rail: show.NewRail(c), width: width}
+	a.ask.say("", a.ask.rail.Top(a.o.dryRun, width), a.ask.rail.Gap())
 	a.ask.stop = a.cancelOnInterrupt(a.ask)
 	return a.ask, nil
 }
@@ -542,6 +559,11 @@ func (a *app) run(args []string) (retErr error) {
 		a.warn(fmt.Sprintf("Warning: agent in %s is blocked on a prompt right now.", t.Pane))
 	}
 
+	// The questions open with the target's report, which says this itself.
+	if !ask {
+		a.tellQueued(t)
+	}
+
 	var runAt int64
 	if detect {
 		if runAt, err = a.detectAt(now); err != nil {
@@ -568,7 +590,7 @@ func (a *app) run(args []string) (retErr error) {
 	// exactly what we printed and what date(1) computed.
 	calendar := when.Format(runAt, when.Calendar)
 	delay := runAt - now
-	id := when.Format(runAt, when.Stamp) + "-" + alnum(t.Pane)
+	id := sendID(runAt, t.Pane)
 	unit := job.UnitPrefix + "-" + id
 
 	// The id is the fire time plus the pane, so a second send to the same pane
@@ -758,7 +780,7 @@ func (a *app) chooseTarget() (target.Row, error) {
 		return rows[0], nil
 	}
 	rows = target.Sort(rows)
-	var marks map[string]target.Mark
+	marks := map[string]target.Mark{}
 	if slices.ContainsFunc(rows, target.Row.IsAgent) {
 		lim := a.limits()
 		// Without --at the send waits for a limit to lift, so the agents held
@@ -768,6 +790,11 @@ func (a *app) chooseTarget() (target.Row, error) {
 		}
 		marks = limitMarks(lim, a.now)
 	}
+	// A target that already has a send is the one least likely to need
+	// another, so the ones still waiting come first.
+	sends := a.queued()
+	rows = queuedLast(rows, sends)
+	queuedMarks(marks, sends, a.now)
 
 	if !a.stdinTTY() {
 		if o.pick == "best" {
@@ -778,7 +805,7 @@ func (a *app) chooseTarget() (target.Row, error) {
 			return target.Row{}, fail("ambiguous", "Multiple targets matched. Narrow with --cwd/--kind/--pane, or use --pick best.")
 		}
 		fmt.Fprintln(a.stderr, "Multiple targets matched. Narrow with --cwd/--kind/--pane, or use --pick best.")
-		target.Render(a.stderr, rows, marks, term.ColorsFor(a.stderr), a.selfPane, a.h.ProcName)
+		target.Render(a.stderr, rows, marks, term.ColorsFor(a.stderr), a.selfPane, a.h.ProcName, 0)
 		return target.Row{}, failure{code: 1}
 	}
 
@@ -788,7 +815,7 @@ func (a *app) chooseTarget() (target.Row, error) {
 		return target.Row{}, die("Could not open /dev/tty for target selection.")
 	}
 	var list bytes.Buffer
-	target.Render(&list, rows, marks, q.c, a.selfPane, a.h.ProcName)
+	target.Render(&list, rows, marks, q.c, a.selfPane, a.h.ProcName, q.room())
 	q.say(q.rail.Step("Which agent or pane?"))
 	for _, line := range strings.Split(strings.Trim(list.String(), "\n"), "\n") {
 		q.say(q.rail.Line(line))
@@ -961,7 +988,7 @@ func (a *app) detectAt(now int64) (int64, error) {
 	report := show.Report{
 		Kind: a.tgt.Kind, Agent: a.tgt.Agent, Pane: a.tgt.Pane, Status: a.tgt.Status, Cwd: a.tgt.Cwd,
 		Summary: target.Summary(a.tgt), Limit: st, Message: a.o.message, Keys: a.o.keys,
-		Margin: limitMargin, Auto: a.o.auto, Now: now,
+		Margin: limitMargin, Auto: a.o.auto, Now: now, Queued: a.queued()[a.tgt.Pane],
 	}
 
 	if a.o.auto {
@@ -1047,6 +1074,10 @@ func (a *app) confirmAt(q *asker, def int64, fromNow bool, now int64) (int64, er
 			case fromNow:
 				def = max(def, when.UpToMinute(now+limitMargin))
 			}
+			if a.taken(def) {
+				q.say(q.rail.Error(a.takenMsg(def, now)))
+				continue
+			}
 			q.say(q.rail.Gap())
 			return def, nil
 		}
@@ -1056,6 +1087,8 @@ func (a *app) confirmAt(q *asker, def int64, fromNow bool, now int64) (int64, er
 			q.say(q.rail.Error(fmt.Sprintf("Could not read '%s'. Try 18:30, 6:30 PM, Sep 27 1am or +30 min.", input)))
 		case epoch <= now:
 			q.say(q.rail.Error(show.Time(epoch, now) + " has already passed."))
+		case a.taken(epoch):
+			q.say(q.rail.Error(a.takenMsg(epoch, now)))
 		default:
 			q.say(q.rail.Resolved(show.Time(epoch, now), when.Delay(epoch-now)))
 			def, fromNow = epoch, false
@@ -1102,12 +1135,7 @@ func (a *app) list() {
 		} else if b, err := os.ReadFile(strings.TrimSuffix(f, ".json") + ".msg"); err == nil {
 			j.Message = string(b)
 		}
-		j.RunAt = s.RunAt
-		if j.RunAt == 0 {
-			if at, err := time.ParseInLocation(when.Calendar, s.At, when.Loc); err == nil {
-				j.RunAt = at.Unix()
-			}
-		}
+		j.RunAt = runAt(s)
 		jobs = append(jobs, j)
 	}
 	if a.o.json {
@@ -1194,7 +1222,7 @@ func (a *app) showTargets() error {
 		show.TargetsJSON(a.stdout, listed)
 		return nil
 	}
-	target.Render(a.stdout, rows, marks, term.ColorsFor(a.stdout), a.selfPane, a.h.ProcName)
+	target.Render(a.stdout, rows, marks, term.ColorsFor(a.stdout), a.selfPane, a.h.ProcName, 0)
 	return nil
 }
 

@@ -11,7 +11,12 @@ passed on it. P2 is built and in `ss-3.1`, fast-forwarded from `ss-3.1-p2`
 after CI passed on it; the owner's Mac run is still to come. The owner
 settled P3's decisions on 2026-11-03 and instructed its build, and added
 P3.1 from a screenshot of the picker. P3 is built and in `ss-3.1`, after CI
-passed on it; its GitHub settings go on at P4.
+passed on it. On 2026-11-03, ahead of P3.1, the owner merged `ss-3.1` into
+`main`, pushed it, and applied P3's settings: P4's first step. Dependabot's
+first pull request then merged itself. P3.1 and the release reach `main`
+through a second merge of `ss-3.1`. The owner settled P3.1's decisions on
+2026-11-03 and instructed its build. P3.1 is built and in `ss-3.1`, after CI
+passed on it.
 
 This document is published with the repository. It names no private
 project, address, or identifier.
@@ -62,9 +67,9 @@ project, address, or identifier.
 | --- | --- | --- |
 | P1 | Housekeeping and current versions | complete |
 | P2 | The prompt: minutes and Ctrl-Space | built; Mac run to come |
-| P3 | Pinned actions and Dependabot's auto-merge | built; settings at P4 |
-| P3.1 | The picker shows sends already scheduled | walkthrough first |
-| P4 | Release v0.1.1 | planned |
+| P3 | Pinned actions and Dependabot's auto-merge | complete |
+| P3.1 | The picker shows sends already scheduled | built; Mac look to come |
+| P4 | Release v0.1.1 | step 1 done; release after P3.1 |
 | P5 | The owner's other public repositories | walkthrough first |
 
 P3 comes before the release so that v0.1.1 runs pinned actions, and P3.1 so
@@ -342,17 +347,134 @@ and Dependabot's checkout v7.0.1 pull request merges itself.
 
 Added on 2026-11-03 from the owner's screenshot: two agents held by the same
 limit, one of them already scheduled, and nothing in the picker to tell
-them apart. Its code check and walkthrough come before it is built. It
-starts from these facts:
+them apart.
+
+#### Code check — 2026-11-03
 
 - The picker reads each agent's screen for its limit, never the scheduled
-  sends, though each send's state records its pane, agent, and folder.
-- Enter takes the first row, which can be the agent already scheduled.
-- A second send to one pane at the same minute is refused, but only after
-  the message is typed.
-- The plugin opens on one agent and skips the picker, so a mark in the
-  picker alone would not reach it.
-- At a narrow width the header and long rows wrap.
+  sends. Each send's state records its pane, agent, and folder; asking
+  whether its timer is armed is one call per send, 10 ms measured with
+  `systemctl --user is-active` on Linux, and `launchctl print` on macOS,
+  not measured.
+- A send is delivered only if its pane still runs the same agent in the
+  same folder (`internal/worker`); a pane id alone can belong to another
+  agent by then.
+- The plugin passes the pane it opened on, so the run skips the picker and
+  opens the rail with the target's report in `detectAt`.
+- Two sends to one pane at the same minute share an id. The second is
+  refused after the message and the time are answered, and the run ends.
+  P2's rounding makes accepting the proposed reset twice land on the same
+  minute.
+- Nothing reads the window's width. A picker row needs 64 columns before
+  its title, the rail's top line 58; the screenshot is about 52.
+  `TIOCGWINSZ` is in package `syscall` on Linux and macOS.
+
+#### Decisions settled 2026-11-03
+
+1. **The mark.** A row with a send reads "queued" in the status column,
+   with its own symbol, and its note adds "sends 22:51", or "2 sends, next
+   22:51"; the limit's "resets 22:50" stays.
+2. **Order.** Within a group, rows with a send come after those without,
+   so Enter takes the one still waiting; `--pick best` follows the same
+   order.
+3. **A clash at "When?".** The time is checked when it is confirmed; a
+   clash says so and asks again, keeping the message. A time given with
+   `--at` is refused as before.
+4. **Narrow windows.** A row fits the window: the title goes first, then
+   the folder shortens from the left; the limit and send notes stay. The
+   rail's top line drops its padding.
+
+Built on these, which the owner did not object to: a send counts while its
+timer is armed, including one being delivered; a gone or invalid one does
+not. Plain panes get the same mark. The report that opens the questions
+says "already has a send at 22:51 · this adds another". The list printed
+when several targets match shows the marks, and `--json` gets a note.
+
+#### Steps
+
+1. Find each pane's scheduled sends: state that loads, the same agent and
+   folder, an armed timer.
+   → verify: unit tests for a match, a reused pane, a gone timer, an
+   invalid state, and several sends.
+2. The mark and the order in the picker, and `--pick best`.
+   → verify: the screenshot's case, two limited agents and one scheduled:
+   Enter takes the other, and the row reads "queued … sends 22:51".
+3. The line in the report when the target is given (the plugin,
+   `--pane`), and a note otherwise.
+   → verify: unit tests; `tools/plugin-smoke`.
+4. The clash check at "When?".
+   → verify: a real-terminal test: the scheduled minute asks again and the
+   message is kept; `tools/parity duplicate` unchanged.
+5. Rows and the top line fit the window.
+   → verify: rendering tests at 52, 64, and 100 columns; no width, as
+   through a pipe, is unchanged.
+6. Usage reference, changelog, full gate and parity, As built,
+   fast-forward into `ss-3.1`.
+   → verify: `tools/check`; `tools/parity` 0 unexpected; CI on macOS.
+
+Not included: cancelling or replacing a send from the picker; `--cancel`
+stays the way.
+
+#### As built — 2026-11-03
+
+- `internal/cli/queued.go` finds, once per run, when each pane's sends
+  fire: a state that reads, the same kind, agent, and folder as the pane
+  shows now, and a timer the scheduler calls active. It asks the scheduler
+  only about sends that match a pane.
+- The picker draws such a target as "» queued", its note "sends 16:01" or
+  "2 sends, next 16:01" after any limit's reset, and lists it after the
+  targets without one in its group; `--pick best` takes the same first row.
+  The list printed when several targets match shows the marks.
+- The report that opens the questions ends with "» already has a send at
+  Sat 16:30 · this adds another". A run that asks nothing gives it as a
+  note, a JSON note under `--json`, and after the picker it goes beside the
+  rail.
+- "When?" checks a typed time and the time Enter keeps against the stored
+  sends; a clash says "wA:p1 already has a send at Sat 16:01. Type another
+  time." and asks again, keeping the message. `--at` is refused as before.
+- `term.Width` reads the terminal's columns with `TIOCGWINSZ`. A picker row
+  too wide drops its title, keeping its notes in the title's column while
+  they fit; then shortens its folder from the left, at a "/" where one
+  fits; then puts its notes on a second line, with the title when it fits
+  there. The rail's top line drops its padding, then "Ctrl-C cancels". With
+  no width, as through a pipe, the picker is unchanged byte for byte.
+- The systemctl stand-in takes several unit patterns, so a test can arm
+  some sends and not others; the usage reference and the changelog
+  describe the change.
+
+Measured:
+
+- `tools/check` exit 0, 12 packages; `tools/parity`: 41 identical, 37
+  known differences, 0 unexpected. The picker, plugin, and clash tests
+  passed three runs in a row.
+- Planted faults each failed their tests: no folder-and-agent check, no
+  armed check, no reordering, no clash check at Enter.
+- No line of the drawn picker is wider than its width at any width from 40
+  to 120. The built program, in a real terminal against the stand-ins,
+  drew its widest line at 52 columns of a 52-column window, and at 98 of
+  100.
+- CI on the pushed `ss-3.1-p3.1`, started by hand, passed on Linux, Linux
+  ARM, and macOS, and the scan; on macOS the width test, `tools/plugin-smoke`,
+  and `tools/launchd-smoke` passed.
+
+Found while building:
+
+- **Names from the screenshot reached the public repository.** A test and
+  a comment copied the screenshot's home folder, project folder, and pane
+  ids. The private-term scan counted 21 hits, but the command went on to
+  push `ss-3.1-p3.1` and start CI. The branch and its run were deleted
+  minutes later, and the two commits rebuilt with neutral names of the same
+  lengths; the scan now stops a push unless it finds nothing. GitHub still
+  serves the two old commits to anyone with their ids, until GitHub Support
+  removes them, which only the owner can ask for.
+- **At 52 columns a row cannot keep its notes on one line.** The columns
+  before the folder take 34 of the 49 beside the rail, so the notes go on a
+  second line, as the second steps above allow.
+- **A long title is dropped even on a wide terminal** when the row would
+  otherwise wrap, as at 100 columns, where it wrapped before.
+
+Still to confirm by hand: the picker on the owner's Mac terminal, with an
+agent that has a send scheduled.
 
 ### P4 — Release v0.1.1
 
@@ -367,6 +489,8 @@ starts from these facts:
    → verify: the push shows the bypass notice; every release job passes;
    `tools/bump-tap` writes the tap and reads it back; Homebrew on macOS and
    on Ubuntu prints `schedule-send 0.1.1`.
+3. As built, once Dependabot's first pull request has merged itself.
+   → verify: zero private-term hits.
 
 P3's settings. Role 5 is the repository admin role, the one that may bypass:
 
@@ -388,8 +512,32 @@ gh api -X PATCH repos/dj-skn/schedule-send -F allow_auto_merge=true
 gh api -X PUT repos/dj-skn/schedule-send/actions/permissions \
   -F enabled=true -f allowed_actions=all -F sha_pinning_required=true
 ```
-3. As built, once Dependabot's first pull request has merged itself.
-   → verify: zero private-term hits.
+
+#### Step 1 as done — 2026-11-03
+
+The owner ran step 1 ahead of P3.1, with the commands above in one-line
+form: `ss-3.1` merged into `main` as `8c9ef26` and pushed, then the three
+settings. The release waits for P3.1.
+
+- The merge commit carries the noreply address, and `main` has zero
+  private-term hits. The hook installed the new build in the main checkout.
+- GitHub stores the ruleset as active, with role 5 bypassing always and the
+  four checks required. Auto-merge is allowed, and pinned actions are
+  required.
+- CI on `main`, started by hand, passed on Linux, Linux ARM, and macOS, and
+  the scan: the first run with pinned actions required.
+- Dependabot ran on its new configuration within a minute and opened pull
+  request #1, checkout v7.0.0 to v7.0.1, moving each pinned commit and its
+  version comment together. The auto-merge workflow turned on a squash
+  merge. macOS failed once: the runner could not download setup-go's
+  archive at its pinned commit, after one attempt, though the other jobs
+  and the run on `main` had downloaded it. The archive answered when
+  checked, and one rerun of that job passed. GitHub then merged the pull
+  request itself, as `ee9d7d2` by Dependabot, 38 seconds after its last
+  check passed.
+- No CI ran on `main` for `ee9d7d2`: GitHub starts no workflow from a push
+  made with a workflow's own token. The pull request's checks, run on the
+  merged result, were its test.
 
 ### P5 — The owner's other public repositories
 

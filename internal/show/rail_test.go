@@ -10,8 +10,12 @@ import (
 func TestRailPieces(t *testing.T) {
 	r := NewRail(term.Colors{})
 	for _, c := range []struct{ got, want string }{
-		{r.Top(false), "┌  Schedule a send" + strings.Repeat(" ", 26) + "Ctrl-C cancels"},
-		{r.Top(true), "┌  Schedule a send · dry run" + strings.Repeat(" ", 16) + "Ctrl-C cancels"},
+		{r.Top(false, 0), "┌  Schedule a send" + strings.Repeat(" ", 26) + "Ctrl-C cancels"},
+		{r.Top(true, 0), "┌  Schedule a send · dry run" + strings.Repeat(" ", 16) + "Ctrl-C cancels"},
+		{r.Top(false, 58), "┌  Schedule a send" + strings.Repeat(" ", 26) + "Ctrl-C cancels"},
+		{r.Top(false, 57), "┌  Schedule a send  Ctrl-C cancels"},
+		{r.Top(true, 52), "┌  Schedule a send · dry run  Ctrl-C cancels"},
+		{r.Top(true, 43), "┌  Schedule a send · dry run"},
 		{r.Gap(), "│"},
 		{r.Line(""), "│"},
 		{r.Line("claude · wB:p1"), "│  claude · wB:p1"},
@@ -112,7 +116,7 @@ func TestRailColoursTheVisibleText(t *testing.T) {
 	warsaw(t)
 	t.Setenv("HOME", "/home/dev")
 	r := NewRail(markers)
-	lines := []string{r.Top(true), r.Gap(), r.Step("When?"), r.Hint("18:30"), r.Input(),
+	lines := []string{r.Top(true, 0), r.Gap(), r.Step("When?"), r.Hint("18:30"), r.Input(),
 		r.Resolved("Sat 16:20", "2m"), r.Error("no"), r.Warning("careful"), r.Fail("stopped"), r.Cancelled()}
 	for _, c := range reportCases() {
 		switch c.name {

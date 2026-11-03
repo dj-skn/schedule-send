@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The picker marks a target that already has a send scheduled, with when it
+  fires, and lists it after the targets still waiting, so Enter and
+  `--pick best` take one of those. Once a target is chosen, the run says it
+  already has a send.
+
 ### Changed
 
 - A time typed without seconds, such as `+30`, fires on a whole minute and
@@ -22,6 +29,11 @@ All notable changes to this project are documented here. The format follows
 
 - Ctrl-Space on an empty answer no longer ends the run without scheduling
   anything; it does nothing, as it already did once text was typed.
+- A time at "When?" that clashes with a send already scheduled to the target
+  is caught there, and the question is asked again; the run used to end
+  after both answers, losing the message typed for it.
+- The picker and the prompt's top line fit a narrow terminal instead of
+  wrapping.
 
 ## [0.1.0] - 2026-10-24
 

@@ -81,7 +81,7 @@ func TestRenderMatchesShellPicker(t *testing.T) {
 	shown := Sort(Filter{Self: "wB:p2"}.Apply(rows[:3]))
 	shown = append(shown, rows[5])
 	var b strings.Builder
-	Render(&b, shown, nil, term.Colors{}, "wB:p2", func(string) string { return "zsh" })
+	Render(&b, shown, nil, term.Colors{}, "wB:p2", func(string) string { return "zsh" }, 0)
 	want := `
 agents
   1  ○ idle     claude   wA:p1    ~/projects/analytics       Analytics backend rewrite
@@ -99,7 +99,7 @@ panes
 
 func TestRenderEmptyGroupsAndSelfMark(t *testing.T) {
 	var b strings.Builder
-	Render(&b, []Row{{"agent", "wB:p2", "claude", "done", "/x", "-"}}, nil, term.Colors{}, "wB:p2", nil)
+	Render(&b, []Row{{"agent", "wB:p2", "claude", "done", "/x", "-"}}, nil, term.Colors{}, "wB:p2", nil, 0)
 	// An empty title still leaves the column's separator before the mark.
 	want := "\nagents\n  1  ✓ done     claude   wB:p2    /x" + strings.Repeat(" ", 26) +
 		"← this pane\n\npanes\n     none\n\n"
@@ -118,7 +118,7 @@ func TestRenderLimitMarks(t *testing.T) {
 		"wB:p2": {Limited: true, Note: "limit over"},
 	}
 	var b strings.Builder
-	Render(&b, shown, marks, term.Colors{}, "wB:p2", nil)
+	Render(&b, shown, marks, term.Colors{}, "wB:p2", nil, 0)
 	want := `
 agents
   1  ◷ limited  claude   wB:p1    ~/projects/shop-backend    checkout-webhook-migration  resets 16:00 (weekly)
@@ -196,5 +196,91 @@ func TestRootCwdSelector(t *testing.T) {
 	}
 	if got := panes((Filter{Cwd: root}).Apply(rows)); got != "wA:p1 wB:p1 wB:p3 wE:p1" {
 		t.Fatalf("root selector got %q, want matching agents preferred", got)
+	}
+}
+
+func TestRenderFitsTheWidth(t *testing.T) {
+	// The owner's screenshot, about 52 columns, so 49 beside the rail.
+	t.Setenv("HOME", "/home/dev")
+	rows := []Row{
+		{"agent", "wC:p1", "claude", "idle", "/home/dev/tools/archive", "Refactor the docs"},
+		{"agent", "wD:p1", "claude", "idle", "/home/dev/projects/reports-tool", "Weekly report cleanups"},
+		{"agent", "wD:p3", "codex", "idle", "/home/dev/a/very/long/folder/that-goes-on-and-on", "-"},
+		{"pane", "wD:p2", "-", "-", "/home/dev/projects/reports-tool", "-"},
+		{"pane", "wD:p4", "-", "-", "/home/dev/projects/reports-tool", "-"},
+	}
+	marks := map[string]Mark{
+		"wC:p1": {Limited: true, Note: "resets 22:50"},
+		"wD:p1": {Limited: true, Queued: true, Note: "resets 22:50  sends 22:51"},
+		"wD:p4": {Queued: true, Note: "sends 23:00"},
+	}
+	draw := func(width int) string {
+		var b strings.Builder
+		Render(&b, rows, marks, term.Colors{}, "wD:p2", func(string) string { return "zsh" }, width)
+		return b.String()
+	}
+	for _, c := range []struct {
+		width int
+		want  string
+	}{
+		{49, `
+agents
+  1  ◷ limited  claude   wC:p1    ~/tools/archive
+     Refactor the docs  resets 22:50
+  2  » queued   claude   wD:p1    …/reports-tool
+     resets 22:50  sends 22:51
+  3  ○ idle     codex    wD:p3    …goes-on-and-on
+
+panes
+  4  · zsh      wD:p2    ~/projects/reports-tool
+  5  » zsh      wD:p4    ~/projects/reports-tool
+     sends 23:00
+
+`},
+		{97, `
+agents
+  1  ◷ limited  claude   wC:p1    ~/tools/archive            Refactor the docs  resets 22:50
+  2  » queued   claude   wD:p1    ~/projects/reports-tool    resets 22:50  sends 22:51
+  3  ○ idle     codex    wD:p3    ~/a/very/long/folder/that-goes-on-and-on 
+
+panes
+  4  · zsh      wD:p2    ~/projects/reports-tool
+  5  » zsh      wD:p4    ~/projects/reports-tool  sends 23:00
+
+`},
+	} {
+		if got := draw(c.width); got != c.want {
+			t.Errorf("at %d columns:\n%s\nwant:\n%s", c.width, got, c.want)
+		}
+	}
+
+	if draw(0) != draw(1000) {
+		t.Errorf("with no width the rows changed:\n%s\nwant:\n%s", draw(0), draw(1000))
+	}
+	for width := 40; width <= 120; width++ {
+		for _, line := range strings.Split(draw(width), "\n") {
+			if visible(line) > width {
+				t.Errorf("at %d columns, %d wide: %q", width, visible(line), line)
+			}
+		}
+	}
+}
+
+func TestShorten(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		n    int
+		want string
+	}{
+		{"~/projects/reports-tool", 30, "~/projects/reports-tool"},
+		{"~/projects/reports-tool", 14, "…/reports-tool"},
+		{"~/projects/reports-tool", 13, "…reports-tool"},
+		{"~/projects/reports-tool", 8, "…ts-tool"},
+		{"~/projects/reports-tool", 1, "…"},
+		{"~/projects/reports-tool", 0, "…"},
+	} {
+		if got := shorten(c.in, c.n); got != c.want {
+			t.Errorf("shorten(%q, %d) = %q, want %q", c.in, c.n, got, c.want)
+		}
 	}
 }

@@ -125,6 +125,7 @@ type Report struct {
 	Margin            int64        // seconds from the reset, or from now once it passed, to the send
 	Auto              bool         // --auto: there is no prompt to type a time at
 	Now               int64        // when the run started
+	Queued            []int64      // when the sends already scheduled to the target fire
 }
 
 // Plain is the report as text, without a final newline.

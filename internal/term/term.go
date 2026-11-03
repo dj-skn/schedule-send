@@ -17,6 +17,16 @@ func IsTerminal(fd uintptr) bool {
 	return errno == 0
 }
 
+// Width is how many columns wide the terminal on fd is, or 0 when that cannot
+// be read, as for a pipe.
+func Width(fd uintptr) int {
+	var size struct{ Rows, Cols, X, Y uint16 }
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, syscall.TIOCGWINSZ, uintptr(unsafe.Pointer(&size))); errno != 0 {
+		return 0
+	}
+	return int(size.Cols)
+}
+
 // Colors holds the escape codes for one output, all empty when it is not a
 // terminal or NO_COLOR is set.
 type Colors struct {

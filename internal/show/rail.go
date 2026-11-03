@@ -18,13 +18,22 @@ type Rail struct{ p palette }
 // NewRail draws in the colours of the terminal the questions are asked on.
 func NewRail(c term.Colors) Rail { return Rail{palette(c)} }
 
-// Top is the rail's first line: what the run does, and how to leave it.
-func (r Rail) Top(dryRun bool) string {
+// Top is the rail's first line: what the run does, and how to leave it, at
+// the right on a terminal wide enough, closer in on a narrow one, and left
+// out where it would wrap. width is 0 when it is not known.
+func (r Rail) Top(dryRun bool, width int) string {
 	title := "Schedule a send"
 	if dryRun {
 		title += " · dry run"
 	}
-	return r.p.dim("┌").s + "  " + plain(title).pad(41) + r.p.dim("Ctrl-C cancels").s
+	const leave = "Ctrl-C cancels"
+	switch n := len([]rune(title)); {
+	case width == 0 || 3+max(n, 41)+len(leave) <= width:
+		return r.p.dim("┌").s + "  " + plain(title).pad(41) + r.p.dim(leave).s
+	case 3+n+2+len(leave) <= width:
+		return r.p.dim("┌").s + "  " + title + "  " + r.p.dim(leave).s
+	}
+	return r.p.dim("┌").s + "  " + title
 }
 
 // Gap is the rail with nothing beside it, between steps.
@@ -69,9 +78,33 @@ func (r Rail) Cancelled() string { return r.end("Cancelled. Nothing was schedule
 func (r Rail) end(s string) string { return r.p.dim("└").s + "  " + s }
 
 // RailLines is the report as it opens the questions: where the send goes,
-// then, for an agent, what its screen says of a usage limit. Each line goes
-// beside the rail.
+// then, for an agent, what its screen says of a usage limit, and last the
+// sends already scheduled to it. Each line goes beside the rail.
 func (r Report) RailLines(c term.Colors) []string {
+	lines := r.railLines(c)
+	if len(r.Queued) > 0 {
+		lines = append(lines, QueuedLine(c, r.Queued, r.Now))
+	}
+	return lines
+}
+
+// QueuedLine says, beside the rail, that a target already has sends before
+// another is armed.
+func QueuedLine(c term.Colors, times []int64, now int64) string {
+	p := palette(c)
+	return p.cyan("»").s + " already has " + QueuedPhrase(times, now) + p.dim(" · this adds another").s
+}
+
+// QueuedPhrase says when the sends already scheduled to a target fire: "a
+// send at Sat 16:01", or "2 sends, the next at Sat 16:01".
+func QueuedPhrase(times []int64, now int64) string {
+	if len(times) == 1 {
+		return "a send at " + Time(times[0], now)
+	}
+	return fmt.Sprintf("%d sends, the next at %s", len(times), Time(times[0], now))
+}
+
+func (r Report) railLines(c term.Colors) []string {
 	p := palette(c)
 	place := "pane " + r.Pane
 	if r.Kind == "agent" {
