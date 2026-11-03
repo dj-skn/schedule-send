@@ -177,9 +177,11 @@ func Glyph(r Row, c term.Colors) string {
 	}
 }
 
-// Mark is what the picker shows of an agent's usage limit.
+// Mark is what the picker shows of a target beyond what Herdr reports: an
+// agent's usage limit, and the sends already scheduled to any target.
 type Mark struct {
 	Limited bool   // held by its own limit: drawn as "◷ limited"
+	Queued  bool   // a send is scheduled to it: drawn as "» queued", over a limit
 	Note    string // shown dim after the title, e.g. "resets 16:00 (weekly)"
 }
 
@@ -199,6 +201,9 @@ func Render(w io.Writer, rows []Row, marks map[string]Mark, c term.Colors, self 
 		glyph, status := Glyph(r, c), r.Status
 		if m.Limited {
 			glyph, status = c.Yellow+"◷"+c.Reset, "limited"
+		}
+		if m.Queued {
+			glyph, status = c.Cyan+"»"+c.Reset, "queued"
 		}
 		title := r.Title
 		if title == "-" {
@@ -234,8 +239,17 @@ func Render(w io.Writer, rows []Row, marks map[string]Mark, c term.Colors, self 
 		if label == "" {
 			label = "-"
 		}
-		fmt.Fprintf(w, "%3d  %s %-8s %-8s %s\n",
-			i+1, c.Dim+"·"+c.Reset, label, r.Pane, PrettyCwd(r.Cwd))
+		m := marks[r.Pane]
+		glyph := c.Dim + "·" + c.Reset
+		if m.Queued {
+			glyph = c.Cyan + "»" + c.Reset
+		}
+		note := ""
+		if m.Note != "" {
+			note = "  " + c.Dim + m.Note + c.Reset
+		}
+		fmt.Fprintf(w, "%3d  %s %-8s %-8s %s%s\n",
+			i+1, glyph, label, r.Pane, PrettyCwd(r.Cwd), note)
 	}
 	if !any {
 		fmt.Fprintln(w, "     "+c.Dim+"none"+c.Reset)

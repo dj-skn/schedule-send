@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -65,4 +66,46 @@ func runAt(s job.State) int64 {
 		return at.Unix()
 	}
 	return 0
+}
+
+// queuedLast moves the targets with a send already scheduled behind those
+// without, agents and plain panes each in their own group, keeping the order
+// otherwise. Enter, and --pick best, then take a target still waiting.
+func queuedLast(rows []target.Row, sends map[string][]int64) []target.Row {
+	key := func(r target.Row) int {
+		k := 0
+		if !r.IsAgent() {
+			k = 2
+		}
+		if len(sends[r.Pane]) > 0 {
+			k++
+		}
+		return k
+	}
+	out := slices.Clone(rows)
+	slices.SortStableFunc(out, func(x, y target.Row) int { return key(x) - key(y) })
+	return out
+}
+
+// queuedMarks marks each target with a send scheduled, its note after any
+// limit's, e.g. "resets 16:00  sends 16:01".
+func queuedMarks(marks map[string]target.Mark, sends map[string][]int64, now int64) {
+	for pane, times := range sends {
+		m := marks[pane]
+		m.Queued = true
+		if m.Note != "" {
+			m.Note += "  "
+		}
+		m.Note += queuedNote(times, now)
+		marks[pane] = m
+	}
+}
+
+// queuedNote is how the picker says when a target's sends fire: "sends
+// 16:01", or "2 sends, next 16:01".
+func queuedNote(times []int64, now int64) string {
+	if len(times) == 1 {
+		return "sends " + noteTime(times[0], now)
+	}
+	return fmt.Sprintf("%d sends, next %s", len(times), noteTime(times[0], now))
 }

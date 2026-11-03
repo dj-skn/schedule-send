@@ -95,3 +95,75 @@ func TestQueuedWithoutStateIsEmpty(t *testing.T) {
 		t.Errorf("queued = %v", got)
 	}
 }
+
+// twoLimited makes wA:p1 show the same weekly limit as wB:p1, and schedules a
+// send to wA:p1 for 16:01: the owner's screenshot, two agents held by one
+// limit and one of them already scheduled.
+func twoLimited(t *testing.T, h *harness) {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(h.dir, "herdr", "visible-wB-p1.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(h.dir, "herdr", "visible-wA-p1.txt"), b, 0o644)
+	h.schedule(t, job.State{ID: "20261003-160100-wAp1", Kind: "agent", PaneID: "wA:p1", Agent: "claude",
+		Cwd: "/home/dev/projects/analytics", At: "2026-10-03 16:01:00", RunAt: 1791036060})
+	h.armed(t, "20261003-160100-wAp1")
+}
+
+func TestPickerPutsTheScheduledAgentLast(t *testing.T) {
+	input := "\n\n\n"
+	h := newHarness(t, &input)
+	twoLimited(t, h)
+	if code := h.a.main([]string{"--dry-run"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	want := `
+◆  Which agent or pane?
+│  agents
+│    1  ◷ limited  claude   wB:p1    ~/projects/shop-backend    checkout-webhook-migration  resets 16:00 (weekly)
+│    2  ○ idle     codex    wB:p3    ~/projects/shop-backend    Implement SB-42 phase 3.1 | shop-backend
+│    3  ● working  cursor   wE:p1    ~/src/schedule-send        Tidy schedule-send UI
+│    4  » queued   claude   wA:p1    ~/projects/analytics       Analytics backend rewrite  resets 16:00 (weekly)  sends 16:01
+│
+│  panes
+│    5  · zsh      wB:p5    ~/projects/shop-backend
+│
+│  Enter takes 1, or type its number
+`
+	if !strings.Contains(h.tty.String(), want) {
+		t.Errorf("terminal:\n%s\nwant within it:\n%s", h.tty, want)
+	}
+	if !strings.Contains(h.stdout.String(), "target=agent wB:p1 (claude, idle)\n") {
+		t.Errorf("Enter did not take the agent still waiting:\n%s", h.stdout)
+	}
+}
+
+func TestPickBestSkipsTheScheduledAgent(t *testing.T) {
+	h := newHarness(t, nil)
+	twoLimited(t, h)
+	if code := h.a.main([]string{"--pick", "best", "--auto", "--dry-run"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	if !strings.HasPrefix(h.stderr.String(), "Multiple targets matched; picking claude in wB:p1 ") {
+		t.Errorf("stderr:\n%s", h.stderr)
+	}
+}
+
+func TestPickerMarksAScheduledPaneAndCountsSends(t *testing.T) {
+	h := newHarness(t, nil)
+	for _, at := range []struct {
+		id    string
+		runAt int64
+	}{{"20261003-170000-wBp5", 1791039600}, {"20261003-163000-wBp5", 1791037800}} {
+		h.schedule(t, job.State{ID: at.id, Kind: "pane", PaneID: "wB:p5", Agent: "-",
+			Cwd: "/home/dev/projects/shop-backend", At: "2026-10-03 16:30:00", RunAt: at.runAt, Mode: "keys", Keys: "enter", Grace: 4})
+	}
+	h.armed(t, "20261003-170000-wBp5", "20261003-163000-wBp5")
+	if code := h.a.main([]string{"--at", "16:30", "--message", "hi"}); code != 1 {
+		t.Errorf("exit %d", code)
+	}
+	if want := "  5  » zsh      wB:p5    ~/projects/shop-backend  2 sends, next 16:30\n"; !strings.Contains(h.stderr.String(), want) {
+		t.Errorf("stderr lacks %q:\n%s", want, h.stderr)
+	}
+}

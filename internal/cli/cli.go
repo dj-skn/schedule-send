@@ -759,7 +759,7 @@ func (a *app) chooseTarget() (target.Row, error) {
 		return rows[0], nil
 	}
 	rows = target.Sort(rows)
-	var marks map[string]target.Mark
+	marks := map[string]target.Mark{}
 	if slices.ContainsFunc(rows, target.Row.IsAgent) {
 		lim := a.limits()
 		// Without --at the send waits for a limit to lift, so the agents held
@@ -769,6 +769,11 @@ func (a *app) chooseTarget() (target.Row, error) {
 		}
 		marks = limitMarks(lim, a.now)
 	}
+	// A target that already has a send is the one least likely to need
+	// another, so the ones still waiting come first.
+	sends := a.queued()
+	rows = queuedLast(rows, sends)
+	queuedMarks(marks, sends, a.now)
 
 	if !a.stdinTTY() {
 		if o.pick == "best" {
