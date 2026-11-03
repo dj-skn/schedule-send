@@ -17,8 +17,9 @@ first pull request then merged itself. P3.1 and the release reach `main`
 through a second merge of `ss-3.1`. The owner settled P3.1's decisions on
 2026-11-03 and instructed its build. P3.1 is built and in `ss-3.1`, after CI
 passed on it. On 2026-11-03 the owner instructed the release: `ss-3.1` went
-into `main` a second time, and v0.1.1 is released, so P4 is complete. P5 is
-next, with its walkthrough.
+into `main` a second time, and v0.1.1 is released, so P4 is complete. On
+2026-11-04 the owner added P4.1, keeping agents' co-author trailers out, and
+settled its decisions; it is being built. P5 follows, with its walkthrough.
 
 This document is published with the repository. It names no private
 project, address, or identifier.
@@ -72,6 +73,7 @@ project, address, or identifier.
 | P3 | Pinned actions and Dependabot's auto-merge | complete |
 | P3.1 | The picker shows sends already scheduled | built; Mac look to come |
 | P4 | Release v0.1.1 | complete |
+| P4.1 | No co-author trailers from agents | building |
 | P5 | The owner's other public repositories | walkthrough first |
 
 P3 comes before the release so that v0.1.1 runs pinned actions, and P3.1 so
@@ -575,6 +577,63 @@ Found while releasing:
   pull request's own commit does not; it is the only commit in the history
   with the trailer. A local hook, a CI check, and merging Dependabot by
   rebase are with the owner to decide.
+
+### P4.1 — No co-author trailers from agents
+
+Added on 2026-11-04. The owner wants no commit from an agent to carry a
+`Co-authored-by` trailer, on any branch. Dependabot's, which GitHub adds
+when it squash-merges, are fine.
+
+#### Code check — 2026-11-04
+
+- GitHub cannot refuse such a push here: its rule on commit messages is for
+  Enterprise organizations, and it answered 422 when asked (P4's As built).
+- The only trailer in the history is Dependabot's, on `ee9d7d2`.
+- `core.hooksPath` points the main checkout and every linked worktree at the
+  main checkout's `.githooks`, so one `commit-msg` hook covers every commit
+  made on this machine, once it is in that checkout.
+- Git runs `commit-msg` for `git commit`, including `--amend`, and for
+  `git merge`. Rebase and cherry-pick carry a message over unchecked, and
+  `--no-verify` skips the hook (Git's `githooks` documentation).
+- An agent working elsewhere, such as a cloud session, pushes to GitHub
+  without the hook. CI runs on pull requests and on pushes to `main`, and
+  its Linux job is one of the checks `main` requires. The owner's direct
+  pushes bypass that requirement, so a push shows a failed run instead.
+
+#### Decisions settled 2026-11-04
+
+1. A `commit-msg` hook refuses a commit whose message has the trailer.
+2. CI's Linux job fails when a commit that the run adds carries one, with
+   the same test as the hook. Dependabot's commits are skipped. CI keeps its
+   triggers.
+3. Once built, `ss-3.1` goes into `main` on the owner's word, with P4's
+   As built, so the hook takes effect.
+
+Built on these assumptions: only lines starting `Co-authored-by:` count, in
+any letter case; Dependabot is known by its author name, `dependabot[bot]`;
+no changelog entry, since the program does not change.
+
+#### Steps
+
+1. `.githooks/commit-msg` refuses a message with the trailer and says what
+   to remove.
+   → verify: new cases in `tools/test-hooks`: refused, refused in lower
+   case, refused for a merge, accepted without it or with the words
+   mid-line.
+2. `tools/check-trailers RANGE` runs the hook on each commit in the range
+   and names the ones it refuses, skipping Dependabot's.
+   → verify: in the hook fixture, a commit made with `--no-verify` fails
+   the range and a Dependabot commit passes. In this repository,
+   `ee9d7d2^..main` passes. Nothing with the trailer is pushed.
+3. CI's Linux job runs it on the commits each run adds: a pull request's
+   own commits, a push's new commits, and what is not on `main` for a run
+   started by hand.
+   → verify: `tools/check` passes; CI on the phase branch, started by hand,
+   passes.
+4. `AGENTS.md` and `CONTRIBUTING.md` say the rule and where it is enforced.
+   → verify: zero private-term hits.
+
+Not included: Dependabot's trailers, and rewriting `ee9d7d2`.
 
 ### P5 — The owner's other public repositories
 
