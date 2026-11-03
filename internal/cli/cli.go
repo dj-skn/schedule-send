@@ -574,7 +574,7 @@ func (a *app) run(args []string) (retErr error) {
 	// exactly what we printed and what date(1) computed.
 	calendar := when.Format(runAt, when.Calendar)
 	delay := runAt - now
-	id := when.Format(runAt, when.Stamp) + "-" + alnum(t.Pane)
+	id := sendID(runAt, t.Pane)
 	unit := job.UnitPrefix + "-" + id
 
 	// The id is the fire time plus the pane, so a second send to the same pane
@@ -1058,6 +1058,10 @@ func (a *app) confirmAt(q *asker, def int64, fromNow bool, now int64) (int64, er
 			case fromNow:
 				def = max(def, when.UpToMinute(now+limitMargin))
 			}
+			if a.taken(def) {
+				q.say(q.rail.Error(a.takenMsg(def, now)))
+				continue
+			}
 			q.say(q.rail.Gap())
 			return def, nil
 		}
@@ -1067,6 +1071,8 @@ func (a *app) confirmAt(q *asker, def int64, fromNow bool, now int64) (int64, er
 			q.say(q.rail.Error(fmt.Sprintf("Could not read '%s'. Try 18:30, 6:30 PM, Sep 27 1am or +30 min.", input)))
 		case epoch <= now:
 			q.say(q.rail.Error(show.Time(epoch, now) + " has already passed."))
+		case a.taken(epoch):
+			q.say(q.rail.Error(a.takenMsg(epoch, now)))
 		default:
 			q.say(q.rail.Resolved(show.Time(epoch, now), when.Delay(epoch-now)))
 			def, fromNow = epoch, false

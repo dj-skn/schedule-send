@@ -252,3 +252,39 @@ func TestAGivenTimeNotesTheSendsAlreadyThere(t *testing.T) {
 		}
 	})
 }
+
+func TestAClashAtWhenAsksAgainAndKeepsTheMessage(t *testing.T) {
+	// wA:p1 already has a send at 16:01, the time the run proposes.
+	for _, c := range []struct {
+		name, input, said string
+	}{
+		{"Enter on the proposed time", "go on\n\n16:05\n\n", "│  › │  ✗ wA:p1 already has a send at Sat 16:01. Type another time.\n│  › │  → Sat 16:05 · in 43m"},
+		{"the same time typed", "go on\n16:01\n16:05\n\n", "│  › │  ✗ wA:p1 already has a send at Sat 16:01. Type another time.\n│  › │  → Sat 16:05 · in 43m"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			input := c.input
+			h := newHarness(t, &input)
+			twoLimited(t, h)
+			if code := h.a.main([]string{"--pane", "wA:p1", "--dry-run"}); code != 0 {
+				t.Fatalf("exit %d: %s\n%s", code, h.stderr, h.tty)
+			}
+			if !strings.Contains(h.tty.String(), c.said) {
+				t.Errorf("terminal:\n%s\nwant within it:\n%s", h.tty, c.said)
+			}
+			if want := `└  · Dry run: would schedule "go on" for Sat 16:05`; !strings.Contains(h.tty.String(), want) {
+				t.Errorf("terminal lacks %q:\n%s", want, h.tty)
+			}
+		})
+	}
+
+	t.Run("--at is refused as before", func(t *testing.T) {
+		h := newHarness(t, nil)
+		twoLimited(t, h)
+		if code := h.a.main([]string{"--pane", "wA:p1", "--at", "16:01", "--message", "x", "--dry-run"}); code != 1 {
+			t.Errorf("exit %d", code)
+		}
+		if want := "A send to wA:p1 at 2026-10-03 16:01:00 is already scheduled (20261003-160100-wAp1)."; !strings.Contains(h.stderr.String(), want) {
+			t.Errorf("stderr lacks %q:\n%s", want, h.stderr)
+		}
+	})
+}

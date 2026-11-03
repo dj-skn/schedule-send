@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -123,4 +124,22 @@ func (a *app) tellQueued(t target.Row) {
 		return
 	}
 	a.note(fmt.Sprintf("%s already has %s; this adds another.", t.Pane, show.QueuedPhrase(times, a.now)))
+}
+
+// sendID names a send by when it fires and where, so two sends to one pane
+// in the same second would share their state and units.
+func sendID(runAt int64, pane string) string {
+	return when.Format(runAt, when.Stamp) + "-" + alnum(pane)
+}
+
+// taken reports whether the target already has a send stored for runAt,
+// which arming would refuse. The question asks again instead, so what was
+// typed before it is kept.
+func (a *app) taken(runAt int64) bool {
+	_, err := os.Stat(a.paths.StatePath(sendID(runAt, a.tgt.Pane)))
+	return err == nil
+}
+
+func (a *app) takenMsg(runAt, now int64) string {
+	return fmt.Sprintf("%s already has a send at %s. Type another time.", a.tgt.Pane, show.Time(runAt, now))
 }
