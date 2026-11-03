@@ -128,6 +128,16 @@ Targets rank idle or done agents first, then unknown, working, and blocked
 ones, then shell panes. Without `--at`, agents at their own usage limit lead:
 expired limits, then the soonest known reset, then unknown ones.
 
+A target that already has a send scheduled reads `» queued` in the picker,
+with when it fires, as in `sends 16:01` or `2 sends, next 16:01`, and moves
+behind the targets without one in its group, so Enter and `--pick best` take
+one still waiting. A send counts while its timer is armed and the pane still
+runs the agent, in the folder, it was scheduled for. Once a target is chosen,
+the run says it already has a send, and that this adds another.
+
+On a narrow terminal a row drops its title, then shortens its folder, and
+then puts its reset and sends on a second line; those always stay.
+
 ## Times and payloads
 
 `--at` takes a local time (`HH:MM`, `HH:MM:SS`, `3pm`, `12:27 AM`) or a GNU
@@ -297,8 +307,10 @@ description = "schedule a send"
 
 The overlay asks what to send and when. On an agent, Enter keeps `resume`;
 a shell pane needs an answer. On an agent held by a usage limit, Enter takes
-one minute after the reset; otherwise, type a time. Ctrl-C cancels. The
-overlay stays open until you press Enter, so you can read the receipt.
+one minute after the reset; otherwise, type a time. If the agent already has
+a send at that minute, the overlay says so and asks for another time,
+keeping the message. Ctrl-C cancels. The overlay stays open until you press
+Enter, so you can read the receipt.
 
 Options for every job scheduled from the plugin go in a file named `args`, in
 the plugin's configuration directory. This prints that directory:
