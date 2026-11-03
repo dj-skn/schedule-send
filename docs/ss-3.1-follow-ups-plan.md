@@ -15,7 +15,8 @@ passed on it. On 2026-11-03, ahead of P3.1, the owner merged `ss-3.1` into
 `main`, pushed it, and applied P3's settings: P4's first step. Dependabot's
 first pull request then merged itself. P3.1 and the release reach `main`
 through a second merge of `ss-3.1`. The owner settled P3.1's decisions on
-2026-11-03 and instructed its build.
+2026-11-03 and instructed its build. P3.1 is built and in `ss-3.1`, after CI
+passed on it.
 
 This document is published with the repository. It names no private
 project, address, or identifier.
@@ -67,7 +68,7 @@ project, address, or identifier.
 | P1 | Housekeeping and current versions | complete |
 | P2 | The prompt: minutes and Ctrl-Space | built; Mac run to come |
 | P3 | Pinned actions and Dependabot's auto-merge | complete |
-| P3.1 | The picker shows sends already scheduled | building |
+| P3.1 | The picker shows sends already scheduled | built; Mac look to come |
 | P4 | Release v0.1.1 | step 1 done; release after P3.1 |
 | P5 | The owner's other public repositories | walkthrough first |
 
@@ -413,6 +414,67 @@ when several targets match shows the marks, and `--json` gets a note.
 
 Not included: cancelling or replacing a send from the picker; `--cancel`
 stays the way.
+
+#### As built — 2026-11-03
+
+- `internal/cli/queued.go` finds, once per run, when each pane's sends
+  fire: a state that reads, the same kind, agent, and folder as the pane
+  shows now, and a timer the scheduler calls active. It asks the scheduler
+  only about sends that match a pane.
+- The picker draws such a target as "» queued", its note "sends 16:01" or
+  "2 sends, next 16:01" after any limit's reset, and lists it after the
+  targets without one in its group; `--pick best` takes the same first row.
+  The list printed when several targets match shows the marks.
+- The report that opens the questions ends with "» already has a send at
+  Sat 16:30 · this adds another". A run that asks nothing gives it as a
+  note, a JSON note under `--json`, and after the picker it goes beside the
+  rail.
+- "When?" checks a typed time and the time Enter keeps against the stored
+  sends; a clash says "wA:p1 already has a send at Sat 16:01. Type another
+  time." and asks again, keeping the message. `--at` is refused as before.
+- `term.Width` reads the terminal's columns with `TIOCGWINSZ`. A picker row
+  too wide drops its title, keeping its notes in the title's column while
+  they fit; then shortens its folder from the left, at a "/" where one
+  fits; then puts its notes on a second line, with the title when it fits
+  there. The rail's top line drops its padding, then "Ctrl-C cancels". With
+  no width, as through a pipe, the picker is unchanged byte for byte.
+- The systemctl stand-in takes several unit patterns, so a test can arm
+  some sends and not others; the usage reference and the changelog
+  describe the change.
+
+Measured:
+
+- `tools/check` exit 0, 12 packages; `tools/parity`: 41 identical, 37
+  known differences, 0 unexpected. The picker, plugin, and clash tests
+  passed three runs in a row.
+- Planted faults each failed their tests: no folder-and-agent check, no
+  armed check, no reordering, no clash check at Enter.
+- No line of the drawn picker is wider than its width at any width from 40
+  to 120. The built program, in a real terminal against the stand-ins,
+  drew its widest line at 52 columns of a 52-column window, and at 98 of
+  100.
+- CI on the pushed `ss-3.1-p3.1`, started by hand, passed on Linux, Linux
+  ARM, and macOS, and the scan; on macOS the width test, `tools/plugin-smoke`,
+  and `tools/launchd-smoke` passed.
+
+Found while building:
+
+- **Names from the screenshot reached the public repository.** A test and
+  a comment copied the screenshot's home folder, project folder, and pane
+  ids. The private-term scan counted 21 hits, but the command went on to
+  push `ss-3.1-p3.1` and start CI. The branch and its run were deleted
+  minutes later, and the two commits rebuilt with neutral names of the same
+  lengths; the scan now stops a push unless it finds nothing. GitHub still
+  serves the two old commits to anyone with their ids, until GitHub Support
+  removes them, which only the owner can ask for.
+- **At 52 columns a row cannot keep its notes on one line.** The columns
+  before the folder take 34 of the 49 beside the rail, so the notes go on a
+  second line, as the second steps above allow.
+- **A long title is dropped even on a wide terminal** when the row would
+  otherwise wrap, as at 100 columns, where it wrapped before.
+
+Still to confirm by hand: the picker on the owner's Mac terminal, with an
+agent that has a send scheduled.
 
 ### P4 — Release v0.1.1
 
