@@ -23,8 +23,8 @@ settled its decisions. P4.1 is built and in `ss-3.1`, after CI passed on
 it; it takes effect once `ss-3.1` is in `main`. On 2026-11-04 the owner
 added P4.2, hours and minutes in a short time such as `+2:30h`, settled its
 decisions, and instructed its build and a v0.1.2 release after it. P4.1
-and P4.2 are in `main`, and v0.1.2 is released. P5 follows, with its
-walkthrough.
+and P4.2 are in `main`, and v0.1.2 is released. On 2026-11-04 the owner
+settled P5's decisions and instructed its build.
 
 This document is published with the repository. It names no private
 project, address, or identifier.
@@ -80,7 +80,7 @@ project, address, or identifier.
 | P4 | Release v0.1.1 | complete |
 | P4.1 | No co-author trailers from agents | complete |
 | P4.2 | Hours and minutes in a short time, and v0.1.2 | complete |
-| P5 | The owner's other public repositories | walkthrough first |
+| P5 | The owner's other public repositories | building |
 
 P3 comes before the release so that v0.1.1 runs pinned actions, and P3.1 so
 that it carries the picker change. P5 is
@@ -786,6 +786,84 @@ It starts from these facts:
   earlier copies.
 - Everyone who installs from the tap holds a clone of it, so how
   `brew update` takes a rewritten tap is checked before the tap is touched.
+
+#### Code check — 2026-11-04
+
+Three public repositories: the tap and two others, called here the larger
+and the smaller.
+
+- 48 commits carry the personal address as author and committer: 3 of the
+  tap's 8, 32 in the larger, and 13 of the smaller's 17. The larger's two
+  annotated tags carry it as tagger. No file version and no commit message
+  holds it, and the larger's package metadata names the owner only.
+- A rewrite that maps the address to the noreply one, run on copies of all
+  three, left every file, message, and date as it was and gave every
+  commit a new identifier. GitHub signed 7 of the commits, made on its
+  website or by its bots; a rewrite drops those signatures.
+- Homebrew's update fetches a tap with `--force` and rebases the local
+  branch onto the fetched one. Run with Git on a copy of the tap, the
+  rebase dropped all 8 old commits as already applied and left the copy on
+  the new history, with a local edit stashed and restored.
+- Pull-request refs cannot be pushed over. The larger's 6 reach all 32
+  commits, and the smaller's one reaches 7. The larger has 2 forks, from
+  November 2024, holding the first 20. GitHub's guide to removing data says
+  its Support dereferences pull requests and collects old commits only when
+  no fork holds them, and does not remove data that is not sensitive. The
+  tap has no pull requests and no forks.
+- The larger refuses a force push on its default branch, by a ruleset no
+  one may bypass, and runs its release workflow on every `v*` tag push:
+  binaries, PyPI, the GitHub release, and the tap. The GitHub-release job
+  runs even when PyPI refuses. The tap installs the larger from PyPI, so
+  its formula does not change.
+- The smaller carries its own formula, which installs its newest tag's
+  archive by checksum. The archive holds the commit identifier, so its
+  checksum changes with the rewrite.
+- The smaller has no stars, forks, issues, or releases; the larger has 18
+  stars, 6 pull requests, and two releases.
+
+#### Decisions settled 2026-11-04
+
+1. The tap and the larger are rewritten in place. The smaller is deleted
+   and created again from its rewritten history, which removes its one
+   pull request's ref and its old commits from GitHub at the cost of that
+   pull request's page.
+2. The agent switches the larger's ruleset and release workflow off through
+   the API for the push, back on after, and checks both.
+3. One request to GitHub Support follows the rewrite, for the tap's old
+   commits and this repository's two commits from P3.1. The larger is left
+   out: its forks hold the old commits.
+
+Built on these assumptions: the leftover branches of merged or closed
+pull requests are deleted, not rewritten; an agent's `Co-authored-by` line
+in one of the smaller's commits goes in the same rewrite; other people's
+and bots' addresses are left as they are; pushes go over SSH, since the
+command-line token cannot push workflow files.
+
+#### Steps
+
+1. A throwaway Homebrew in a temporary directory taps a local copy of the
+   tap; the copy is rewritten; `brew update` runs. → verify: the tap is on
+   the new history and lists both formulae.
+2. Each repository is saved as a Git bundle outside every tree.
+   → verify: `git bundle verify` passes.
+3. The tap is rewritten and force-pushed. → verify: a fresh clone has no
+   commit with the address and the same files at every commit;
+   `tools/bump-tap --dry-run` finds nothing to change.
+4. The smaller's settings are recorded; it is rewritten, created again, and
+   pushed with its tags; its formula gets the new checksum. → verify: a
+   mirror clone has no hit and no pull-request ref; the checksum matches
+   the archive GitHub serves; CI passes.
+5. The larger's guards go off, the leftover branches are deleted, its
+   default branch and tags are force-pushed, and the guards go back on.
+   → verify: no hit on any branch or tag; no release run started; the
+   releases keep their files; the docs site still serves; the ruleset is
+   active.
+6. The Support request is drafted for the owner. → verify: it gives what
+   GitHub's guide asks for, with the first changed commits.
+
+Not included: pinning the other repositories' actions, which can be P5.1;
+the forks, which belong to other people; and the owner's own clones, which
+need cloning afresh.
 
 ## Not included
 
