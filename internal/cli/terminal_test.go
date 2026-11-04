@@ -686,7 +686,7 @@ func TestMessageQuestion(t *testing.T) {
 		}
 		want := "│  pane wB:p5 · ~/projects/shop-backend\n│\n" +
 			"◆  What should it send?\n│  It's a shell, so this runs as a command\n│  › │  › │  › │\n" +
-			"◆  When?\n│  Like 18:30, 6:30 PM, Sep 27 1am or +30 min\n│  › │  → Sat 17:00 · in 1h 38m · Enter keeps it\n│  › │\n"
+			"◆  When?\n│  Like 18:30, 6:30 PM, Sep 27 1am, +30 or +2:30h\n│  › │  → Sat 17:00 · in 1h 38m · Enter keeps it\n│  › │\n"
 		if !strings.Contains(h.tty.String(), want) {
 			t.Errorf("terminal:\n%s\nwant it to hold:\n%s", h.tty, want)
 		}
@@ -766,6 +766,48 @@ func TestShortOffsetAndStrayKeyCodes(t *testing.T) {
 	}
 	if strings.Contains(h.tty.String(), "\x1b") || strings.Contains(h.tty.String(), "Could not read") {
 		t.Errorf("terminal:\n%q", h.tty)
+	}
+}
+
+func TestHoursAndMinutesAtWhen(t *testing.T) {
+	// "+2:30" could be minutes and seconds, so it is refused with the forms
+	// that work, and the question is asked again; "+2:30h" is 150 minutes.
+	input := "\n+2:30\n+2:30h\n\n"
+	h := newHarness(t, &input)
+	// date(1) resolves the offset from the real clock, so the answer is given
+	// at the real time.
+	answered := time.Now().Unix()
+	h.a.clock = waiting(answered-120, 120)
+	if code := h.a.main([]string{"--pane", "wB:p3", "--dry-run"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.stderr)
+	}
+	for _, want := range []string{
+		"│  Like 18:30, 6:30 PM, Sep 27 1am, +30 or +2:30h\n",
+		"✗ Could not read '+2:30'. Try 18:30, 6:30 PM, Sep 27 1am, +30 or +2:30h.\n",
+	} {
+		if !strings.Contains(h.tty.String(), want) {
+			t.Errorf("terminal lacks %q:\n%s", want, h.tty)
+		}
+	}
+	_, rest, _ := strings.Cut(h.stdout.String(), "run_at_epoch=")
+	line, _, _ := strings.Cut(rest, "\n")
+	runAt, _ := strconv.ParseInt(line, 10, 64)
+	if d := runAt - answered; d < 9000 || d > 9065 || runAt%60 != 0 {
+		t.Fatalf("sends %d s after the answer, want the minute at or after 9000 s:\n%s", d, h.stdout)
+	}
+}
+
+func TestHoursAndMinutesWithAt(t *testing.T) {
+	h := newHarness(t, nil)
+	if code := h.a.main([]string{"--pane", "wB:p3", "--at", "+2:30", "--message", "x", "--dry-run"}); code != 1 {
+		t.Errorf("--at +2:30: exit %d", code)
+	}
+	if want := "Could not parse --at '+2:30'. Use HH:MM[:SS], H[:MM]am/pm, YYYY-MM-DD HH:MM:SS, or an offset such as +30 or +2:30h."; !strings.Contains(h.stderr.String(), want) {
+		t.Errorf("stderr lacks %q:\n%s", want, h.stderr)
+	}
+	h = newHarness(t, nil)
+	if code := h.a.main([]string{"--pane", "wB:p3", "--at", "+1h30m", "--message", "x", "--dry-run"}); code != 0 {
+		t.Fatalf("--at +1h30m: exit %d: %s", code, h.stderr)
 	}
 }
 

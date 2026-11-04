@@ -59,6 +59,8 @@ var (
 	clock12  = regexp.MustCompile(`^[0-9]{1,2}(:[0-9]{2}(:[0-9]{2})?)? ?[AaPp][Mm]$`)
 	yearless = regexp.MustCompile(`^([A-Z][a-z]{2} [0-9]{1,2}) ([0-9]{1,2}(:[0-9]{2})? ?[AaPp][Mm])$`)
 	short    = regexp.MustCompile(`^\+ *([0-9]+) *([mh]?)$`)
+	hourMin  = regexp.MustCompile(`^\+ *([0-9]+)(:([0-5][0-9]) *h| *h *([0-9]{1,2}) *m)$`)
+	bareHM   = regexp.MustCompile(`^\+ *[0-9]+:[0-9]+$`)
 	dateTool = DateTool
 )
 
@@ -102,6 +104,11 @@ func namesSeconds(at string) bool {
 // against tomorrow's calendar date rather than advanced by 86400, so a DST
 // transition between the two days cannot shift the result by an hour.
 func resolve(at string, now int64) (epoch int64, ok bool) {
+	// "+2:30" could be hours and minutes or minutes and seconds, so it is not
+	// guessed at; "+2:30h" says which.
+	if bareHM.MatchString(strings.TrimSpace(at)) {
+		return 0, false
+	}
 	at, zone := normalise(at)
 	prefix := ""
 	if zone != "" {
@@ -214,7 +221,16 @@ func isClock(at string) bool { return clock24.MatchString(at) || clock12.MatchSt
 // split off.
 func normalise(at string) (string, string) {
 	// "+30" and "+30m" are minutes and "+2h" hours: the short ways of writing
-	// an offset, which date(1) does not read.
+	// an offset, which date(1) does not read. "+2:30h" and "+1h30m" are hours
+	// and minutes, handed over as the minutes they add up to; minutes past 59,
+	// and hours too many to count, are left for date(1) to refuse.
+	if m := hourMin.FindStringSubmatch(strings.TrimSpace(at)); m != nil {
+		hours, err := strconv.Atoi(m[1])
+		minutes, _ := strconv.Atoi(m[3] + m[4])
+		if err == nil && hours <= 999999 && minutes < 60 {
+			return "+" + strconv.Itoa(hours*60+minutes) + " min", ""
+		}
+	}
 	if m := short.FindStringSubmatch(strings.TrimSpace(at)); m != nil {
 		unit := " min"
 		if m[2] == "h" {
