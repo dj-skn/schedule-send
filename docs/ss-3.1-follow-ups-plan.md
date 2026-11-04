@@ -16,7 +16,12 @@ passed on it. On 2026-11-03, ahead of P3.1, the owner merged `ss-3.1` into
 first pull request then merged itself. P3.1 and the release reach `main`
 through a second merge of `ss-3.1`. The owner settled P3.1's decisions on
 2026-11-03 and instructed its build. P3.1 is built and in `ss-3.1`, after CI
-passed on it.
+passed on it. On 2026-11-03 the owner instructed the release: `ss-3.1` went
+into `main` a second time, and v0.1.1 is released, so P4 is complete. On
+2026-11-04 the owner added P4.1, keeping agents' co-author trailers out, and
+settled its decisions. P4.1 is built and in `ss-3.1`, after CI passed on
+it; it takes effect once `ss-3.1` is in `main`. P5 follows, with its
+walkthrough.
 
 This document is published with the repository. It names no private
 project, address, or identifier.
@@ -69,7 +74,8 @@ project, address, or identifier.
 | P2 | The prompt: minutes and Ctrl-Space | built; Mac run to come |
 | P3 | Pinned actions and Dependabot's auto-merge | complete |
 | P3.1 | The picker shows sends already scheduled | built; Mac look to come |
-| P4 | Release v0.1.1 | step 1 done; release after P3.1 |
+| P4 | Release v0.1.1 | complete |
+| P4.1 | No co-author trailers from agents | built; reaches `main` on the owner's word |
 | P5 | The owner's other public repositories | walkthrough first |
 
 P3 comes before the release so that v0.1.1 runs pinned actions, and P3.1 so
@@ -538,6 +544,136 @@ settings. The release waits for P3.1.
 - No CI ran on `main` for `ee9d7d2`: GitHub starts no workflow from a push
   made with a workflow's own token. The pull request's checks, run on the
   merged result, were its test.
+
+#### As built — 2026-11-03
+
+- `ss-3.1` went into `main` a second time as `ebe6adc`, and `tools/check`
+  passed there, all 12 packages. `tools/release 0.1.1` dated the changelog
+  2026-11-03, set the plugin to 0.1.1, committed `21a78e0`, and made the
+  annotated tag. The tree, the added lines, the messages, and the tag had
+  zero private-term hits, and every author, committer, and tagger is the
+  noreply address.
+- One atomic push took `main` and `v0.1.1`. GitHub printed the bypass
+  notice: "Bypassed rule violations for refs/heads/main: 4 of 4 required
+  status checks are expected."
+- CI on `main` and all 14 jobs of the release passed. The release is
+  published, not a draft, with the two Linux archives and `checksums.txt`.
+  `install.sh` installed 0.1.1 on Ubuntu, x86 and Arm. `tools/bump-tap`
+  brought the tap's formula to 0.1.1, committed with the noreply address.
+  Homebrew on macOS and on Ubuntu installed it, and its version check,
+  test, and audit passed. The formula's checksum matches the tag's archive,
+  hashed here: `4363bbda…cb5b`.
+- The release went out before the owner's Mac run of P2 and Mac look at
+  P3.1. CI's macOS jobs passed both phases' tests; the hand checks stay
+  open.
+
+Found while releasing:
+
+- The owner asked for GitHub to refuse any commit carrying a
+  `Co-authored-by` trailer, on any branch. GitHub's rule on commit messages
+  is for Enterprise organizations: asked to create one here, disabled,
+  GitHub answered 422 "Invalid rule 'commit_message_pattern'", and nothing
+  was created.
+- GitHub adds `Co-authored-by: dependabot[bot]` itself when it
+  squash-merges Dependabot's pull requests. `ee9d7d2` carries it, and the
+  pull request's own commit does not; it is the only commit in the history
+  with the trailer. A local hook, a CI check, and merging Dependabot by
+  rebase are with the owner to decide.
+
+### P4.1 — No co-author trailers from agents
+
+Added on 2026-11-04. The owner wants no commit from an agent to carry a
+`Co-authored-by` trailer, on any branch. Dependabot's, which GitHub adds
+when it squash-merges, are fine.
+
+#### Code check — 2026-11-04
+
+- GitHub cannot refuse such a push here: its rule on commit messages is for
+  Enterprise organizations, and it answered 422 when asked (P4's As built).
+- The only trailer in the history is Dependabot's, on `ee9d7d2`.
+- `core.hooksPath` points the main checkout and every linked worktree at the
+  main checkout's `.githooks`, so one `commit-msg` hook covers every commit
+  made on this machine, once it is in that checkout.
+- Git runs `commit-msg` for `git commit`, including `--amend`, and for
+  `git merge`. Rebase and cherry-pick carry a message over unchecked, and
+  `--no-verify` skips the hook (Git's `githooks` documentation).
+- An agent working elsewhere, such as a cloud session, pushes to GitHub
+  without the hook. CI runs on pull requests and on pushes to `main`, and
+  its Linux job is one of the checks `main` requires. The owner's direct
+  pushes bypass that requirement, so a push shows a failed run instead.
+
+#### Decisions settled 2026-11-04
+
+1. A `commit-msg` hook refuses a commit whose message has the trailer.
+2. CI's Linux job fails when a commit that the run adds carries one, with
+   the same test as the hook. Dependabot's commits are skipped. CI keeps its
+   triggers.
+3. Once built, `ss-3.1` goes into `main` on the owner's word, with P4's
+   As built, so the hook takes effect.
+
+Built on these assumptions: only lines starting `Co-authored-by:` count, in
+any letter case; Dependabot is known by its author name, `dependabot[bot]`;
+no changelog entry, since the program does not change.
+
+#### Steps
+
+1. `.githooks/commit-msg` refuses a message with the trailer and says what
+   to remove.
+   → verify: new cases in `tools/test-hooks`: refused, refused in lower
+   case, refused for a merge, accepted without it or with the words
+   mid-line.
+2. `tools/check-trailers RANGE` runs the hook on each commit in the range
+   and names the ones it refuses, skipping Dependabot's.
+   → verify: in the hook fixture, a commit made with `--no-verify` fails
+   the range and a Dependabot commit passes. In this repository,
+   `ee9d7d2^..main` passes. Nothing with the trailer is pushed.
+3. CI's Linux job runs it on the commits each run adds: a pull request's
+   own commits, a push's new commits, and what is not on `main` for a run
+   started by hand.
+   → verify: `tools/check` passes; CI on the phase branch, started by hand,
+   passes.
+4. `AGENTS.md` and `CONTRIBUTING.md` say the rule and where it is enforced.
+   → verify: zero private-term hits.
+
+Not included: Dependabot's trailers, and rewriting `ee9d7d2`.
+
+#### As built — 2026-11-04
+
+- `.githooks/commit-msg` refuses a commit, amend, or merge whose message has
+  a line starting `Co-authored-by:`, in any letter case and with spaces or
+  tabs before it or before the colon. It prints the line and says to remove
+  it. Git's comment lines and the diff of `git commit --verbose` do not
+  count, and the words in the middle of a line do not either. mawk, gawk,
+  gawk in POSIX mode, and BusyBox's awk give the same results; the Mac's
+  awk was not at hand.
+- `tools/check-trailers RANGE` runs that hook on each commit in the range
+  and names the ones it refuses. It skips commits whose author is
+  `dependabot[bot]`, and fails on a range it cannot read. Without the skip
+  it names `ee9d7d2`; with it, `ee9d7d2^..main` passes.
+- CI's Linux job checks out the full history and runs the check before Go
+  is set up: a pull request's base to its head, a push's old head to its
+  new one, or the new head alone when the old one is gone, as for the tag
+  push that starts a release; any other run checks what is not on `main`.
+  Each case was run here against this repository's commits.
+- `tools/test-hooks` has ten new cases: refused in either case, the branch
+  left where it was, the words mid-line taken, a merge refused, comments and
+  the `--verbose` diff ignored, a clean range passing, a commit made with
+  `--no-verify` named, Dependabot's skipped, and an unreadable range
+  failing. With the hook planted to accept everything, the tests failed.
+- `AGENTS.md` and `CONTRIBUTING.md` give the rule, the hook, and the check.
+
+Found while building:
+
+- The new checkout setting sat on the line that Dependabot's update had
+  changed on `main`, so the two conflicted. `main` was merged into `ss-3.1`
+  (`dcca608`), with the release, and the phase's commits were replayed on
+  it, so CI on the phase branch tests what reaches `main`.
+- The tooling commits first had `feat:`; they were given `chore:`, as
+  `AGENTS.md` asks, before anything was pushed.
+- CI's macOS job does not run the hook tests, so the hook on the Mac is a
+  check by hand.
+- The hook takes effect when `ss-3.1` is in the main checkout, at the merge
+  into `main` the owner approved, on their word.
 
 ### P5 — The owner's other public repositories
 

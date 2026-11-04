@@ -36,6 +36,11 @@ compatibility shim for older timers.
   the owner's direct pushes bypass it.
 - Use the user's commit prefixes: `feat:`, `fix:`, `docs:`, `refactor:`,
   and `chore:`. Use `chore:` for merge commits and tooling changes.
+- Commits carry no `Co-authored-by` trailer, from any agent or person. The
+  tracked `commit-msg` hook refuses one, and CI's Linux job runs
+  `tools/check-trailers` on the commits each run adds, for commits made
+  where the hook is not set up. Dependabot's, which GitHub adds when it
+  merges, are accepted.
 - `tools/install` and `tools/setup-hooks` must run only from the main checkout
   on `main`; both enforce this through `tools/main-checkout`, the one place
   that names the deploy branch. Never point the installed binary at a worktree.
@@ -64,6 +69,7 @@ compatibility shim for older timers.
 | `tools/vulncheck` | Report known vulnerabilities the program reaches, Go standard library included, for both builds; needs network. |
 | `tools/release-check VERSION` | Check that the changelog and the plugin manifest carry the version, and print its release notes. |
 | `tools/setup-hooks` | Enable this repository's hooks and install if needed; main checkout on `main` only. |
+| `tools/check-trailers RANGE` | Fail when a commit in the range carries a `Co-authored-by` trailer, skipping Dependabot's; run by CI. |
 | `tools/media [TAPE...]` | Record the README's GIFs from `docs/media/*.tape` with VHS in Docker, against `testdata/demo` and the stand-ins. |
 
 Build/install needs Go at `go.mod`'s version or newer, Git, `flock`, and GNU coreutils (`base64`, `tr`). Checks also need `zsh` and

@@ -43,6 +43,8 @@ scheduling.
   defaults; do not rename or remove one.
 - Text is sent once. Recovery may press Enter again on fresh evidence of a
   stuck draft, and never resends the message or answers a dialog.
+- Commits carry no `Co-authored-by` trailer. The `commit-msg` hook refuses
+  one, and CI fails a pull request or push whose commits carry one.
 
 [AGENTS.md](AGENTS.md) has the full list, for people and coding agents alike.
 
@@ -97,6 +99,12 @@ Run `tools/install` from the main checkout on `main` and invoke the installed
 command; never point the installed binary at a worktree. The zsh shim,
 `schedule-send.zsh`, remains so timers created before the Go rewrite still
 work.
+
+The `commit-msg` hook refuses a commit, amend, or merge whose message has a
+`Co-authored-by` trailer, and says which line to remove. It runs in every
+checkout and worktree, on any branch. Rebase and cherry-pick copy messages
+without it, and `--no-verify` skips it; CI's `tools/check-trailers` catches
+those commits.
 
 Hook configuration is local to each repository; run `tools/setup-hooks` after
 a fresh clone. Setup refuses to overwrite a different `core.hooksPath`.

@@ -7,7 +7,7 @@ fixture="$(mktemp -d)"
 trap 'rm -rf "$fixture"' EXIT HUP INT TERM
 mkdir -p "$fixture/tools" "$fixture/.githooks"
 cp "$root/tools/source-id" "$root/tools/auto-install" "$root/tools/setup-hooks" \
-  "$root/tools/main-checkout" "$fixture/tools/"
+  "$root/tools/main-checkout" "$root/tools/check-trailers" "$fixture/tools/"
 cp "$root/.githooks/"* "$fixture/.githooks/"
 cat > "$fixture/tools/install" <<'MOCK'
 #!/bin/sh
@@ -135,6 +135,57 @@ git -C "$fixture" worktree add -q -b preview "$worktree"
 [ ! -e "$worktree/installations" ]
 if (cd "$worktree" && tools/setup-hooks) > /dev/null 2>&1; then
   echo 'setup accepted a linked worktree' >&2; exit 1
+fi
+count 8
+# commit-msg refuses a Co-authored-by trailer in any letter case, for commits
+# and merges alike, and leaves the words alone in the middle of a line.
+refused() {
+  if "$@" > "$fixture/bin/trailer-output" 2>&1; then
+    echo "accepted a co-author trailer: $*" >&2; exit 1
+  fi
+  if ! grep -q 'no Co-authored-by trailers' "$fixture/bin/trailer-output"; then
+    echo "missing trailer diagnostic: $*" >&2; exit 1
+  fi
+}
+start="$(git -C "$fixture" rev-parse HEAD)"
+refused git -C "$fixture" commit -q --allow-empty -m 'chore: pair' \
+  -m 'Co-authored-by: Agent <agent@example.invalid>'
+refused git -C "$fixture" commit -q --allow-empty -m 'chore: pair' \
+  -m 'co-authored-by: Agent <agent@example.invalid>'
+[ "$(git -C "$fixture" rev-parse HEAD)" = "$start" ]
+git -C "$fixture" commit -q --allow-empty -m 'chore: mention the rule' \
+  -m 'A Co-authored-by: line is not taken here.'
+git -C "$fixture" checkout -q -b paired
+git -C "$fixture" commit -q --allow-empty -m 'chore: side commit'
+git -C "$fixture" checkout -q main
+head="$(git -C "$fixture" rev-parse HEAD)"
+refused git -C "$fixture" merge -q --no-ff paired -m 'chore: merge paired' \
+  -m 'Co-authored-by: Agent <agent@example.invalid>'
+git -C "$fixture" merge --abort
+[ "$(git -C "$fixture" rev-parse HEAD)" = "$head" ]
+# Comment lines and the diff of `git commit --verbose` are not the message.
+printf '%s\n' 'chore: verbose' '# Co-authored-by: Agent <agent@example.invalid>' \
+  '# ------------------------ >8 ------------------------' \
+  ' Co-authored-by: Agent <agent@example.invalid>' > "$fixture/bin/verbose-message"
+(cd "$fixture" && .githooks/commit-msg bin/verbose-message)
+# check-trailers names a commit that got past the hook and skips Dependabot's,
+# whose trailer GitHub adds when it merges.
+clean="$(git -C "$fixture" rev-parse HEAD)"
+[ "$(git -C "$fixture" rev-list --count "$start..HEAD")" -eq 1 ]
+(cd "$fixture" && tools/check-trailers "$start..HEAD") > /dev/null
+git -C "$fixture" commit -q --no-verify --allow-empty -m 'chore: unchecked' \
+  -m 'Co-authored-by: Agent <agent@example.invalid>'
+if (cd "$fixture" && tools/check-trailers "$clean..HEAD") > /dev/null 2> "$fixture/bin/range-output"; then
+  echo 'check-trailers accepted a co-author trailer' >&2; exit 1
+fi
+if ! grep -q 'chore: unchecked' "$fixture/bin/range-output"; then
+  echo 'check-trailers did not name the commit' >&2; exit 1
+fi
+git -C "$fixture" -c user.name='dependabot[bot]' commit -q --no-verify --allow-empty \
+  -m 'chore: bump a dependency' -m 'Co-authored-by: dependabot[bot] <bot@example.invalid>'
+(cd "$fixture" && tools/check-trailers HEAD^!) > /dev/null
+if (cd "$fixture" && tools/check-trailers no-such-ref..HEAD) > /dev/null 2>&1; then
+  echo 'check-trailers accepted a range it could not read' >&2; exit 1
 fi
 count 8
 echo 'hooks: ok'
