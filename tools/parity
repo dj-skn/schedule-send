@@ -70,6 +70,11 @@ known+=(
   help "the usage text documents --json and --targets"
   unknown-arg "an unknown argument prints that same usage text"
 )
+# Behaviour SS-3.1 P4.2 changed: the --at error names the short forms too.
+known+=(
+  unparseable "the --at error adds 'or an offset such as +30 or +2:30h'"
+  unknown-zone "the same --at error, with the short forms"
+)
 
 # Review fixes intentionally change persistence and lifecycle calls. Unlike the
 # older presentation differences above, these cases are checked strictly:
