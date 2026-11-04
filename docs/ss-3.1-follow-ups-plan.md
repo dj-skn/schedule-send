@@ -24,7 +24,8 @@ it; it takes effect once `ss-3.1` is in `main`. On 2026-11-04 the owner
 added P4.2, hours and minutes in a short time such as `+2:30h`, settled its
 decisions, and instructed its build and a v0.1.2 release after it. P4.1
 and P4.2 are in `main`, and v0.1.2 is released. On 2026-11-04 the owner
-settled P5's decisions and instructed its build.
+settled P5's decisions and instructed its build. P5 is done in the three
+repositories; the Support request it drafted is the owner's to send.
 
 This document is published with the repository. It names no private
 project, address, or identifier.
@@ -40,8 +41,8 @@ project, address, or identifier.
   minor updates merge themselves once CI passes.
 - The picker shows which agents already have a send scheduled.
 - v0.1.1 is released, its tap written by `tools/bump-tap`.
-- The owner's other public repositories carry the noreply address, as P5's
-  walkthrough settles.
+- The owner's other public repositories carry the noreply address on their
+  branches and tags.
 
 ## Decisions settled 2026-11-02
 
@@ -80,7 +81,7 @@ project, address, or identifier.
 | P4 | Release v0.1.1 | complete |
 | P4.1 | No co-author trailers from agents | complete |
 | P4.2 | Hours and minutes in a short time, and v0.1.2 | complete |
-| P5 | The owner's other public repositories | building |
+| P5 | The owner's other public repositories | complete; Support request with the owner |
 
 P3 comes before the release so that v0.1.1 runs pinned actions, and P3.1 so
 that it carries the picker change. P5 is
@@ -864,6 +865,45 @@ command-line token cannot push workflow files.
 Not included: pinning the other repositories' actions, which can be P5.1;
 the forks, which belong to other people; and the owner's own clones, which
 need cloning afresh.
+
+#### As built — 2026-11-04
+
+- A throwaway Homebrew 7.0.12 tapped a local copy of the tap; the copy was
+  rewritten and `brew update` moved the tap onto the new history ("Updated
+  1 tap"), with both formulae loading after.
+- Each repository was saved first, as a verified Git bundle with its
+  settings, outside every tree, and each push was refused unless the
+  rewritten branches and tags held no personal address.
+- The tap was rewritten and force-pushed, with a lease on its old tip. A
+  fresh clone has no commit with the address and the same files at every
+  commit, and `tools/bump-tap --dry-run 0.1.2` finds the formula current.
+  GitHub still serves its old commits by identifier, which the Support
+  request covers.
+- The larger's default branch and both tags were rewritten and pushed with
+  its ruleset and release workflow off; both went back on and were checked.
+  The two annotated tags' tagger was rewritten too. Its three leftover
+  branches were deleted. Only CI ran on the push, and it passed. The
+  releases' files are unchanged, and the docs site serves. Its 6
+  pull-request refs and 2 forks keep the old commits, and GitHub serves
+  them by identifier.
+- Claude Code's auto mode refused the agent's deletion and creation of the
+  smaller, so the owner ran both. Its rewritten history and three tags were
+  pushed, without the agent's co-author line, and its formula took the new
+  archive checksum in a commit of its own; the archive's files are
+  unchanged. A mirror clone has no hit and no pull-request ref, GitHub no
+  longer serves its old commits, and its settings match the saved ones.
+- The smaller's CI fails on Linux, on the first push and on the checksum
+  commit alike, and passes on macOS. Its Linux jobs build against the
+  newest code of a library they fetch, whose header changed in October
+  2026, after the smaller's last run. The files are those that passed before, so the
+  failure is not the rewrite's; it is left alone.
+- Homebrew 7.0.12 asks users to trust a third-party tap before it loads
+  its formulae for most commands; installing by full name still works, as
+  the release's jobs show.
+- The Support request is drafted for the owner, outside the tree.
+
+Still with the owner: send the Support request; clone the repositories
+afresh; and see that the Mac's `brew update` takes the tap.
 
 ## Not included
 
