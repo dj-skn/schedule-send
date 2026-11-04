@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-04
+
 ### Added
 
 - `+2:30h` and `+1h30m` as hours and minutes, alongside `+30` and `+2h`.

@@ -1,6 +1,6 @@
 id = "dj-skn.schedule-send"
 name = "Schedule Send"
-version = "0.1.1"
+version = "0.1.2"
 min_herdr_version = "0.9.5"
 description = "Schedule a message to the focused agent, or resume it when its usage limit resets."
 platforms = ["linux", "macos"]
