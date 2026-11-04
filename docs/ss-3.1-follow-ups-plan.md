@@ -78,7 +78,7 @@ project, address, or identifier.
 | P3.1 | The picker shows sends already scheduled | built; Mac look to come |
 | P4 | Release v0.1.1 | complete |
 | P4.1 | No co-author trailers from agents | built; reaches `main` on the owner's word |
-| P4.2 | Hours and minutes in a short time, and v0.1.2 | building |
+| P4.2 | Hours and minutes in a short time, and v0.1.2 | built; release next |
 | P5 | The owner's other public repositories | walkthrough first |
 
 P3 comes before the release so that v0.1.1 runs pinned actions, and P3.1 so
@@ -724,6 +724,34 @@ prompt's hint becomes "Try 18:30, 6:30 PM, Sep 27 1am, +30 or +2:30h."
    and Homebrew on macOS and Ubuntu prints `schedule-send 0.1.2`.
 
 Not included: decimal hours, and any change to how `+30` reads.
+
+#### As built — 2026-11-04
+
+- The parser reads `+H:MMh` and `+HhMm`, spaces allowed as before, and
+  hands `date` the minutes they add up to, so `+2:30h` is `+150 min`.
+  Minutes run 0 to 59, written with two digits after a colon; more than
+  999,999 hours is left for `date` to refuse. `+2:30` alone is refused
+  before `date` sees it.
+- Nine forms are read and twelve refused in the new parser test. With the
+  new branch switched off, all nine read cases failed.
+- The time question's hint and its error share one list: "18:30, 6:30 PM,
+  Sep 27 1am, +30 or +2:30h". The `--at` help names the short forms, and
+  the `--at` error adds "or an offset such as +30 or +2:30h". A prompt test
+  types `+2:30`, gets the error, and is asked again; `+2:30h` then fires
+  150 minutes on, at the whole minute. `--at +2:30` is refused, and
+  `--at +1h30m` is taken.
+- The README, `docs/usage.md`, and the changelog name the forms.
+- `tools/check` passed, all 12 packages. `tools/parity`: 39 identical, 39
+  known differences, 0 unexpected.
+
+Found while building:
+
+- The walkthrough said no parity case typed an unreadable time. Two do,
+  `--at garbage` and `--at '4pm (Mars/Base)'`, and they differed from the
+  zsh version by the error's new clause alone. They are recorded as known
+  differences, as the help text already was.
+- The time question's "Like …" hint, shown before anything is typed, lists
+  the same forms as its error; the walkthrough had named only the error.
 
 ### P5 — The owner's other public repositories
 
