@@ -22,8 +22,13 @@ into `main` a second time, and v0.1.1 is released, so P4 is complete. On
 settled its decisions. P4.1 is built and in `ss-3.1`, after CI passed on
 it; it takes effect once `ss-3.1` is in `main`. On 2026-11-04 the owner
 added P4.2, hours and minutes in a short time such as `+2:30h`, settled its
-decisions, and instructed its build and a v0.1.2 release after it. P5
-follows, with its walkthrough.
+decisions, and instructed its build and a v0.1.2 release after it. P4.1
+and P4.2 are in `main`, and v0.1.2 is released. On 2026-11-04 the owner
+settled P5's decisions and instructed its build. P5 is done in the three
+repositories; the Support request it drafted is the owner's to send.
+SS-3.1 closed on 2026-11-04, when `ss-3.1` went into `main` a third time
+with this record. Left with the owner: the Mac checks of P2 and P3.1, the
+Support request, and fresh clones of the repositories P5 rewrote.
 
 This document is published with the repository. It names no private
 project, address, or identifier.
@@ -39,8 +44,8 @@ project, address, or identifier.
   minor updates merge themselves once CI passes.
 - The picker shows which agents already have a send scheduled.
 - v0.1.1 is released, its tap written by `tools/bump-tap`.
-- The owner's other public repositories carry the noreply address, as P5's
-  walkthrough settles.
+- The owner's other public repositories carry the noreply address on their
+  branches and tags.
 
 ## Decisions settled 2026-11-02
 
@@ -77,9 +82,9 @@ project, address, or identifier.
 | P3 | Pinned actions and Dependabot's auto-merge | complete |
 | P3.1 | The picker shows sends already scheduled | built; Mac look to come |
 | P4 | Release v0.1.1 | complete |
-| P4.1 | No co-author trailers from agents | built; reaches `main` on the owner's word |
-| P4.2 | Hours and minutes in a short time, and v0.1.2 | built; release next |
-| P5 | The owner's other public repositories | walkthrough first |
+| P4.1 | No co-author trailers from agents | complete |
+| P4.2 | Hours and minutes in a short time, and v0.1.2 | complete |
+| P5 | The owner's other public repositories | complete; Support to send |
 
 P3 comes before the release so that v0.1.1 runs pinned actions, and P3.1 so
 that it carries the picker change. P5 is
@@ -753,6 +758,24 @@ Found while building:
 - The time question's "Like …" hint, shown before anything is typed, lists
   the same forms as its error; the walkthrough had named only the error.
 
+#### Release as done — 2026-11-04
+
+- `ss-3.1` went into `main` twice: P4.1 as `b731f64`, then P4.2 as
+  `a9cd48d`. CI passed on both pushes, on every system, and on the first the
+  new co-author check ran on a real push. The release was tagged only after
+  that.
+- `tools/release 0.1.2` committed `93cd08a` and the tag, with zero
+  private-term hits, the noreply address throughout, and no co-author
+  trailer. GitHub printed the bypass notice.
+- All 14 release jobs passed, and CI on the release commit too. `install.sh`
+  installed 0.1.2 on Ubuntu, x86 and Arm. The tap's formula is at 0.1.2,
+  committed with the noreply address, and its checksum matches the tag's
+  archive, hashed here. Homebrew on macOS and Ubuntu installed 0.1.2.
+- GitHub had "Incident with Pull Requests, Git Operations and Issues" open
+  from 09:49 UTC. Pushes alternated between "Permission denied (publickey)"
+  and "Internal Server Error" before going through, so each was retried,
+  with the scan before every attempt.
+
 ### P5 — The owner's other public repositories
 
 Added on 2026-11-02 at the owner's request. The commit history of some of
@@ -767,6 +790,123 @@ It starts from these facts:
   earlier copies.
 - Everyone who installs from the tap holds a clone of it, so how
   `brew update` takes a rewritten tap is checked before the tap is touched.
+
+#### Code check — 2026-11-04
+
+Three public repositories: the tap and two others, called here the larger
+and the smaller.
+
+- 48 commits carry the personal address as author and committer: 3 of the
+  tap's 8, 32 in the larger, and 13 of the smaller's 17. The larger's two
+  annotated tags carry it as tagger. No file version and no commit message
+  holds it, and the larger's package metadata names the owner only.
+- A rewrite that maps the address to the noreply one, run on copies of all
+  three, left every file, message, and date as it was and gave every
+  commit a new identifier. GitHub signed 7 of the commits, made on its
+  website or by its bots; a rewrite drops those signatures.
+- Homebrew's update fetches a tap with `--force` and rebases the local
+  branch onto the fetched one. Run with Git on a copy of the tap, the
+  rebase dropped all 8 old commits as already applied and left the copy on
+  the new history, with a local edit stashed and restored.
+- Pull-request refs cannot be pushed over. The larger's 6 reach all 32
+  commits, and the smaller's one reaches 7. The larger has 2 forks, from
+  November 2024, holding the first 20. GitHub's guide to removing data says
+  its Support dereferences pull requests and collects old commits only when
+  no fork holds them, and does not remove data that is not sensitive. The
+  tap has no pull requests and no forks.
+- The larger refuses a force push on its default branch, by a ruleset no
+  one may bypass, and runs its release workflow on every `v*` tag push:
+  binaries, PyPI, the GitHub release, and the tap. The GitHub-release job
+  runs even when PyPI refuses. The tap installs the larger from PyPI, so
+  its formula does not change.
+- The smaller carries its own formula, which installs its newest tag's
+  archive by checksum. The archive holds the commit identifier, so its
+  checksum changes with the rewrite.
+- The smaller has no stars, forks, issues, or releases; the larger has 18
+  stars, 6 pull requests, and two releases.
+
+#### Decisions settled 2026-11-04
+
+1. The tap and the larger are rewritten in place. The smaller is deleted
+   and created again from its rewritten history, which removes its one
+   pull request's ref and its old commits from GitHub at the cost of that
+   pull request's page.
+2. The agent switches the larger's ruleset and release workflow off through
+   the API for the push, back on after, and checks both.
+3. One request to GitHub Support follows the rewrite, for the tap's old
+   commits and this repository's two commits from P3.1. The larger is left
+   out: its forks hold the old commits.
+
+Built on these assumptions: the leftover branches of merged or closed
+pull requests are deleted, not rewritten; an agent's `Co-authored-by` line
+in one of the smaller's commits goes in the same rewrite; other people's
+and bots' addresses are left as they are; pushes go over SSH, since the
+command-line token cannot push workflow files.
+
+#### Steps
+
+1. A throwaway Homebrew in a temporary directory taps a local copy of the
+   tap; the copy is rewritten; `brew update` runs. → verify: the tap is on
+   the new history and lists both formulae.
+2. Each repository is saved as a Git bundle outside every tree.
+   → verify: `git bundle verify` passes.
+3. The tap is rewritten and force-pushed. → verify: a fresh clone has no
+   commit with the address and the same files at every commit;
+   `tools/bump-tap --dry-run` finds nothing to change.
+4. The smaller's settings are recorded; it is rewritten, created again, and
+   pushed with its tags; its formula gets the new checksum. → verify: a
+   mirror clone has no hit and no pull-request ref; the checksum matches
+   the archive GitHub serves; CI passes.
+5. The larger's guards go off, the leftover branches are deleted, its
+   default branch and tags are force-pushed, and the guards go back on.
+   → verify: no hit on any branch or tag; no release run started; the
+   releases keep their files; the docs site still serves; the ruleset is
+   active.
+6. The Support request is drafted for the owner. → verify: it gives what
+   GitHub's guide asks for, with the first changed commits.
+
+Not included: pinning the other repositories' actions, which can be P5.1;
+the forks, which belong to other people; and the owner's own clones, which
+need cloning afresh.
+
+#### As built — 2026-11-04
+
+- A throwaway Homebrew 7.0.12 tapped a local copy of the tap; the copy was
+  rewritten and `brew update` moved the tap onto the new history ("Updated
+  1 tap"), with both formulae loading after.
+- Each repository was saved first, as a verified Git bundle with its
+  settings, outside every tree, and each push was refused unless the
+  rewritten branches and tags held no personal address.
+- The tap was rewritten and force-pushed, with a lease on its old tip. A
+  fresh clone has no commit with the address and the same files at every
+  commit, and `tools/bump-tap --dry-run 0.1.2` finds the formula current.
+  GitHub still serves its old commits by identifier, which the Support
+  request covers.
+- The larger's default branch and both tags were rewritten and pushed with
+  its ruleset and release workflow off; both went back on and were checked.
+  The two annotated tags' tagger was rewritten too. Its three leftover
+  branches were deleted. Only CI ran on the push, and it passed. The
+  releases' files are unchanged, and the docs site serves. Its 6
+  pull-request refs and 2 forks keep the old commits, and GitHub serves
+  them by identifier.
+- Claude Code's auto mode refused the agent's deletion and creation of the
+  smaller, so the owner ran both. Its rewritten history and three tags were
+  pushed, without the agent's co-author line, and its formula took the new
+  archive checksum in a commit of its own; the archive's files are
+  unchanged. A mirror clone has no hit and no pull-request ref, GitHub no
+  longer serves its old commits, and its settings match the saved ones.
+- The smaller's CI fails on Linux, on the first push and on the checksum
+  commit alike, and passes on macOS. Its Linux jobs build against the
+  newest code of a library they fetch, whose header changed in October
+  2026, after the smaller's last run. The files are those that passed
+  before, so the failure is not the rewrite's; it is left alone.
+- Homebrew 7.0.12 asks users to trust a third-party tap before it loads
+  its formulae for most commands; installing by full name still works, as
+  the release's jobs show.
+- The Support request is drafted for the owner, outside the tree.
+
+Still with the owner: send the Support request; clone the repositories
+afresh; and see that the Mac's `brew update` takes the tap.
 
 ## Not included
 
