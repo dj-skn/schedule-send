@@ -22,8 +22,9 @@ into `main` a second time, and v0.1.1 is released, so P4 is complete. On
 settled its decisions. P4.1 is built and in `ss-3.1`, after CI passed on
 it; it takes effect once `ss-3.1` is in `main`. On 2026-11-04 the owner
 added P4.2, hours and minutes in a short time such as `+2:30h`, settled its
-decisions, and instructed its build and a v0.1.2 release after it. P5
-follows, with its walkthrough.
+decisions, and instructed its build and a v0.1.2 release after it. P4.1
+and P4.2 are in `main`, and v0.1.2 is released. P5 follows, with its
+walkthrough.
 
 This document is published with the repository. It names no private
 project, address, or identifier.
@@ -77,8 +78,8 @@ project, address, or identifier.
 | P3 | Pinned actions and Dependabot's auto-merge | complete |
 | P3.1 | The picker shows sends already scheduled | built; Mac look to come |
 | P4 | Release v0.1.1 | complete |
-| P4.1 | No co-author trailers from agents | built; reaches `main` on the owner's word |
-| P4.2 | Hours and minutes in a short time, and v0.1.2 | built; release next |
+| P4.1 | No co-author trailers from agents | complete |
+| P4.2 | Hours and minutes in a short time, and v0.1.2 | complete |
 | P5 | The owner's other public repositories | walkthrough first |
 
 P3 comes before the release so that v0.1.1 runs pinned actions, and P3.1 so
@@ -752,6 +753,24 @@ Found while building:
   differences, as the help text already was.
 - The time question's "Like …" hint, shown before anything is typed, lists
   the same forms as its error; the walkthrough had named only the error.
+
+#### Release as done — 2026-11-04
+
+- `ss-3.1` went into `main` twice: P4.1 as `b731f64`, then P4.2 as
+  `a9cd48d`. CI passed on both pushes, on every system, and on the first the
+  new co-author check ran on a real push. The release was tagged only after
+  that.
+- `tools/release 0.1.2` committed `93cd08a` and the tag, with zero
+  private-term hits, the noreply address throughout, and no co-author
+  trailer. GitHub printed the bypass notice.
+- All 14 release jobs passed, and CI on the release commit too. `install.sh`
+  installed 0.1.2 on Ubuntu, x86 and Arm. The tap's formula is at 0.1.2,
+  committed with the noreply address, and its checksum matches the tag's
+  archive, hashed here. Homebrew on macOS and Ubuntu installed 0.1.2.
+- GitHub had "Incident with Pull Requests, Git Operations and Issues" open
+  from 09:49 UTC. Pushes alternated between "Permission denied (publickey)"
+  and "Internal Server Error" before going through, so each was retried,
+  with the scan before every attempt.
 
 ### P5 — The owner's other public repositories
 
