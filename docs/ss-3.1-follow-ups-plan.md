@@ -26,6 +26,9 @@ decisions, and instructed its build and a v0.1.2 release after it. P4.1
 and P4.2 are in `main`, and v0.1.2 is released. On 2026-11-04 the owner
 settled P5's decisions and instructed its build. P5 is done in the three
 repositories; the Support request it drafted is the owner's to send.
+SS-3.1 closed on 2026-11-04, when `ss-3.1` went into `main` a third time
+with this record. Left with the owner: the Mac checks of P2 and P3.1, the
+Support request, and fresh clones of the repositories P5 rewrote.
 
 This document is published with the repository. It names no private
 project, address, or identifier.
@@ -81,7 +84,7 @@ project, address, or identifier.
 | P4 | Release v0.1.1 | complete |
 | P4.1 | No co-author trailers from agents | complete |
 | P4.2 | Hours and minutes in a short time, and v0.1.2 | complete |
-| P5 | The owner's other public repositories | complete; Support request with the owner |
+| P5 | The owner's other public repositories | complete; Support to send |
 
 P3 comes before the release so that v0.1.1 runs pinned actions, and P3.1 so
 that it carries the picker change. P5 is
@@ -895,8 +898,8 @@ need cloning afresh.
 - The smaller's CI fails on Linux, on the first push and on the checksum
   commit alike, and passes on macOS. Its Linux jobs build against the
   newest code of a library they fetch, whose header changed in October
-  2026, after the smaller's last run. The files are those that passed before, so the
-  failure is not the rewrite's; it is left alone.
+  2026, after the smaller's last run. The files are those that passed
+  before, so the failure is not the rewrite's; it is left alone.
 - Homebrew 7.0.12 asks users to trust a third-party tap before it loads
   its formulae for most commands; installing by full name still works, as
   the release's jobs show.
