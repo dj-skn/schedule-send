@@ -10,7 +10,9 @@ const usage = `Usage:
 
 Timing:
   --at TIME              Local time. "HH:MM", "HH:MM:SS", "12:27 AM", "3pm",
-                         "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DDTHH:MM:SS".
+                         "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DDTHH:MM:SS"; or
+                         from now, "+30" minutes, "+2h" hours, and "+2:30h"
+                         or "+1h30m" hours and minutes.
                          Time-only values that already passed roll to
                          tomorrow, correctly across DST. Omitted: read the
                          reset time from the target's usage-limit notice, add

@@ -575,7 +575,7 @@ func (a *app) run(args []string) (retErr error) {
 	} else {
 		var ok bool
 		if runAt, ok = when.Resolve(o.at, now); !ok {
-			return die("Could not parse --at '%s'. Use HH:MM[:SS], H[:MM]am/pm, or YYYY-MM-DD HH:MM:SS.", o.at)
+			return die("Could not parse --at '%s'. Use HH:MM[:SS], H[:MM]am/pm, YYYY-MM-DD HH:MM:SS, or an offset such as +30 or +2:30h.", o.at)
 		}
 	}
 	if runAt <= now {
@@ -1084,7 +1084,7 @@ func (a *app) confirmAt(q *asker, def int64, fromNow bool, now int64) (int64, er
 		epoch, parsed := when.Resolve(input, now)
 		switch {
 		case !parsed:
-			q.say(q.rail.Error(fmt.Sprintf("Could not read '%s'. Try 18:30, 6:30 PM, Sep 27 1am or +30 min.", input)))
+			q.say(q.rail.Error(fmt.Sprintf("Could not read '%s'. Try %s.", input, timeExamples)))
 		case epoch <= now:
 			q.say(q.rail.Error(show.Time(epoch, now) + " has already passed."))
 		case a.taken(epoch):
@@ -1096,13 +1096,17 @@ func (a *app) confirmAt(q *asker, def int64, fromNow bool, now int64) (int64, er
 	}
 }
 
+// timeExamples are the ways of typing a time that the time question offers,
+// and repeats when an answer cannot be read.
+const timeExamples = "18:30, 6:30 PM, Sep 27 1am, +30 or +2:30h"
+
 // timeHint says what the time question takes: the time Enter keeps and why,
 // or, with none to keep, the ways a time can be typed.
 func timeHint(def int64, fromNow bool, now int64) string {
 	mins := limitMargin / 60
 	switch {
 	case def == 0:
-		return "Like 18:30, 6:30 PM, Sep 27 1am or +30 min"
+		return "Like " + timeExamples
 	case fromNow:
 		return fmt.Sprintf("Enter keeps %s, %d min from now", show.Time(def, now), mins)
 	}
