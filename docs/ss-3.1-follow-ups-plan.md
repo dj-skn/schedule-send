@@ -20,8 +20,10 @@ passed on it. On 2026-11-03 the owner instructed the release: `ss-3.1` went
 into `main` a second time, and v0.1.1 is released, so P4 is complete. On
 2026-11-04 the owner added P4.1, keeping agents' co-author trailers out, and
 settled its decisions. P4.1 is built and in `ss-3.1`, after CI passed on
-it; it takes effect once `ss-3.1` is in `main`. P5 follows, with its
-walkthrough.
+it; it takes effect once `ss-3.1` is in `main`. On 2026-11-04 the owner
+added P4.2, hours and minutes in a short time such as `+2:30h`, settled its
+decisions, and instructed its build and a v0.1.2 release after it. P5
+follows, with its walkthrough.
 
 This document is published with the repository. It names no private
 project, address, or identifier.
@@ -76,6 +78,7 @@ project, address, or identifier.
 | P3.1 | The picker shows sends already scheduled | built; Mac look to come |
 | P4 | Release v0.1.1 | complete |
 | P4.1 | No co-author trailers from agents | built; reaches `main` on the owner's word |
+| P4.2 | Hours and minutes in a short time, and v0.1.2 | building |
 | P5 | The owner's other public repositories | walkthrough first |
 
 P3 comes before the release so that v0.1.1 runs pinned actions, and P3.1 so
@@ -674,6 +677,53 @@ Found while building:
   check by hand.
 - The hook takes effect when `ss-3.1` is in the main checkout, at the merge
   into `main` the owner approved, on their word.
+
+### P4.2 — Hours and minutes in a short time, and v0.1.2
+
+Added on 2026-11-04. The owner wants a time such as `+2:30h`, which is
+easier to type than `+150` or `+2 hours 30 min`.
+
+#### Code check — 2026-11-04
+
+- One function, `normalise` in `internal/when`, turns `+30`, `+30m`, and
+  `+2h` into what GNU `date` reads; the prompt, `--at`, and the plugin all
+  go through it. Through the parser, `+2:30h`, `+2.5h`, and `+1h10m` are
+  refused today, and `+150` and `+2 hours 30 min` read as 150 minutes.
+- What to type is listed in three places, none with every short form: the
+  prompt's error ("Try 18:30, 6:30 PM, Sep 27 1am or +30 min."), the
+  `--at` help, and the `--at` error.
+- A time without seconds already fires on the whole minute at or after, so
+  `+2:30h` fires as `+150` does.
+- No parity case types a short time or an unreadable one, and the help text
+  is a documented difference.
+
+#### Decisions settled 2026-11-04
+
+1. `+2:30h` and `+1h30m` read as hours and minutes, minutes 0 to 59. No
+   decimal hours: `+1.33h` lands on no minute.
+2. `+2:30` without the `h` is refused, and the error suggests `+2:30h`: on
+   its own it could be minutes and seconds.
+3. v0.1.2 is released once this is in `main`.
+
+Built on these assumptions: any whole number of hours (`+0:45h`,
+`+26:30h`); spaces as the short forms already allow (`+ 2:30 h`); the
+prompt's hint becomes "Try 18:30, 6:30 PM, Sep 27 1am, +30 or +2:30h."
+
+#### Steps
+
+1. The parser reads `+H:MMh` and `+HhMm` as minutes, and refuses `+H:MM`.
+   → verify: `+2:30h` and `+1h30m` give 150 and 90 minutes, `+0:45h` 45;
+   `+2:60h`, `+2:3h`, `+2:30`, `+2.5h`, and `+1h90m` are refused.
+2. The prompt's hint, the `--at` help, and the `--at` error name the forms.
+   → verify: a prompt test types `+2:30`, sees the hint, and is asked again;
+   `+2:30h` then fires 150 minutes on.
+3. `docs/usage.md` and the changelog.
+   → verify: `tools/check` and the full `tools/parity` pass.
+4. Into `main`, then `tools/release 0.1.2` and the push.
+   → verify: as for v0.1.1: every release job passes, the tap is at 0.1.2,
+   and Homebrew on macOS and Ubuntu prints `schedule-send 0.1.2`.
+
+Not included: decimal hours, and any change to how `+30` reads.
 
 ### P5 — The owner's other public repositories
 
