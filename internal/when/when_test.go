@@ -262,3 +262,26 @@ func TestResolveShortOffsets(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveHoursAndMinutes(t *testing.T) {
+	warsaw(t)
+	for in, d := range map[string]time.Duration{
+		"+2:30h": 150 * time.Minute, "+1h30m": 90 * time.Minute, "+0:45h": 45 * time.Minute,
+		"+1h 30m": 90 * time.Minute, "+ 2:30 h": 150 * time.Minute, "+1h5m": 65 * time.Minute,
+		"+2:00h": 2 * time.Hour, "+26:30h": 26*time.Hour + 30*time.Minute, " +0h59m ": 59 * time.Minute,
+	} {
+		got, ok := Resolve(in, 0)
+		want := time.Now().Add(d).Unix()
+		if !ok || !aboutMinuteAfter(got, want) {
+			t.Errorf("Resolve(%q) = %d, %v; want the minute at or after %d", in, got, ok, want)
+		}
+	}
+	// "+2:30" alone could be minutes and seconds, and decimals land on no
+	// minute; minutes run to 59 and are written with two digits after a colon.
+	for _, in := range []string{"+2:30", "+ 2:30", "+2:30m", "+2:60h", "+2:3h", "+2.5h", "+2,5h",
+		"+1h90m", "+1h30", "+h30m", "+:30h", "+9999999:00h"} {
+		if got, ok := Resolve(in, 0); ok {
+			t.Errorf("Resolve(%q) = %d was read", in, got)
+		}
+	}
+}
