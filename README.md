@@ -75,8 +75,8 @@ schedule-send
 ```
 
 It asks which agent, what to send, and when. For an agent at its usage limit,
-Enter accepts each proposal. Otherwise, type a time, such as `18:30` or
-`+30 min`.
+Enter accepts each proposal. Otherwise, type a time, such as `18:30`, `+30`,
+or `+2:30h`.
 
 ### Send a message at a set time
 

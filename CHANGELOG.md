@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `+2:30h` and `+1h30m` as hours and minutes, alongside `+30` and `+2h`.
+  `+2:30` alone is refused, since it could be minutes and seconds. The time
+  question's hint, its error, and the `--at` help name the short forms.
+
 ## [0.1.1] - 2026-11-03
 
 ### Added

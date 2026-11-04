@@ -72,8 +72,8 @@ On a terminal, it asks:
    question.
 2. **When.** Enter confirms the proposal. With no usage limit on the agent's
    screen, there is none; type a time. A typed time, such as `00:45`, `3pm`,
-   `Sep 28 1am`, or `+30`, is shown back as the new proposal. Press Enter
-   again to confirm it.
+   `Sep 28 1am`, `+30`, or `+2:30h`, is shown back as the new proposal.
+   Press Enter again to confirm it.
 
 Edit an answer before Enter with Left, Right, Home, End, Backspace, Delete,
 and Ctrl-U. Ctrl-C cancels, and nothing is written before the last answer.
@@ -142,11 +142,14 @@ then puts its reset and sends on a second line; those always stay.
 
 `--at` takes a local time (`HH:MM`, `HH:MM:SS`, `3pm`, `12:27 AM`) or a GNU
 `date` expression such as `+30 min`. A full timestamp is `2026-10-15 18:30:00`
-or `2026-10-15T18:30:00`. `+30` and `+30m` are minutes, and `+2h` is hours. A
-clock time already past today means that time tomorrow, even across a
-daylight-saving change. A past timestamp is refused. A time given without
-seconds fires on a whole minute: `+30` typed at 18:02:54 sends at 18:33:00,
-never earlier than asked. Seconds typed on purpose, as in `18:30:15`, are kept.
+or `2026-10-15T18:30:00`. `+30` and `+30m` are minutes, and `+2h` is hours.
+`+2:30h` and `+1h30m` are hours and minutes, the minutes from 0 to 59.
+`+2:30` alone is refused, since it could be minutes and seconds, and so are
+decimal hours such as `+2.5h`. A clock time already past today means that
+time tomorrow, even across a daylight-saving change. A past timestamp is
+refused. A time given without seconds fires on a whole minute: `+30` typed
+at 18:02:54 sends at 18:33:00, never earlier than asked. Seconds typed on
+purpose, as in `18:30:15`, are kept.
 
 On Linux, timers store the instant in UTC. The receipt, the summary printed
 when a job is scheduled, shows local time. `HERDR_SCHEDULE_NOW_EPOCH` fixes
