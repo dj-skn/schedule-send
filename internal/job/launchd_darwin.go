@@ -284,16 +284,8 @@ func (p Paths) removeFiles(id string) error {
 	return nil
 }
 
-// Remove keeps inspectable state when unloading a job fails.
-func (p Paths) Remove(s Scheduler, id string) error {
-	lock, err := p.Lock(id)
-	if err != nil {
-		return err
-	}
-	defer lock.Close()
-	if _, err := os.Stat(p.StatePath(id)); err != nil {
-		return err
-	}
+// removeArmed keeps inspectable state when unloading a job fails.
+func (p Paths) removeArmed(s Scheduler, id string) error {
 	if err := s.bootout(id); err != nil {
 		return err
 	}
