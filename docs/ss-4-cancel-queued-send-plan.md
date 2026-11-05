@@ -2,8 +2,8 @@
 
 ## Status
 
-Draft for owner review, 2026-11-05. Story branch `ss-4` starts at
-`343e46f` on `main`. P1 is proposed for `ss-4-p1`.
+The owner instructed the P1 build on 2026-11-05. Story branch `ss-4`
+starts at `343e46f` on `main`. Build P1 on `ss-4-p1`.
 
 The story starts with Go 1.27.3 and Herdr 0.9.5. The Go release and
 Homebrew's stable formula both report 1.27.3. Herdr's latest stable release
@@ -47,7 +47,7 @@ as `--cancel ID`.
   [Cancellation command](../internal/cli/cli.go#L1159) ·
   [Job management](usage.md#manage-jobs-and-missed-runs)
 
-### Decisions for review
+### Decisions settled 2026-11-05
 
 1. **Entry.** Recommend `c N` at the existing picker, where `N` is a
    queued pane's row number. Show a numbered list only when the pane has
@@ -62,7 +62,7 @@ as `--cancel ID`.
    would let the user schedule another send immediately and would require
    refreshing rows, queued marks and interrupt handling after a mutation.
 
-### Assumptions for the draft
+### Assumptions for the build
 
 - Offer the action only when the existing interactive picker has a queued
   row and the run uses human output with writes enabled. Dry runs, JSON,
