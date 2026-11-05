@@ -3,7 +3,8 @@
 ## Status
 
 The owner instructed the P1 build on 2026-11-05. Story branch `ss-4`
-starts at `343e46f` on `main`. Build P1 on `ss-4-p1`.
+starts at `343e46f` on `main`. P1 is built and verified on
+`ss-4-p1` and fast-forwarded into `ss-4`.
 
 The story starts with Go 1.27.3 and Herdr 0.9.5. The Go release and
 Homebrew's stable formula both report 1.27.3. Herdr's latest stable release
@@ -105,3 +106,27 @@ operations from the queued picker action.
 The owner's hand check uses temporary state and stand-ins. From a numbered
 picker with several queued sends, decline one confirmation, then confirm
 another. Compare the remaining jobs with the initial list.
+
+### As built — 2026-11-05
+
+- Type `c N` at the interactive picker. A pane with several sends shows
+  them in time order with their IDs. Confirmation shows the pane, local
+  date and time, and ID. Enter or `n` draws the picker again. `y` removes
+  the chosen send, prints the ordinary cancellation receipt and ends the
+  invocation.
+- The state file stays open through confirmation. Cancellation compares
+  its identity under the same lock as ordinary `--cancel` before
+  contacting the scheduler. A send that went away or was replaced gets
+  a message to open the picker again. A failed disarm reports the error.
+- `tools/check` passed all 12 Go test packages, both platform vet passes,
+  and the script checks. The focused picker and cancellation parity run
+  had 3 identical cases, 5 known differences and zero unexpected
+  differences. Full Linux parity had 39 identical cases, 39 known differences
+  and zero unexpected differences.
+- The focused regression tests covered exact selection among several jobs,
+  invalid choices, decline, EOF, dry run, JSON, a non-terminal call,
+  same-ID replacement, a busy lock and failed disarm. A 52-column Linux
+  terminal run with stand-ins confirmed that Ctrl-C exits 130 without
+  changing the queue and `y` stops only the selected job and arms nothing.
+- Native macOS verification remains for CI. The owner can check the
+  terminal interaction using the stand-in steps above.
