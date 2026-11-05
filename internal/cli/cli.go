@@ -88,7 +88,7 @@ type app struct {
 	now  int64 // when the run started; screens are judged at this moment
 
 	lim   map[string]limit.Status // set by limits
-	sends map[string][]int64      // set by queued
+	sends map[string][]queuedSend // set by queued
 	ask   *asker                  // set by asking, at the first question
 }
 
@@ -988,7 +988,7 @@ func (a *app) detectAt(now int64) (int64, error) {
 	report := show.Report{
 		Kind: a.tgt.Kind, Agent: a.tgt.Agent, Pane: a.tgt.Pane, Status: a.tgt.Status, Cwd: a.tgt.Cwd,
 		Summary: target.Summary(a.tgt), Limit: st, Message: a.o.message, Keys: a.o.keys,
-		Margin: limitMargin, Auto: a.o.auto, Now: now, Queued: a.queued()[a.tgt.Pane],
+		Margin: limitMargin, Auto: a.o.auto, Now: now, Queued: a.queuedTimes(a.tgt.Pane),
 	}
 
 	if a.o.auto {

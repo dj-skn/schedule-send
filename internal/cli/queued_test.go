@@ -57,8 +57,10 @@ func TestQueuedCountsArmedSendsForWhatThePaneShows(t *testing.T) {
 	// The same pane id, but another agent or folder: the worker would abort it.
 	h.schedule(t, send("20261003-160000-wBp1", "wB:p1", "agent", "codex", "/home/dev/projects/shop-backend", 1791037200))
 	h.schedule(t, send("20261003-161000-wBp1", "wB:p1", "agent", "claude", "/home/dev/elsewhere", 1791037800))
-	// A plain pane counts too.
-	h.schedule(t, send("20261003-162000-wBp5", "wB:p5", "pane", "-", "/home/dev/projects/shop-backend", 1791038400))
+	// A plain pane counts too, including legacy state without run_at.
+	legacy := send("20261003-162000-wBp5", "wB:p5", "pane", "-", "/home/dev/projects/shop-backend", 0)
+	legacy.At = "2026-10-03 16:20:00"
+	h.schedule(t, legacy)
 	// Stored but not armed: its timer is gone.
 	h.schedule(t, send("20261003-163000-wBp5", "wB:p5", "pane", "-", "/home/dev/projects/shop-backend", 1791039000))
 	// A state that does not read is never counted.
@@ -67,9 +69,9 @@ func TestQueuedCountsArmedSendsForWhatThePaneShows(t *testing.T) {
 		"20261003-161000-wBp1", "20261003-162000-wBp5", "20261003-164000-wAp1")
 
 	got := h.a.queued()
-	want := map[string][]int64{
-		"wA:p1": {1791037200, 1791040800},
-		"wB:p5": {1791038400},
+	want := map[string][]queuedSend{
+		"wA:p1": {{id: "20261003-160000-wAp1", at: 1791037200}, {id: "20261003-170000-wAp1", at: 1791040800}},
+		"wB:p5": {{id: "20261003-162000-wBp5", at: 1791037200}},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("queued = %v, want %v", got, want)
