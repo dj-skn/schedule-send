@@ -347,16 +347,8 @@ func (p Paths) finishRemoval(sys Systemctl, id string) error {
 	return removeFile(p.StatePath(id))
 }
 
-// Remove keeps inspectable state when stopping/disabling a job fails.
-func (p Paths) Remove(sys Systemctl, id string) error {
-	lock, err := p.Lock(id)
-	if err != nil {
-		return err
-	}
-	defer lock.Close()
-	if _, err := os.Stat(p.StatePath(id)); err != nil {
-		return err
-	}
+// removeArmed keeps inspectable state when stopping/disabling a job fails.
+func (p Paths) removeArmed(sys Systemctl, id string) error {
 	if err := p.disarm(sys, id, true); err != nil {
 		return err
 	}

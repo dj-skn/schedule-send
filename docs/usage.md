@@ -135,6 +135,14 @@ one still waiting. A send counts while its timer is armed and the pane still
 runs the agent, in the folder, it was scheduled for. Once a target is chosen,
 the run says it already has a send, and that this adds another.
 
+In the interactive picker, type `c N` with a queued pane's row number to
+cancel one of its sends. If several are queued, choose the send by number.
+Check the pane, time and job ID, then type `y` to cancel. Enter or `n`
+returns to the picker. A successful cancellation prints a receipt and ends
+the command. If the send changed or is gone, open the picker again. Use
+`--cancel ID` to cancel from the command line. The picker action is available
+during normal scheduling with human output and writes enabled.
+
 On a narrow terminal a row drops its title, then shortens its folder, and
 then puts its reset and sends on a second line; those always stay.
 

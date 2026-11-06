@@ -88,7 +88,7 @@ type app struct {
 	now  int64 // when the run started; screens are judged at this moment
 
 	lim   map[string]limit.Status // set by limits
-	sends map[string][]int64      // set by queued
+	sends map[string][]queuedSend // set by queued
 	ask   *asker                  // set by asking, at the first question
 }
 
@@ -429,7 +429,7 @@ func (a *app) run(args []string) (retErr error) {
 		a.list()
 		return nil
 	case "--cancel":
-		return a.cancel(a.o.operationID)
+		return a.cancel(a.o.operationID, nil)
 	case "--status":
 		return a.status(a.o.operationID)
 	case "--help":
@@ -541,8 +541,12 @@ func (a *app) run(args []string) (retErr error) {
 		if !found {
 			return die("No such pane: %s", o.pane)
 		}
-	} else if a.tgt, err = a.chooseTarget(); err != nil {
-		return err
+	} else {
+		row, err := a.chooseTarget()
+		if err != nil || row == nil {
+			return err
+		}
+		a.tgt = *row
 	}
 	t := a.tgt
 
@@ -763,21 +767,22 @@ func b2i(b bool) int {
 
 // ---------------------------------------------------------------- selection
 
-func (a *app) chooseTarget() (target.Row, error) {
+// chooseTarget returns a nil row without an error when the picker cancelled a send.
+func (a *app) chooseTarget() (*target.Row, error) {
 	o := a.o
 	rows := target.Filter{
 		Kind: o.kind, PanesOnly: o.panesOnly, Cwd: o.cwd,
 		AllowSelf: o.allowSelf, Self: a.selfPane,
 	}.Apply(a.rows)
 	if len(rows) == 0 {
-		return target.Row{}, die("No target matches the given selectors.")
+		return nil, die("No target matches the given selectors.")
 	}
 
 	// One match skips the picker, so this note is the only place the choice
 	// is stated before the send is armed.
 	if len(rows) == 1 {
 		a.note(fmt.Sprintf("Only one target matched; selecting %s.", target.Summary(rows[0])))
-		return rows[0], nil
+		return &rows[0], nil
 	}
 	rows = target.Sort(rows)
 	marks := map[string]target.Mark{}
@@ -799,45 +804,77 @@ func (a *app) chooseTarget() (target.Row, error) {
 	if !a.stdinTTY() {
 		if o.pick == "best" {
 			a.note(fmt.Sprintf("Multiple targets matched; picking %s.", target.Summary(rows[0])))
-			return rows[0], nil
+			return &rows[0], nil
 		}
 		if a.o.json {
-			return target.Row{}, fail("ambiguous", "Multiple targets matched. Narrow with --cwd/--kind/--pane, or use --pick best.")
+			return nil, fail("ambiguous", "Multiple targets matched. Narrow with --cwd/--kind/--pane, or use --pick best.")
 		}
 		fmt.Fprintln(a.stderr, "Multiple targets matched. Narrow with --cwd/--kind/--pane, or use --pick best.")
 		target.Render(a.stderr, rows, marks, term.ColorsFor(a.stderr), a.selfPane, a.h.ProcName, 0)
-		return target.Row{}, failure{code: 1}
+		return nil, failure{code: 1}
 	}
 
 	// The picker is the rail's first step, its list beside the rail.
 	q, err := a.asking()
 	if err != nil {
-		return target.Row{}, die("Could not open /dev/tty for target selection.")
+		return nil, die("Could not open /dev/tty for target selection.")
 	}
 	var list bytes.Buffer
 	target.Render(&list, rows, marks, q.c, a.selfPane, a.h.ProcName, q.room())
-	q.say(q.rail.Step("Which agent or pane?"))
-	for _, line := range strings.Split(strings.Trim(list.String(), "\n"), "\n") {
-		q.say(q.rail.Line(line))
+	canCancel := !o.dryRun && !o.json && slices.ContainsFunc(rows, func(row target.Row) bool {
+		return len(sends[row.Pane]) != 0
+	})
+	draw := func() {
+		q.say(q.rail.Step("Which agent or pane?"))
+		for _, line := range strings.Split(strings.Trim(list.String(), "\n"), "\n") {
+			q.say(q.rail.Line(line))
+		}
+		q.say(q.rail.Gap(), q.rail.Hint("Enter takes 1, or type its number"))
+		if canCancel {
+			q.say(q.rail.Hint("Type c N to cancel a queued send"))
+		}
 	}
-	q.say(q.rail.Gap(), q.rail.Hint("Enter takes 1, or type its number"))
+	draw()
 	for {
 		choice, ok, err := q.answer()
 		if err != nil {
-			return target.Row{}, err
+			return nil, err
 		}
 		if !ok {
-			return target.Row{}, die("Target selection cancelled: no input received.")
+			return nil, die("Target selection cancelled: no input received.")
 		}
 		if choice == "" {
 			choice = "1"
 		}
-		if n, err := strconv.Atoi(choice); err == nil && digits.MatchString(choice) && n >= 1 && n <= len(rows) {
+		if n := pickerNumber(choice, len(rows)); n != 0 {
 			q.say(q.rail.Gap())
-			return rows[n-1], nil
+			return &rows[n-1], nil
+		}
+		command, arg, _ := strings.Cut(choice, " ")
+		if canCancel && command == "c" {
+			n := pickerNumber(strings.TrimSpace(arg), len(rows))
+			if n == 0 || len(sends[rows[n-1].Pane]) == 0 {
+				q.say(q.rail.Error("Use c N with a queued pane number."))
+				continue
+			}
+			row := rows[n-1]
+			cancelled, err := a.cancelQueuedSend(q, row, sends[row.Pane])
+			if err != nil || cancelled {
+				return nil, err
+			}
+			q.say(q.rail.Gap())
+			draw()
+			continue
 		}
 		q.say(q.rail.Error(fmt.Sprintf("Enter a number from 1 to %d.", len(rows))))
 	}
+}
+
+func pickerNumber(choice string, count int) int {
+	if n, err := strconv.Atoi(choice); err == nil && digits.MatchString(choice) && n >= 1 && n <= count {
+		return n
+	}
+	return 0
 }
 
 // ------------------------------------------------------- usage-limit timing
@@ -988,7 +1025,7 @@ func (a *app) detectAt(now int64) (int64, error) {
 	report := show.Report{
 		Kind: a.tgt.Kind, Agent: a.tgt.Agent, Pane: a.tgt.Pane, Status: a.tgt.Status, Cwd: a.tgt.Cwd,
 		Summary: target.Summary(a.tgt), Limit: st, Message: a.o.message, Keys: a.o.keys,
-		Margin: limitMargin, Auto: a.o.auto, Now: now, Queued: a.queued()[a.tgt.Pane],
+		Margin: limitMargin, Auto: a.o.auto, Now: now, Queued: a.queuedTimes(a.tgt.Pane),
 	}
 
 	if a.o.auto {
@@ -1156,11 +1193,20 @@ func (a *app) list() {
 	show.ListStyled(a.stdout, term.ColorsFor(a.stdout), jobs, a.clock())
 }
 
-func (a *app) cancel(id string) error {
-	if _, err := os.Stat(a.paths.StatePath(id)); err != nil {
-		return fail("not_found", "No scheduled send with id: %s", id)
+func (a *app) cancel(id string, selected os.FileInfo) error {
+	var err error
+	if selected == nil {
+		if _, err := os.Stat(a.paths.StatePath(id)); err != nil {
+			return fail("not_found", "No scheduled send with id: %s", id)
+		}
+		err = a.paths.Remove(a.sys, id)
+	} else {
+		err = a.paths.RemoveIfSame(a.sys, id, selected)
+		if errors.Is(err, job.ErrStateChanged) || errors.Is(err, os.ErrNotExist) {
+			return queuedSendChanged(id)
+		}
 	}
-	if err := a.paths.Remove(a.sys, id); err != nil {
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return fail("not_found", "No scheduled send with id: %s", id)
 		}

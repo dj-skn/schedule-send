@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Cancel a queued send from the interactive target picker with `c N`. Choose
+  the send if the pane has several, then confirm the pane, time and job ID.
+
 ## [0.1.2] - 2026-11-04
 
 ### Added

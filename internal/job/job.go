@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -81,13 +82,22 @@ var numericFields = []struct {
 	{"run_at", 0, 0, 1<<63 - 1, func(s State) int64 { return s.RunAt }, func(s *State, v int64) { s.RunAt = v }},
 }
 
-// Load reads a state file, retaining defaults for absent/null optional fields.
-// Numeric fields use JSON integer literals and are range-checked before use.
-// On a field error Load still returns every field it could decode, with
-// defaults for the rest, so a refused job can be reported and listed; such a
-// state must never be delivered.
+// Load opens a state file and reads it with ReadState.
 func Load(path string) (State, error) {
-	b, err := os.ReadFile(path)
+	f, err := os.Open(path)
+	if err != nil {
+		return State{}, err
+	}
+	defer f.Close()
+	return ReadState(f)
+}
+
+// ReadState reads state, retaining defaults for absent/null optional fields.
+// Numeric fields use JSON integer literals and are range-checked before use.
+// On a field error it still returns every field it could decode, with
+// defaults for the rest, so a refused job can be reported and listed.
+func ReadState(r io.Reader) (State, error) {
+	b, err := io.ReadAll(r)
 	if err != nil {
 		return State{}, err
 	}
@@ -228,6 +238,39 @@ func (l *Lock) Close() error {
 	err := l.file.Close()
 	l.file = nil
 	return err
+}
+
+// ErrStateChanged means the state file now belongs to a different send.
+var ErrStateChanged = errors.New("job state changed")
+
+// Remove stops a job and removes its files under the job lock.
+func (p Paths) Remove(s Scheduler, id string) error {
+	return p.remove(s, id, nil)
+}
+
+// RemoveIfSame removes a job only when its state file matches expected.
+// Keep the selected file open until this returns so its inode cannot be reused.
+func (p Paths) RemoveIfSame(s Scheduler, id string, expected os.FileInfo) error {
+	if expected == nil {
+		return ErrStateChanged
+	}
+	return p.remove(s, id, expected)
+}
+
+func (p Paths) remove(s Scheduler, id string, expected os.FileInfo) error {
+	lock, err := p.Lock(id)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	current, err := os.Stat(p.StatePath(id))
+	if err != nil {
+		return err
+	}
+	if expected != nil && !os.SameFile(expected, current) {
+		return ErrStateChanged
+	}
+	return p.removeArmed(s, id)
 }
 
 // lockUntil lets a firing worker wait for the scheduler to finish enabling its
